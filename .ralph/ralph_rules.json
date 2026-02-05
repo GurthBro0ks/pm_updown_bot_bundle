@@ -1,0 +1,19 @@
+{
+  "forbidden_globs": [
+    ".env*",
+    "secrets/**",
+    "infra/**",
+    "prod/**",
+    "**/*wallet*",
+    "**/*key*",
+    "**/*seed*",
+    "**/*mnemonic*",
+    "data/**",
+    "artifacts/**",
+    "flight_recorder/**",
+    "tmp/**",
+    "/tmp/**"
+  ],
+  "notes": "Fail-closed: if a patch touches forbidden paths, the harness rejects it and keeps looping."
+}
+
