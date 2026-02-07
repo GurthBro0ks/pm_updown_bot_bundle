@@ -658,12 +658,57 @@ else:
         risk_fail "ML-10: Kalshi min_size override not applied correctly!"
     fi
 
+    #---------------------------------------------------------------------------
+    # Test ML-17: Kalshi RSA Auth Type (no Basic auth)
+    #---------------------------------------------------------------------------
+    log_risk "Test ML-17: Kalshi RSA Auth Type"
+    python3 > "${RISK_PROOF_DIR}/${RISK_PROOF_PREFIX}_rsa_auth_$(date +%Y%m%d_%H%M%S).json" << 'EOF'
+import json, importlib.util, sys
+from datetime import datetime, timezone
+
+spec = importlib.util.spec_from_file_location("runner", "runner.py")
+runner = importlib.util.module_from_spec(spec)
+sys.modules["runner"] = runner
+sys.argv = ["runner.py", "--mode", "shadow"]
+spec.loader.exec_module(runner)
+
+api_type = runner.VENUE_CONFIGS["kalshi"]["api_type"]
+no_basic = "basic" not in api_type.lower()
+is_rsa = api_type == "rest_rsa_signed"
+
+result = {
+    "test_id": "ML-17",
+    "test_name": "Kalshi RSA Auth Type",
+    "timestamp": datetime.now(timezone.utc).isoformat(),
+    "api_type": api_type,
+    "no_basic_auth": no_basic,
+    "is_rsa_signed": is_rsa,
+    "status": "PASS" if is_rsa and no_basic else "FAIL"
+}
+print(json.dumps(result, indent=2))
+EOF
+
+    RSA_STATUS=$(python3 -c "
+import json, glob
+files = sorted(glob.glob('${RISK_PROOF_DIR}/proof_risk_caps_rsa_auth_*.json'))
+if files:
+    d = json.load(open(files[-1]))
+    print(d['status'])
+else:
+    print('FAIL')
+")
+    if [ "$RSA_STATUS" = "PASS" ]; then
+        risk_pass "ML-17: Kalshi api_type=rest_rsa_signed, no Basic auth"
+    else
+        risk_fail "ML-17: Kalshi still using Basic auth!"
+    fi
+
     echo ""
     echo "========================================"
     echo "  Micro-Live Test Results"
     echo "========================================"
     echo ""
-    echo "Tests passed: 6 (ML-01, ML-02, ML-07, ML-08, ML-09, ML-10)"
+    echo "Tests passed: 7 (ML-01, ML-02, ML-07, ML-08, ML-09, ML-10, ML-17)"
     echo "Tests failed (expected): 4 (ML-03, ML-04, ML-05, ML-06)"
     echo ""
     echo "STATUS: MICRO-LIVE GATES PASS"

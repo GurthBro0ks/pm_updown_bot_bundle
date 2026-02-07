@@ -53,11 +53,11 @@ def run_shadow() -> dict:
     
     env = os.environ.copy()
     
-    # Add Kalshi credentials if available
+    # Add Kalshi RSA credentials if available
     if os.environ.get("KALSHI_KEY"):
         env["KALSHI_KEY"] = os.environ["KALSHI_KEY"]
-    if os.environ.get("KALSHI_SECRET"):
-        env["KALSHI_SECRET"] = os.environ["KALSHI_SECRET"]
+    if os.environ.get("KALSHI_PRIVATE_KEY_PATH"):
+        env["KALSHI_PRIVATE_KEY_PATH"] = os.environ["KALSHI_PRIVATE_KEY_PATH"]
     
     result = subprocess.run(
         [sys.executable, str(BOT_DIR / "runner.py"), 

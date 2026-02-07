@@ -12,6 +12,9 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+import requests
+from kalshi_auth import KalshiAuth, KALSHI_BASE_URL
+
 # Risk Caps Configuration
 RISK_CAPS = {
     # Original caps
@@ -32,7 +35,7 @@ VENUE_CONFIGS = {
         "min_trade_usd": 0.01,   # Penny-trade minimum
         "max_trade_usd": 10.0,
         "fee_pct": 0.07,         # ~7% taker fee on Kalshi
-        "api_type": "rest_basic_auth",
+        "api_type": "rest_rsa_signed",
         "settlement": "USDC",
     },
     "ibkr": {
@@ -144,10 +147,53 @@ def check_micro_live_gates(market: dict, trade_size: float, edge_pct: float,
     return True
 
 
+def _get_kalshi_auth() -> "KalshiAuth | None":
+    """Return a KalshiAuth instance if credentials are configured, else None."""
+    api_key = os.environ.get("KALSHI_KEY", "")
+    key_path = os.environ.get("KALSHI_PRIVATE_KEY_PATH", "")
+    if api_key and key_path and os.path.isfile(key_path):
+        return KalshiAuth(api_key=api_key, private_key_path=key_path)
+    return None
+
+
+def fetch_kalshi_markets(auth: KalshiAuth, limit: int = 20) -> list:
+    """
+    Fetch live markets from Kalshi using RSA-signed authentication.
+
+    Args:
+        auth: KalshiAuth instance
+        limit: Max markets to return
+
+    Returns:
+        List of market dicts normalised to VenueBook schema.
+    """
+    path = "/trade-api/v2/events"
+    resp = auth.get(path, params={"limit": limit, "status": "open"})
+    resp.raise_for_status()
+    events = resp.json().get("events", [])
+
+    markets = []
+    for evt in events:
+        for mkt in evt.get("markets", []):
+            yes_price = mkt.get("yes_ask", 0.50)
+            no_price = mkt.get("no_ask", 0.50)
+            markets.append({
+                "id": mkt.get("ticker", evt.get("ticker", "unknown")),
+                "question": mkt.get("title", evt.get("title", "")),
+                "odds": {"yes": yes_price, "no": no_price},
+                "liquidity_usd": mkt.get("volume", 0),
+                "hours_to_end": 48,  # placeholder; refine with close_time
+                "fees_pct": 0.07,
+            })
+
+    print(f"Fetched {len(markets)} markets from Kalshi (LIVE RSA-signed)")
+    return markets[:limit]
+
+
 def fetch_venuebook_mock() -> list:
     """
-    Fetch markets from VenueBook (MOCK for now).
-    
+    Fetch markets from VenueBook (MOCK fallback).
+
     Returns:
         List of market dicts with: id, question, odds, liquidity_usd, hours_to_end
     """
@@ -186,7 +232,7 @@ def fetch_venuebook_mock() -> list:
             "fees_pct": 0.05  # Higher fees = no edge
         }
     ]
-    
+
     print(f"Fetched {len(markets)} markets from VenueBook (MOCK)")
     return markets
 
@@ -367,9 +413,18 @@ def micro_live_mode(venue: str = "kalshi", bankroll: float = 1.06, max_pos: floa
     print("Risk caps check: PASSED")
     print()
     
-    # Fetch markets from VenueBook
-    print("Fetching markets from VenueBook...")
-    markets = fetch_venuebook_mock()
+    # Fetch markets (live RSA-signed if credentials available, else mock)
+    auth = _get_kalshi_auth() if venue == "kalshi" else None
+    if auth:
+        print("Fetching markets from Kalshi (RSA-signed)...")
+        try:
+            markets = fetch_kalshi_markets(auth)
+        except Exception as e:
+            print(f"  Live fetch failed ({e}), falling back to mock")
+            markets = fetch_venuebook_mock()
+    else:
+        print("Fetching markets from VenueBook...")
+        markets = fetch_venuebook_mock()
     print()
     
     # Simulate micro trades with bankroll-based sizing
