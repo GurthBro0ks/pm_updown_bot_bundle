@@ -173,30 +173,37 @@ def fetch_polymarket_markets() -> list:
 
 def fetch_kalshi_markets() -> list:
     """
-    Fetch markets from Kalshi REST API (MOCK).
+    Fetch markets from Kalshi REST API.
     
     Kalshi is US-legal, CFTC-regulated prediction market.
     API: https://api.kalshi.com/v1/markets
     
+    Authentication: Basic Auth (base64 of key:secret)
+    
     Environment:
-        KALSHI_API_KEY: API key for Kalshi (mock if not set)
+        KALSHI_KEY: API key (short ID)
+        KALSHI_SECRET: Secret key (long)
+        KALSHI_BASE_URL: API base URL (default: https://api.kalshi.com)
     
     Returns:
         List of market dicts with: id, question, odds, liquidity_usd, hours_to_end
     """
+    import base64
     import requests
     
-    api_key = os.environ.get("KALSHI_API_KEY", "")
+    api_key = os.environ.get("KALSHI_KEY", "")
+    api_secret = os.environ.get("KALSHI_SECRET", "")
+    base_url = os.environ.get("KALSHI_BASE_URL", "https://api.kalshi.com")
     
-    # Mock data for Kalshi (US election, weather, economics markets)
+    # Mock data for testing without credentials
     markets = [
         {
             "id": "kalshi-fed-rate-2025-03",
             "question": "Will Fed rate be unchanged in March 2025?",
             "odds": {"yes": 0.72, "no": 0.28},
-            "liquidity_usd": 25000,  # Higher liquidity for US markets
-            "hours_to_end": 720,  # 30 days
-            "fees_pct": 0.01,  # Lower fees on Kalshi
+            "liquidity_usd": 25000,
+            "hours_to_end": 720,
+            "fees_pct": 0.01,
             "venue": "kalshi",
             "category": "economics",
             "currency": "USD"
@@ -206,7 +213,7 @@ def fetch_kalshi_markets() -> list:
             "question": "Will Democrats win Senate in 2024?",
             "odds": {"yes": 0.55, "no": 0.45},
             "liquidity_usd": 50000,
-            "hours_to_end": 24,  # Exactly 24h - should pass
+            "hours_to_end": 24,
             "fees_pct": 0.01,
             "venue": "kalshi",
             "category": "politics",
@@ -216,7 +223,7 @@ def fetch_kalshi_markets() -> list:
             "id": "kalshi-low-liquidity-test",
             "question": "Test market with low liquidity",
             "odds": {"yes": 0.50, "no": 0.50},
-            "liquidity_usd": 500,  # Below minimum
+            "liquidity_usd": 500,
             "hours_to_end": 48,
             "fees_pct": 0.01,
             "venue": "kalshi",
@@ -228,7 +235,7 @@ def fetch_kalshi_markets() -> list:
             "question": "Test market ending in 12h",
             "odds": {"yes": 0.60, "no": 0.40},
             "liquidity_usd": 10000,
-            "hours_to_end": 12,  # Below 24h minimum
+            "hours_to_end": 12,
             "fees_pct": 0.01,
             "venue": "kalshi",
             "category": "test",
@@ -236,38 +243,54 @@ def fetch_kalshi_markets() -> list:
         }
     ]
     
-    # If API key is set, try to fetch real data
-    if api_key:
+    # If credentials provided, try real API fetch
+    if api_key and api_secret:
+        print(f"Fetching from Kalshi API: {base_url}")
+        
         try:
-            headers = {"Authorization": f"Bearer {api_key}"}
-            response = requests.get(
-                "https://api.kalshi.com/v1/markets",
-                headers=headers,
-                timeout=10,
-                params={"status": "active", "limit": 10}
-            )
+            # Basic Auth: base64(key:secret)
+            credentials = f"{api_key}:{api_secret}"
+            encoded = base64.b64encode(credentials.encode()).decode()
+            headers = {"Authorization": f"Basic {encoded}"}
+            
+            # Fetch markets endpoint
+            url = f"{base_url}/v1/markets"
+            params = {"status": "active", "limit": 20}
+            
+            response = requests.get(url, headers=headers, params=params, timeout=15)
+            
             if response.status_code == 200:
                 data = response.json()
-                # Transform real API response to our format
-                for m in data.get("markets", []):
+                api_markets = data.get("markets", [])
+                
+                # Transform API response to our format
+                for m in api_markets:
+                    ticker = m.get("ticker", "")
                     markets.append({
-                        "id": m.get("id"),
-                        "question": m.get("question"),
-                        "odds": {"yes": m.get("yes_prob", 0.5), "no": 1 - m.get("yes_prob", 0.5)},
+                        "id": ticker,
+                        "question": m.get("question", ticker),
+                        "odds": {
+                            "yes": m.get("yes_prob", 0.5),
+                            "no": 1 - m.get("yes_prob", 0.5)
+                        },
                         "liquidity_usd": m.get("liquidity", 0),
                         "hours_to_end": m.get("hours_to_end", 0),
                         "fees_pct": 0.01,  # Kalshi standard
                         "venue": "kalshi",
                         "category": m.get("category", "unknown"),
-                        "currency": "USD"
+                        "currency": "USD",
+                        "source": "api"
                     })
-                print(f"Fetched {len(markets)} markets from Kalshi API")
+                
+                print(f"Fetched {len(api_markets)} markets from Kalshi API")
+            else:
+                print(f"Kalshi API error: {response.status_code} - using mock data")
         except Exception as e:
-            print(f"Kalshi API fetch failed ({e}), using mock data")
+            print(f"Kalshi API fetch failed ({e}) - using mock data")
     else:
-        print("KALSHI_API_KEY not set, using mock data")
+        print("KALSHI_KEY/KALSHI_SECRET not set - using mock data")
     
-    print(f"Fetched {len(markets)} markets from Kalshi (MOCK)")
+    print(f"Total markets: {len(markets)} from Kalshi (MOCK)")
     return markets
 
 

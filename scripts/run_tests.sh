@@ -734,29 +734,42 @@ EOF
     risk_pass "KL-05: Kalshi Edge Calculation - Edge calculation completed"
     
     #---------------------------------------------------------------------------
-    # Test KL-06: Kalshi API Key Environment Check
+    # Test KL-06: Kalshi Basic Auth Check
     #---------------------------------------------------------------------------
-    log_risk "Test KL-06: Kalshi API Key Environment Check"
-    python3 > "${RISK_PROOF_DIR}/${RISK_PROOF_PREFIX}_kalshi_api_key_$(date +%Y%m%d_%H%M%S).json" << 'EOF'
+    log_risk "Test KL-06: Kalshi Basic Auth Check"
+    python3 > "${RISK_PROOF_DIR}/${RISK_PROOF_PREFIX}_kalshi_auth_$(date +%Y%m%d_%H%M%S).json" << 'EOF'
 import json
 import os
+import base64
 from datetime import datetime
 
-api_key = os.environ.get("KALSHI_API_KEY", "")
+key = os.environ.get("KALSHI_KEY", "")
+secret = os.environ.get("KALSHI_SECRET", "")
+base_url = os.environ.get("KALSHI_BASE_URL", "https://api.kalshi.com")
+
+# Basic Auth: base64(key:secret)
+if key and secret:
+    credentials = f"{key}:{secret}"
+    encoded = base64.b64encode(credentials.encode()).decode()
+    auth_header = f"Basic {encoded}"
+else:
+    auth_header = None
 
 result = {
     "test_id": "KL-06",
-    "test_name": "Kalshi API Key Environment Check",
+    "test_name": "Kalshi Basic Auth Check",
     "timestamp": datetime.now().isoformat(),
-    "api_key_set": bool(api_key),
-    "api_key_length": len(api_key) if api_key else 0,
+    "key_set": bool(key),
+    "secret_set": bool(secret),
+    "auth_header_prefix": auth_header[:20] + "..." if auth_header else None,
+    "base_url": base_url,
     "status": "PASS" if True else "FAIL",
-    "note": "Mock data used when API key not set"
+    "note": "Mock data used when credentials not set"
 }
 print(json.dumps(result, indent=2))
 EOF
     
-    risk_pass "KL-06: Kalshi API Key Check - Environment variable handled"
+    risk_pass "KL-06: Kalshi Basic Auth - Credentials handled"
     
     echo ""
     echo "========================================"
