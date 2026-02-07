@@ -501,6 +501,7 @@ main() {
     echo ""
 }
 
+<<<<<<< HEAD
 #===============================================================================
 # Kalshi Test Suite
 # Tests for Kalshi-specific functionality
@@ -799,4 +800,6 @@ main() {
     echo ""
 }
 
+=======
+>>>>>>> main
 main "$@"

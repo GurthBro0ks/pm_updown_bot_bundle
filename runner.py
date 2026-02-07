@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """
+<<<<<<< HEAD
 Polymarket/Kalshi Shadow Runner with Risk Caps
 Multi-venue trading runner with risk management gates.
 Supports: shadow (no trading), micro-live (simulated small trades with gates)
 Venues: polymarket, kalshi
+=======
+Polymarket Shadow Runner with Risk Caps
+Shadow-mode trading runner with risk management gates.
+Supports: shadow (no trading), micro-live (simulated small trades with gates)
+>>>>>>> main
 """
 
 import argparse
@@ -13,14 +19,22 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+<<<<<<< HEAD
 # Risk Caps Configuration (shared across venues)
+=======
+# Risk Caps Configuration
+>>>>>>> main
 RISK_CAPS = {
     # Original caps
     "max_pos_usd": 10,
     "max_daily_loss_usd": 50,
     "max_open_pos": 5,
     "max_daily_positions": 20,
+<<<<<<< HEAD
     # Micro-live gates (shared)
+=======
+    # Micro-live gates
+>>>>>>> main
     "liquidity_min_usd": 1000,
     "edge_after_fees_pct": 2.0,
     "market_end_hrs": 24
@@ -68,7 +82,11 @@ def check_risk_caps(pos_usd: float, daily_loss: float, open_pos: int, daily_pos:
     return True
 
 
+<<<<<<< HEAD
 def check_micro_live_gates(market: dict, trade_size: float, edge_pct: float, venue: str = "polymarket") -> bool:
+=======
+def check_micro_live_gates(market: dict, trade_size: float, edge_pct: float) -> bool:
+>>>>>>> main
     """
     Check micro-live gates before simulated trade.
     
@@ -76,7 +94,10 @@ def check_micro_live_gates(market: dict, trade_size: float, edge_pct: float, ven
         market: Market dict with liquidity, end_time, etc.
         trade_size: Proposed trade size in USD
         edge_pct: Edge after fees percentage
+<<<<<<< HEAD
         venue: Venue name for gate customization
+=======
+>>>>>>> main
     
     Returns:
         True if gates pass, False otherwise
@@ -90,12 +111,17 @@ def check_micro_live_gates(market: dict, trade_size: float, edge_pct: float, ven
     liquidity = market.get("liquidity_usd", 0)
     if liquidity < RISK_CAPS["liquidity_min_usd"]:
         violations.append(
+<<<<<<< HEAD
             f"[{venue}] Liquidity ${liquidity} below minimum ${RISK_CAPS['liquidity_min_usd']}"
+=======
+            f"Liquidity ${liquidity} below minimum ${RISK_CAPS['liquidity_min_usd']}"
+>>>>>>> main
         )
     
     # Gate 2: Edge after fees
     if edge_pct < RISK_CAPS["edge_after_fees_pct"]:
         violations.append(
+<<<<<<< HEAD
             f"[{venue}] Edge {edge_pct}% below minimum {RISK_CAPS['edge_after_fees_pct']}%"
         )
     
@@ -104,13 +130,29 @@ def check_micro_live_gates(market: dict, trade_size: float, edge_pct: float, ven
     if market_end_hrs < RISK_CAPS["market_end_hrs"]:
         violations.append(
             f"[{venue}] Market ends in {market_end_hrs}h, requires >{RISK_CAPS['market_end_hrs']}h"
+=======
+            f"Edge {edge_pct}% below minimum {RISK_CAPS['edge_after_fees_pct']}%"
+        )
+    
+    # Gate 3: Market end time
+    market_end_hrs = market.get("hours_to_end", float('inf'))
+    if market_end_hrs < RISK_CAPS["market_end_hrs"]:
+        violations.append(
+            f"Market ends in {market_end_hrs}h, requires >{RISK_CAPS['market_end_hrs']}h"
+>>>>>>> main
         )
     
     # Gate 4: Trade size limits
     if trade_size < 1.0:
+<<<<<<< HEAD
         violations.append(f"[{venue}] Trade size ${trade_size} below minimum $1.00")
     elif trade_size > 10.0:
         violations.append(f"[{venue}] Trade size ${trade_size} exceeds maximum $10.00")
+=======
+        violations.append(f"Trade size ${trade_size} below minimum $1.00")
+    elif trade_size > 10.0:
+        violations.append(f"Trade size ${trade_size} exceeds maximum $10.00")
+>>>>>>> main
     
     if violations:
         print("MICRO-LIVE GATE VIOLATION")
@@ -121,13 +163,23 @@ def check_micro_live_gates(market: dict, trade_size: float, edge_pct: float, ven
     return True
 
 
+<<<<<<< HEAD
 def fetch_polymarket_markets() -> list:
     """
     Fetch markets from Polymarket (MOCK).
+=======
+def fetch_venuebook_mock() -> list:
+    """
+    Fetch markets from VenueBook (MOCK for now).
+>>>>>>> main
     
     Returns:
         List of market dicts with: id, question, odds, liquidity_usd, hours_to_end
     """
+<<<<<<< HEAD
+=======
+    # Mock data simulating real VenueBook API response
+>>>>>>> main
     markets = [
         {
             "id": "solana-polymarket-temp-2025-02-07",
@@ -135,8 +187,12 @@ def fetch_polymarket_markets() -> list:
             "odds": {"yes": 0.65, "no": 0.35},
             "liquidity_usd": 5000,
             "hours_to_end": 48,
+<<<<<<< HEAD
             "fees_pct": 0.02,
             "venue": "polymarket"
+=======
+            "fees_pct": 0.02
+>>>>>>> main
         },
         {
             "id": "btc-macro-2025-02-07",
@@ -144,8 +200,12 @@ def fetch_polymarket_markets() -> list:
             "odds": {"yes": 0.42, "no": 0.58},
             "liquidity_usd": 15000,
             "hours_to_end": 672,  # 28 days
+<<<<<<< HEAD
             "fees_pct": 0.02,
             "venue": "polymarket"
+=======
+            "fees_pct": 0.02
+>>>>>>> main
         },
         {
             "id": "low-liquidity-test",
@@ -153,8 +213,12 @@ def fetch_polymarket_markets() -> list:
             "odds": {"yes": 0.50, "no": 0.50},
             "liquidity_usd": 500,  # Below $1000 minimum
             "hours_to_end": 120,
+<<<<<<< HEAD
             "fees_pct": 0.02,
             "venue": "polymarket"
+=======
+            "fees_pct": 0.02
+>>>>>>> main
         },
         {
             "id": "no-edge-test",
@@ -162,6 +226,7 @@ def fetch_polymarket_markets() -> list:
             "odds": {"yes": 0.49, "no": 0.51},
             "liquidity_usd": 5000,
             "hours_to_end": 96,
+<<<<<<< HEAD
             "fees_pct": 0.05,
             "venue": "polymarket"
         }
@@ -291,6 +356,13 @@ def fetch_kalshi_markets() -> list:
         print("KALSHI_KEY/KALSHI_SECRET not set - using mock data")
     
     print(f"Total markets: {len(markets)} from Kalshi (MOCK)")
+=======
+            "fees_pct": 0.05  # Higher fees = no edge
+        }
+    ]
+    
+    print(f"Fetched {len(markets)} markets from VenueBook (MOCK)")
+>>>>>>> main
     return markets
 
 
@@ -313,7 +385,11 @@ def calculate_edge(market: dict, trade_side: str) -> float:
     return round(edge * 100, 2)
 
 
+<<<<<<< HEAD
 def simulate_micro_trade(market: dict, trade_size: float, trade_side: str, venue: str) -> dict:
+=======
+def simulate_micro_trade(market: dict, trade_size: float, trade_side: str) -> dict:
+>>>>>>> main
     """
     Simulate a micro trade with full gate checking.
     
@@ -321,7 +397,10 @@ def simulate_micro_trade(market: dict, trade_size: float, trade_side: str, venue
         market: Market dict
         trade_size: Trade size in USD
         trade_side: 'yes' or 'no'
+<<<<<<< HEAD
         venue: Venue name
+=======
+>>>>>>> main
     
     Returns:
         Trade result dict
@@ -329,7 +408,11 @@ def simulate_micro_trade(market: dict, trade_size: float, trade_side: str, venue
     edge_pct = calculate_edge(market, trade_side)
     
     # Check micro-live gates (will exit if violation)
+<<<<<<< HEAD
     check_micro_live_gates(market, trade_size, edge_pct, venue)
+=======
+    check_micro_live_gates(market, trade_size, edge_pct)
+>>>>>>> main
     
     # Simulate trade outcome (50/50 for mock)
     import random
@@ -339,7 +422,10 @@ def simulate_micro_trade(market: dict, trade_size: float, trade_side: str, venue
     
     return {
         "market_id": market["id"],
+<<<<<<< HEAD
         "venue": venue,
+=======
+>>>>>>> main
         "trade_size": trade_size,
         "trade_side": trade_side,
         "edge_pct": edge_pct,
@@ -368,10 +454,17 @@ def generate_proof(proof_id: str, data: dict) -> str:
     return proof_path
 
 
+<<<<<<< HEAD
 def shadow_mode(venue: str):
     """Execute shadow mode trading simulation."""
     print("=" * 50)
     print(f"{venue.upper()} SHADOW RUNNER")
+=======
+def shadow_mode():
+    """Execute shadow mode trading simulation."""
+    print("=" * 50)
+    print("POLYMARKET SHADOW RUNNER")
+>>>>>>> main
     print("Mode: SHADOW (No live trading)")
     print("=" * 50)
     print()
@@ -401,10 +494,16 @@ def shadow_mode(venue: str):
     print()
     
     # Generate proof for shadow run
+<<<<<<< HEAD
     proof_id = f"{venue}_shadow_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
     proof_data = {
         "mode": "shadow",
         "venue": venue,
+=======
+    proof_id = f"ned_risk_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    proof_data = {
+        "mode": "shadow",
+>>>>>>> main
         "initial_state": {
             "pos_usd": pos_usd,
             "daily_loss": daily_loss,
@@ -412,13 +511,18 @@ def shadow_mode(venue: str):
             "daily_pos": daily_pos
         },
         "status": "completed",
+<<<<<<< HEAD
         "message": f"{venue} shadow runner initialized successfully"
+=======
+        "message": "Shadow runner initialized successfully"
+>>>>>>> main
     }
     
     generate_proof(proof_id, proof_data)
     
     print()
     print("=" * 50)
+<<<<<<< HEAD
     print(f"{venue.upper()} SHADOW RUNNER COMPLETED")
     print("=" * 50)
 
@@ -427,6 +531,16 @@ def micro_live_mode(venue: str):
     """Execute micro-live mode (simulated small trades with gates)."""
     print("=" * 50)
     print(f"{venue.upper()} MICRO-LIVE RUNNER")
+=======
+    print("SHADOW RUNNER COMPLETED")
+    print("=" * 50)
+
+
+def micro_live_mode():
+    """Execute micro-live mode (simulated small trades with gates)."""
+    print("=" * 50)
+    print("POLYMARKET MICRO-LIVE RUNNER")
+>>>>>>> main
     print("Mode: MICRO-LIVE (Simulated small trades)")
     print("=" * 50)
     print()
@@ -455,6 +569,7 @@ def micro_live_mode(venue: str):
     print("Risk caps check: PASSED")
     print()
     
+<<<<<<< HEAD
     # Fetch markets based on venue
     if venue == "polymarket":
         markets = fetch_polymarket_markets()
@@ -464,6 +579,11 @@ def micro_live_mode(venue: str):
         print(f"Unknown venue: {venue}")
         sys.exit(1)
     
+=======
+    # Fetch markets from VenueBook
+    print("Fetching markets from VenueBook...")
+    markets = fetch_venuebook_mock()
+>>>>>>> main
     print()
     
     # Simulate micro trades
@@ -477,12 +597,19 @@ def micro_live_mode(venue: str):
         
         print(f"Trade {i+1}: {market['id']}")
         print(f"  Question: {market['question']}")
+<<<<<<< HEAD
         print(f"  Venue: {market.get('venue', venue)}")
+=======
+>>>>>>> main
         print(f"  Liquidity: ${market['liquidity_usd']}")
         print(f"  Hours to End: {market['hours_to_end']}h")
         
         try:
+<<<<<<< HEAD
             result = simulate_micro_trade(market, trade_size, trade_side, venue)
+=======
+            result = simulate_micro_trade(market, trade_size, trade_side)
+>>>>>>> main
             trades.append(result)
             
             print(f"  ✅ Trade executed")
@@ -501,7 +628,10 @@ def micro_live_mode(venue: str):
             print(f"  ❌ Gate violation - trade skipped")
             trades.append({
                 "market_id": market["id"],
+<<<<<<< HEAD
                 "venue": venue,
+=======
+>>>>>>> main
                 "status": "gate_violation",
                 "reason": "Micro-live gate check failed"
             })
@@ -526,10 +656,16 @@ def micro_live_mode(venue: str):
     print()
     
     # Generate proof
+<<<<<<< HEAD
     proof_id = f"{venue}_micro_live_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
     proof_data = {
         "mode": "micro-live",
         "venue": venue,
+=======
+    proof_id = f"ned_micro_live_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    proof_data = {
+        "mode": "micro-live",
+>>>>>>> main
         "initial_state": {
             "pos_usd": pos_usd,
             "daily_loss": daily_loss,
@@ -550,12 +686,17 @@ def micro_live_mode(venue: str):
     
     print()
     print("=" * 50)
+<<<<<<< HEAD
     print(f"{venue.upper()} MICRO-LIVE RUNNER COMPLETED")
+=======
+    print("MICRO-LIVE RUNNER COMPLETED")
+>>>>>>> main
     print("=" * 50)
 
 
 def main():
     parser = argparse.ArgumentParser(
+<<<<<<< HEAD
         description="Polymarket/Kalshi Shadow Runner with Risk Caps"
     )
     parser.add_argument(
@@ -563,6 +704,9 @@ def main():
         choices=["polymarket", "kalshi"],
         default="polymarket",
         help="Trading venue (default: polymarket)"
+=======
+        description="Polymarket Shadow Runner with Risk Caps"
+>>>>>>> main
     )
     parser.add_argument(
         "--mode",
@@ -574,9 +718,15 @@ def main():
     args = parser.parse_args()
     
     if args.mode == "shadow":
+<<<<<<< HEAD
         shadow_mode(args.venue)
     elif args.mode == "micro-live":
         micro_live_mode(args.venue)
+=======
+        shadow_mode()
+    elif args.mode == "micro-live":
+        micro_live_mode()
+>>>>>>> main
     else:
         print(f"Unknown mode: {args.mode}")
         sys.exit(1)
