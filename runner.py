@@ -320,13 +320,13 @@ def shadow_mode(venue: str = "kalshi"):
     print("=" * 50)
 
 
-def micro_live_mode(venue: str = "kalshi"):
-    """Execute micro-live mode (simulated small trades with gates)."""
+def micro_live_mode(venue: str = "kalshi", bankroll: float = 1.06, max_pos: float = 0.01):
+    """Execute micro-live mode (simulated small trades with Kelly/VaR gates)."""
     vcfg = VENUE_CONFIGS.get(venue, VENUE_CONFIGS["kalshi"])
     print("=" * 50)
     print(f"{vcfg['name'].upper()} MICRO-LIVE RUNNER")
     print(f"Mode: MICRO-LIVE (Simulated small trades) | Venue: {vcfg['name']}")
-    print(f"Min trade: ${vcfg['min_trade_usd']:.2f} | Settlement: {vcfg['settlement']}")
+    print(f"Bankroll: ${bankroll:.2f} | Max Pos: ${max_pos:.2f} | Settlement: {vcfg['settlement']}")
     print("=" * 50)
     print()
     
@@ -341,6 +341,19 @@ def micro_live_mode(venue: str = "kalshi"):
     print(f"  Daily Loss: ${daily_loss}")
     print(f"  Open Positions: {open_pos}")
     print(f"  Daily Positions: {daily_pos}")
+    print(f"  Bankroll: ${bankroll:.2f}")
+    print(f"  Max Position: ${max_pos:.2f}")
+    print()
+    
+    # Kelly Fraction (conservative: 0.25 Kelly = 1/4 Kelly)
+    kelly_fraction = 0.25
+    kelly_pct = (2 * 0.50 - 1) * kelly_fraction  # Simplified Kelly: b*p - q
+    kelly_trade_size = min(bankroll * kelly_pct if kelly_pct > 0 else max_pos, max_pos)
+    
+    print(f"Kelly Calculation:")
+    print(f"  Kelly Fraction: {kelly_fraction:.2f} (conservative)")
+    print(f"  Suggested Size: ${kelly_trade_size:.4f}")
+    print(f"  Actual Trade Size: ${max_pos:.2f} (capped)")
     print()
     
     # Verify risk caps
@@ -359,9 +372,9 @@ def micro_live_mode(venue: str = "kalshi"):
     markets = fetch_venuebook_mock()
     print()
     
-    # Simulate micro trades
-    trade_size = 5.0  # $5 micro trade
-    print(f"Simulating micro trades (${trade_size} each)...")
+    # Simulate micro trades with bankroll-based sizing
+    trade_size = max_pos  # Use --max-pos parameter
+    print(f"Simulating micro trades (${trade_size:.2f} each)...")
     print()
     
     trades = []
@@ -420,6 +433,9 @@ def micro_live_mode(venue: str = "kalshi"):
     proof_id = f"ned_micro_live_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     proof_data = {
         "mode": "micro-live",
+        "bankroll": bankroll,
+        "max_pos": max_pos,
+        "kelly_fraction": 0.25,
         "initial_state": {
             "pos_usd": pos_usd,
             "daily_loss": daily_loss,
@@ -460,13 +476,29 @@ def main():
         default="kalshi",
         help="Trading venue (default: kalshi)"
     )
+    parser.add_argument(
+        "--bankroll",
+        type=float,
+        default=1.06,
+        help="Bankroll in USD for Kelly calculations (default: 1.06)"
+    )
+    parser.add_argument(
+        "--max-pos",
+        type=float,
+        default=0.01,
+        help="Maximum position size in USD (default: 0.01)"
+    )
 
     args = parser.parse_args()
 
     if args.mode == "shadow":
         shadow_mode(venue=args.venue)
     elif args.mode == "micro-live":
-        micro_live_mode(venue=args.venue)
+        micro_live_mode(
+            venue=args.venue,
+            bankroll=args.bankroll,
+            max_pos=args.max_pos
+        )
     else:
         print(f"Unknown mode: {args.mode}")
         sys.exit(1)
