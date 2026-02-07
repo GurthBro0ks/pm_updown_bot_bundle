@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Polymarket Shadow Runner with Risk Caps
-Shadow-mode trading runner with risk management gates.
+Polymarket/Kalshi Shadow Runner with Risk Caps
+Multi-venue trading runner with risk management gates.
 Supports: shadow (no trading), micro-live (simulated small trades with gates)
+Venues: polymarket, kalshi
 """
 
 import argparse
@@ -12,14 +13,14 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# Risk Caps Configuration
+# Risk Caps Configuration (shared across venues)
 RISK_CAPS = {
     # Original caps
     "max_pos_usd": 10,
     "max_daily_loss_usd": 50,
     "max_open_pos": 5,
     "max_daily_positions": 20,
-    # Micro-live gates
+    # Micro-live gates (shared)
     "liquidity_min_usd": 1000,
     "edge_after_fees_pct": 2.0,
     "market_end_hrs": 24
@@ -67,7 +68,7 @@ def check_risk_caps(pos_usd: float, daily_loss: float, open_pos: int, daily_pos:
     return True
 
 
-def check_micro_live_gates(market: dict, trade_size: float, edge_pct: float) -> bool:
+def check_micro_live_gates(market: dict, trade_size: float, edge_pct: float, venue: str = "polymarket") -> bool:
     """
     Check micro-live gates before simulated trade.
     
@@ -75,6 +76,7 @@ def check_micro_live_gates(market: dict, trade_size: float, edge_pct: float) -> 
         market: Market dict with liquidity, end_time, etc.
         trade_size: Proposed trade size in USD
         edge_pct: Edge after fees percentage
+        venue: Venue name for gate customization
     
     Returns:
         True if gates pass, False otherwise
@@ -88,27 +90,27 @@ def check_micro_live_gates(market: dict, trade_size: float, edge_pct: float) -> 
     liquidity = market.get("liquidity_usd", 0)
     if liquidity < RISK_CAPS["liquidity_min_usd"]:
         violations.append(
-            f"Liquidity ${liquidity} below minimum ${RISK_CAPS['liquidity_min_usd']}"
+            f"[{venue}] Liquidity ${liquidity} below minimum ${RISK_CAPS['liquidity_min_usd']}"
         )
     
     # Gate 2: Edge after fees
     if edge_pct < RISK_CAPS["edge_after_fees_pct"]:
         violations.append(
-            f"Edge {edge_pct}% below minimum {RISK_CAPS['edge_after_fees_pct']}%"
+            f"[{venue}] Edge {edge_pct}% below minimum {RISK_CAPS['edge_after_fees_pct']}%"
         )
     
-    # Gate 3: Market end time
+    # Gate 3: Market end time (Kalshi-specific: US markets may have different hours)
     market_end_hrs = market.get("hours_to_end", float('inf'))
     if market_end_hrs < RISK_CAPS["market_end_hrs"]:
         violations.append(
-            f"Market ends in {market_end_hrs}h, requires >{RISK_CAPS['market_end_hrs']}h"
+            f"[{venue}] Market ends in {market_end_hrs}h, requires >{RISK_CAPS['market_end_hrs']}h"
         )
     
     # Gate 4: Trade size limits
     if trade_size < 1.0:
-        violations.append(f"Trade size ${trade_size} below minimum $1.00")
+        violations.append(f"[{venue}] Trade size ${trade_size} below minimum $1.00")
     elif trade_size > 10.0:
-        violations.append(f"Trade size ${trade_size} exceeds maximum $10.00")
+        violations.append(f"[{venue}] Trade size ${trade_size} exceeds maximum $10.00")
     
     if violations:
         print("MICRO-LIVE GATE VIOLATION")
@@ -119,14 +121,13 @@ def check_micro_live_gates(market: dict, trade_size: float, edge_pct: float) -> 
     return True
 
 
-def fetch_venuebook_mock() -> list:
+def fetch_polymarket_markets() -> list:
     """
-    Fetch markets from VenueBook (MOCK for now).
+    Fetch markets from Polymarket (MOCK).
     
     Returns:
         List of market dicts with: id, question, odds, liquidity_usd, hours_to_end
     """
-    # Mock data simulating real VenueBook API response
     markets = [
         {
             "id": "solana-polymarket-temp-2025-02-07",
@@ -134,7 +135,8 @@ def fetch_venuebook_mock() -> list:
             "odds": {"yes": 0.65, "no": 0.35},
             "liquidity_usd": 5000,
             "hours_to_end": 48,
-            "fees_pct": 0.02
+            "fees_pct": 0.02,
+            "venue": "polymarket"
         },
         {
             "id": "btc-macro-2025-02-07",
@@ -142,7 +144,8 @@ def fetch_venuebook_mock() -> list:
             "odds": {"yes": 0.42, "no": 0.58},
             "liquidity_usd": 15000,
             "hours_to_end": 672,  # 28 days
-            "fees_pct": 0.02
+            "fees_pct": 0.02,
+            "venue": "polymarket"
         },
         {
             "id": "low-liquidity-test",
@@ -150,7 +153,8 @@ def fetch_venuebook_mock() -> list:
             "odds": {"yes": 0.50, "no": 0.50},
             "liquidity_usd": 500,  # Below $1000 minimum
             "hours_to_end": 120,
-            "fees_pct": 0.02
+            "fees_pct": 0.02,
+            "venue": "polymarket"
         },
         {
             "id": "no-edge-test",
@@ -158,11 +162,112 @@ def fetch_venuebook_mock() -> list:
             "odds": {"yes": 0.49, "no": 0.51},
             "liquidity_usd": 5000,
             "hours_to_end": 96,
-            "fees_pct": 0.05  # Higher fees = no edge
+            "fees_pct": 0.05,
+            "venue": "polymarket"
         }
     ]
     
-    print(f"Fetched {len(markets)} markets from VenueBook (MOCK)")
+    print(f"Fetched {len(markets)} markets from Polymarket (MOCK)")
+    return markets
+
+
+def fetch_kalshi_markets() -> list:
+    """
+    Fetch markets from Kalshi REST API (MOCK).
+    
+    Kalshi is US-legal, CFTC-regulated prediction market.
+    API: https://api.kalshi.com/v1/markets
+    
+    Environment:
+        KALSHI_API_KEY: API key for Kalshi (mock if not set)
+    
+    Returns:
+        List of market dicts with: id, question, odds, liquidity_usd, hours_to_end
+    """
+    import requests
+    
+    api_key = os.environ.get("KALSHI_API_KEY", "")
+    
+    # Mock data for Kalshi (US election, weather, economics markets)
+    markets = [
+        {
+            "id": "kalshi-fed-rate-2025-03",
+            "question": "Will Fed rate be unchanged in March 2025?",
+            "odds": {"yes": 0.72, "no": 0.28},
+            "liquidity_usd": 25000,  # Higher liquidity for US markets
+            "hours_to_end": 720,  # 30 days
+            "fees_pct": 0.01,  # Lower fees on Kalshi
+            "venue": "kalshi",
+            "category": "economics",
+            "currency": "USD"
+        },
+        {
+            "id": "kalshi-election-senate-2024",
+            "question": "Will Democrats win Senate in 2024?",
+            "odds": {"yes": 0.55, "no": 0.45},
+            "liquidity_usd": 50000,
+            "hours_to_end": 24,  # Exactly 24h - should pass
+            "fees_pct": 0.01,
+            "venue": "kalshi",
+            "category": "politics",
+            "currency": "USD"
+        },
+        {
+            "id": "kalshi-low-liquidity-test",
+            "question": "Test market with low liquidity",
+            "odds": {"yes": 0.50, "no": 0.50},
+            "liquidity_usd": 500,  # Below minimum
+            "hours_to_end": 48,
+            "fees_pct": 0.01,
+            "venue": "kalshi",
+            "category": "test",
+            "currency": "USD"
+        },
+        {
+            "id": "kalshi-ending-soon",
+            "question": "Test market ending in 12h",
+            "odds": {"yes": 0.60, "no": 0.40},
+            "liquidity_usd": 10000,
+            "hours_to_end": 12,  # Below 24h minimum
+            "fees_pct": 0.01,
+            "venue": "kalshi",
+            "category": "test",
+            "currency": "USD"
+        }
+    ]
+    
+    # If API key is set, try to fetch real data
+    if api_key:
+        try:
+            headers = {"Authorization": f"Bearer {api_key}"}
+            response = requests.get(
+                "https://api.kalshi.com/v1/markets",
+                headers=headers,
+                timeout=10,
+                params={"status": "active", "limit": 10}
+            )
+            if response.status_code == 200:
+                data = response.json()
+                # Transform real API response to our format
+                for m in data.get("markets", []):
+                    markets.append({
+                        "id": m.get("id"),
+                        "question": m.get("question"),
+                        "odds": {"yes": m.get("yes_prob", 0.5), "no": 1 - m.get("yes_prob", 0.5)},
+                        "liquidity_usd": m.get("liquidity", 0),
+                        "hours_to_end": m.get("hours_to_end", 0),
+                        "fees_pct": 0.01,  # Kalshi standard
+                        "venue": "kalshi",
+                        "category": m.get("category", "unknown"),
+                        "currency": "USD"
+                    })
+                print(f"Fetched {len(markets)} markets from Kalshi API")
+        except Exception as e:
+            print(f"Kalshi API fetch failed ({e}), using mock data")
+    else:
+        print("KALSHI_API_KEY not set, using mock data")
+    
+    print(f"Fetched {len(markets)} markets from Kalshi (MOCK)")
     return markets
 
 
@@ -185,7 +290,7 @@ def calculate_edge(market: dict, trade_side: str) -> float:
     return round(edge * 100, 2)
 
 
-def simulate_micro_trade(market: dict, trade_size: float, trade_side: str) -> dict:
+def simulate_micro_trade(market: dict, trade_size: float, trade_side: str, venue: str) -> dict:
     """
     Simulate a micro trade with full gate checking.
     
@@ -193,6 +298,7 @@ def simulate_micro_trade(market: dict, trade_size: float, trade_side: str) -> di
         market: Market dict
         trade_size: Trade size in USD
         trade_side: 'yes' or 'no'
+        venue: Venue name
     
     Returns:
         Trade result dict
@@ -200,7 +306,7 @@ def simulate_micro_trade(market: dict, trade_size: float, trade_side: str) -> di
     edge_pct = calculate_edge(market, trade_side)
     
     # Check micro-live gates (will exit if violation)
-    check_micro_live_gates(market, trade_size, edge_pct)
+    check_micro_live_gates(market, trade_size, edge_pct, venue)
     
     # Simulate trade outcome (50/50 for mock)
     import random
@@ -210,6 +316,7 @@ def simulate_micro_trade(market: dict, trade_size: float, trade_side: str) -> di
     
     return {
         "market_id": market["id"],
+        "venue": venue,
         "trade_size": trade_size,
         "trade_side": trade_side,
         "edge_pct": edge_pct,
@@ -238,10 +345,10 @@ def generate_proof(proof_id: str, data: dict) -> str:
     return proof_path
 
 
-def shadow_mode():
+def shadow_mode(venue: str):
     """Execute shadow mode trading simulation."""
     print("=" * 50)
-    print("POLYMARKET SHADOW RUNNER")
+    print(f"{venue.upper()} SHADOW RUNNER")
     print("Mode: SHADOW (No live trading)")
     print("=" * 50)
     print()
@@ -271,9 +378,10 @@ def shadow_mode():
     print()
     
     # Generate proof for shadow run
-    proof_id = f"ned_risk_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    proof_id = f"{venue}_shadow_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
     proof_data = {
         "mode": "shadow",
+        "venue": venue,
         "initial_state": {
             "pos_usd": pos_usd,
             "daily_loss": daily_loss,
@@ -281,21 +389,21 @@ def shadow_mode():
             "daily_pos": daily_pos
         },
         "status": "completed",
-        "message": "Shadow runner initialized successfully"
+        "message": f"{venue} shadow runner initialized successfully"
     }
     
     generate_proof(proof_id, proof_data)
     
     print()
     print("=" * 50)
-    print("SHADOW RUNNER COMPLETED")
+    print(f"{venue.upper()} SHADOW RUNNER COMPLETED")
     print("=" * 50)
 
 
-def micro_live_mode():
+def micro_live_mode(venue: str):
     """Execute micro-live mode (simulated small trades with gates)."""
     print("=" * 50)
-    print("POLYMARKET MICRO-LIVE RUNNER")
+    print(f"{venue.upper()} MICRO-LIVE RUNNER")
     print("Mode: MICRO-LIVE (Simulated small trades)")
     print("=" * 50)
     print()
@@ -324,9 +432,15 @@ def micro_live_mode():
     print("Risk caps check: PASSED")
     print()
     
-    # Fetch markets from VenueBook
-    print("Fetching markets from VenueBook...")
-    markets = fetch_venuebook_mock()
+    # Fetch markets based on venue
+    if venue == "polymarket":
+        markets = fetch_polymarket_markets()
+    elif venue == "kalshi":
+        markets = fetch_kalshi_markets()
+    else:
+        print(f"Unknown venue: {venue}")
+        sys.exit(1)
+    
     print()
     
     # Simulate micro trades
@@ -340,11 +454,12 @@ def micro_live_mode():
         
         print(f"Trade {i+1}: {market['id']}")
         print(f"  Question: {market['question']}")
+        print(f"  Venue: {market.get('venue', venue)}")
         print(f"  Liquidity: ${market['liquidity_usd']}")
         print(f"  Hours to End: {market['hours_to_end']}h")
         
         try:
-            result = simulate_micro_trade(market, trade_size, trade_side)
+            result = simulate_micro_trade(market, trade_size, trade_side, venue)
             trades.append(result)
             
             print(f"  ✅ Trade executed")
@@ -363,6 +478,7 @@ def micro_live_mode():
             print(f"  ❌ Gate violation - trade skipped")
             trades.append({
                 "market_id": market["id"],
+                "venue": venue,
                 "status": "gate_violation",
                 "reason": "Micro-live gate check failed"
             })
@@ -387,9 +503,10 @@ def micro_live_mode():
     print()
     
     # Generate proof
-    proof_id = f"ned_micro_live_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    proof_id = f"{venue}_micro_live_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
     proof_data = {
         "mode": "micro-live",
+        "venue": venue,
         "initial_state": {
             "pos_usd": pos_usd,
             "daily_loss": daily_loss,
@@ -410,13 +527,19 @@ def micro_live_mode():
     
     print()
     print("=" * 50)
-    print("MICRO-LIVE RUNNER COMPLETED")
+    print(f"{venue.upper()} MICRO-LIVE RUNNER COMPLETED")
     print("=" * 50)
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Polymarket Shadow Runner with Risk Caps"
+        description="Polymarket/Kalshi Shadow Runner with Risk Caps"
+    )
+    parser.add_argument(
+        "--venue",
+        choices=["polymarket", "kalshi"],
+        default="polymarket",
+        help="Trading venue (default: polymarket)"
     )
     parser.add_argument(
         "--mode",
@@ -428,9 +551,9 @@ def main():
     args = parser.parse_args()
     
     if args.mode == "shadow":
-        shadow_mode()
+        shadow_mode(args.venue)
     elif args.mode == "micro-live":
-        micro_live_mode()
+        micro_live_mode(args.venue)
     else:
         print(f"Unknown mode: {args.mode}")
         sys.exit(1)
