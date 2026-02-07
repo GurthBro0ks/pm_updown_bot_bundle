@@ -1,0 +1,1 @@
+#!/bin/bash\nset -euo pipefail\ncd /opt/slimy/pm_updown_bot_bundle\nfor i in {1..5}; do\n  echo \"Loop $i/5 $(date)\"\n  scripts/live_wrapper.sh --mode real-live --venue kalshi --bankroll 1.06 --max-pos 0.01\n  sleep 60\n  echo \"---\"\ndone

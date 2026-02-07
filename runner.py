@@ -21,7 +21,7 @@ RISK_CAPS = {
     "max_open_pos": 5,
     "max_daily_positions": 20,
     "liquidity_min_usd": 1000,
-    "edge_after_fees_pct": 2.0,
+    "edge_after_fees_pct": 1.5,
     "market_end_hrs": 24
 }
 
@@ -46,7 +46,7 @@ VENUE_CONFIGS = {
 
 PROOF_DIR = Path("/tmp")
 KELLY_FRAC_SHADOW = 0.25
-KELLY_FRAC_LIVE = 0.025
+KELLY_FRAC_LIVE = 0.05
 
 
 def calculate_kelly_size(bankroll, win_prob, odds, mode="shadow"):
@@ -73,6 +73,8 @@ def calculate_kelly_size(bankroll, win_prob, odds, mode="shadow"):
     size_usd = bankroll * size_pct
     
     print(f"Kelly: p={win_prob:.2f} odds={odds:.2f} f*={f_star:.2f} frac={k_frac} -> ${size_usd:.2f}")
+    size_usd = max(size_usd, 0.01)
+    print(f"Tuned min size: ${size_usd:.2f}")
     return size_usd
 
 
@@ -179,10 +181,9 @@ def place_kalshi_order(market, trade_side, trade_size):
     # I should try to respect trade_size if possible, but the original was hardcoded.
     # Let's update it to use trade_size if > 0.01, else 1.
     
-    if trade_size > 0.01 and price > 0:
-        count = int(trade_size / price)
-    else:
-        count = 1
+    count = 1
+    if price > 0 and trade_size >= 0.01:
+        count = max(1, int(trade_size / price + 0.5))
         
     data = {'side': trade_side, 'count': count, 'price': price, 'type': 'market'}
     
@@ -226,7 +227,7 @@ def real_live_mode(venue="kalshi", bankroll=1.06, max_pos=0.01):
     orders = []
     
     for market in markets:
-        if market['liquidity_usd'] < 5000 or market['hours_to_end'] < 48:
+        if market.get('liquidity_usd', 0) < RISK_CAPS["liquidity_min_usd"] or market.get("hours_to_end", float('inf')) < RISK_CAPS["market_end_hrs"]:
             continue
         
         edge_pct = calculate_edge(market, 'yes')
@@ -239,6 +240,7 @@ def real_live_mode(venue="kalshi", bankroll=1.06, max_pos=0.01):
             kelly_size = calculate_kelly_size(bankroll, p_win, decimal_odds, "real-live")
             trade_size = min(kelly_size, max_pos)
             trade_size = min(trade_size, RISK_CAPS["max_pos_usd"])
+            trade_size = max(trade_size, vcfg["min_trade_usd"])
         else:
             trade_size = 0.0
             
