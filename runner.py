@@ -9,7 +9,7 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Risk Caps Configuration
@@ -23,6 +23,26 @@ RISK_CAPS = {
     "liquidity_min_usd": 1000,
     "edge_after_fees_pct": 2.0,
     "market_end_hrs": 24
+}
+
+# Venue-specific configuration
+VENUE_CONFIGS = {
+    "kalshi": {
+        "name": "Kalshi",
+        "min_trade_usd": 0.01,   # Penny-trade minimum
+        "max_trade_usd": 10.0,
+        "fee_pct": 0.07,         # ~7% taker fee on Kalshi
+        "api_type": "rest_basic_auth",
+        "settlement": "USDC",
+    },
+    "ibkr": {
+        "name": "IBKR TWS",
+        "min_trade_usd": 1.00,   # Standard minimum
+        "max_trade_usd": 10.0,
+        "fee_pct": 0.01,         # ~1% commission
+        "api_type": "tws_socket",
+        "settlement": "USD",
+    },
 }
 
 PROOF_DIR = "/tmp"
@@ -67,48 +87,53 @@ def check_risk_caps(pos_usd: float, daily_loss: float, open_pos: int, daily_pos:
     return True
 
 
-def check_micro_live_gates(market: dict, trade_size: float, edge_pct: float) -> bool:
+def check_micro_live_gates(market: dict, trade_size: float, edge_pct: float,
+                           venue: str = "kalshi") -> bool:
     """
     Check micro-live gates before simulated trade.
-    
+
     Args:
         market: Market dict with liquidity, end_time, etc.
         trade_size: Proposed trade size in USD
         edge_pct: Edge after fees percentage
-    
+        venue: Venue key ('kalshi' or 'ibkr')
+
     Returns:
         True if gates pass, False otherwise
-    
+
     Raises:
         SystemExit: If gate violation detected (exits with code 1)
     """
+    vcfg = VENUE_CONFIGS.get(venue, VENUE_CONFIGS["kalshi"])
     violations = []
-    
+
     # Gate 1: Liquidity minimum
     liquidity = market.get("liquidity_usd", 0)
     if liquidity < RISK_CAPS["liquidity_min_usd"]:
         violations.append(
             f"Liquidity ${liquidity} below minimum ${RISK_CAPS['liquidity_min_usd']}"
         )
-    
-    # Gate 2: Edge after fees
+
+    # Gate 2: Edge after fees (fee-adjusted expectancy must be positive)
     if edge_pct < RISK_CAPS["edge_after_fees_pct"]:
         violations.append(
             f"Edge {edge_pct}% below minimum {RISK_CAPS['edge_after_fees_pct']}%"
         )
-    
+
     # Gate 3: Market end time
     market_end_hrs = market.get("hours_to_end", float('inf'))
     if market_end_hrs < RISK_CAPS["market_end_hrs"]:
         violations.append(
             f"Market ends in {market_end_hrs}h, requires >{RISK_CAPS['market_end_hrs']}h"
         )
-    
-    # Gate 4: Trade size limits
-    if trade_size < 1.0:
-        violations.append(f"Trade size ${trade_size} below minimum $1.00")
-    elif trade_size > 10.0:
-        violations.append(f"Trade size ${trade_size} exceeds maximum $10.00")
+
+    # Gate 4: Trade size limits (venue-specific min_size)
+    min_size = vcfg["min_trade_usd"]
+    max_size = vcfg["max_trade_usd"]
+    if trade_size < min_size:
+        violations.append(f"Trade size ${trade_size} below minimum ${min_size:.2f} ({vcfg['name']})")
+    elif trade_size > max_size:
+        violations.append(f"Trade size ${trade_size} exceeds maximum ${max_size:.2f} ({vcfg['name']})")
     
     if violations:
         print("MICRO-LIVE GATE VIOLATION")
@@ -185,22 +210,24 @@ def calculate_edge(market: dict, trade_side: str) -> float:
     return round(edge * 100, 2)
 
 
-def simulate_micro_trade(market: dict, trade_size: float, trade_side: str) -> dict:
+def simulate_micro_trade(market: dict, trade_size: float, trade_side: str,
+                         venue: str = "kalshi") -> dict:
     """
     Simulate a micro trade with full gate checking.
-    
+
     Args:
         market: Market dict
         trade_size: Trade size in USD
         trade_side: 'yes' or 'no'
-    
+        venue: Venue key ('kalshi' or 'ibkr')
+
     Returns:
         Trade result dict
     """
     edge_pct = calculate_edge(market, trade_side)
-    
+
     # Check micro-live gates (will exit if violation)
-    check_micro_live_gates(market, trade_size, edge_pct)
+    check_micro_live_gates(market, trade_size, edge_pct, venue=venue)
     
     # Simulate trade outcome (50/50 for mock)
     import random
@@ -222,7 +249,7 @@ def simulate_micro_trade(market: dict, trade_size: float, trade_side: str) -> di
 
 def generate_proof(proof_id: str, data: dict) -> str:
     """Generate a proof file for the given operation."""
-    timestamp = datetime.utcnow().isoformat() + "Z"
+    timestamp = datetime.now(timezone.utc).isoformat()
     proof_data = {
         "proof_id": proof_id,
         "timestamp": timestamp,
@@ -238,11 +265,12 @@ def generate_proof(proof_id: str, data: dict) -> str:
     return proof_path
 
 
-def shadow_mode():
+def shadow_mode(venue: str = "kalshi"):
     """Execute shadow mode trading simulation."""
+    vcfg = VENUE_CONFIGS.get(venue, VENUE_CONFIGS["kalshi"])
     print("=" * 50)
-    print("POLYMARKET SHADOW RUNNER")
-    print("Mode: SHADOW (No live trading)")
+    print(f"{vcfg['name'].upper()} SHADOW RUNNER")
+    print(f"Mode: SHADOW (No live trading) | Venue: {vcfg['name']}")
     print("=" * 50)
     print()
     
@@ -271,7 +299,7 @@ def shadow_mode():
     print()
     
     # Generate proof for shadow run
-    proof_id = f"ned_risk_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    proof_id = f"ned_risk_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     proof_data = {
         "mode": "shadow",
         "initial_state": {
@@ -292,11 +320,13 @@ def shadow_mode():
     print("=" * 50)
 
 
-def micro_live_mode():
+def micro_live_mode(venue: str = "kalshi"):
     """Execute micro-live mode (simulated small trades with gates)."""
+    vcfg = VENUE_CONFIGS.get(venue, VENUE_CONFIGS["kalshi"])
     print("=" * 50)
-    print("POLYMARKET MICRO-LIVE RUNNER")
-    print("Mode: MICRO-LIVE (Simulated small trades)")
+    print(f"{vcfg['name'].upper()} MICRO-LIVE RUNNER")
+    print(f"Mode: MICRO-LIVE (Simulated small trades) | Venue: {vcfg['name']}")
+    print(f"Min trade: ${vcfg['min_trade_usd']:.2f} | Settlement: {vcfg['settlement']}")
     print("=" * 50)
     print()
     
@@ -344,7 +374,7 @@ def micro_live_mode():
         print(f"  Hours to End: {market['hours_to_end']}h")
         
         try:
-            result = simulate_micro_trade(market, trade_size, trade_side)
+            result = simulate_micro_trade(market, trade_size, trade_side, venue=venue)
             trades.append(result)
             
             print(f"  ✅ Trade executed")
@@ -387,7 +417,7 @@ def micro_live_mode():
     print()
     
     # Generate proof
-    proof_id = f"ned_micro_live_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    proof_id = f"ned_micro_live_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     proof_data = {
         "mode": "micro-live",
         "initial_state": {
@@ -416,7 +446,7 @@ def micro_live_mode():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Polymarket Shadow Runner with Risk Caps"
+        description="Multi-Venue Shadow Runner with Risk Caps"
     )
     parser.add_argument(
         "--mode",
@@ -424,13 +454,19 @@ def main():
         required=True,
         help="Execution mode (shadow = no trading, micro-live = simulated small trades)"
     )
-    
+    parser.add_argument(
+        "--venue",
+        choices=list(VENUE_CONFIGS.keys()),
+        default="kalshi",
+        help="Trading venue (default: kalshi)"
+    )
+
     args = parser.parse_args()
-    
+
     if args.mode == "shadow":
-        shadow_mode()
+        shadow_mode(venue=args.venue)
     elif args.mode == "micro-live":
-        micro_live_mode()
+        micro_live_mode(venue=args.venue)
     else:
         print(f"Unknown mode: {args.mode}")
         sys.exit(1)
