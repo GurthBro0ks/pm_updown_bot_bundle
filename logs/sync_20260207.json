@@ -1,0 +1,20 @@
+{
+  "sync_date": "2026-02-07T13:54:00Z",
+  "source": "origin/main@228cca5",
+  "status": "synced",
+  "fixes_applied": {
+    "utcnow_deprecation": "ML-09 audit passed - timezone-aware replacements confirmed",
+    "venue_parser": "ML-08 passed - kalshi/ibkr accepted, polymarket rejected",
+    "kalshi_min_size": "ML-10 passed - min_trade_usd=0.01 for Kalshi"
+  },
+  "test_results": {
+    "micro_live": {
+      "passed": 6,
+      "failed_expected": 4,
+      "total": 10,
+      "status": "PASS"
+    }
+  },
+  "shadow_proof": "/tmp/proof_ned_risk_20260207_135401.json",
+  "no_live_trades": true
+}
