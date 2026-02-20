@@ -4,6 +4,7 @@ Kalshi Optimization Strategy - Phase 1 (Quick Wins)
 Maker order logic, probability-weighted edge detection, trade frequency optimization
 """
 
+import argparse
 import json
 import logging
 import sys
