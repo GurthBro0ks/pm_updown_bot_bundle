@@ -69,6 +69,29 @@ RISK_CAPS = {
     "slippage_max_pct": 1.0
 }
 
+def check_sef_micro_live_gates(order, risk_caps):
+    """
+    Micro-live risk gates for SEF trading
+    
+    Returns: (passed: bool, violations: list)
+    """
+    violations = []
+    
+    # Gate 1: Position size limit
+    if order["size_usd"] > risk_caps.get("max_pos_usd", 20):
+        violations.append(f"Size ${order['size_usd']:.2f} > max ${risk_caps['max_pos_usd']}")
+    
+    # Gate 2: Minimum profit
+    if order["profit_pct"] < 0.5:  # At least 0.5% profit
+        violations.append(f"Profit {order['profit_pct']:.2f}% < min 0.5%")
+    
+    # Gate 3: Slippage check
+    if order.get("slippage", 0) > risk_caps.get("slippage_max_pct", 1.0):
+        violations.append(f"Slippage {order.get('slippage', 0):.2f}% > max {risk_caps['slippage_max_pct']}")
+    
+    passed = len(violations) == 0
+    return passed, violations
+
 def get_uniswap_price(token_in, token_out, amount_in):
     """Get Uniswap V3 price for spot trade"""
     try:
@@ -246,6 +269,14 @@ def optimize_sef_strategy(bankroll, max_pos_usd, mode="shadow"):
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
+        # Micro-live gate check
+        if mode == "micro-live" or mode == "real-live":
+            passed, violations = check_sef_micro_live_gates(order, RISK_CAPS)
+            if not passed:
+                logger.info(f"SEF order failed gates: {violations}")
+                continue
+            logger.info(f"SEF order passed all gates")
+        
         orders.append(order)
         total_volume += optimal_size
     
@@ -294,7 +325,7 @@ def optimize_sef_strategy(bankroll, max_pos_usd, mode="shadow"):
 
 def main():
     parser = argparse.ArgumentParser(description="SEF Spot Trading - Phase 2")
-    parser.add_argument("--mode", choices=["shadow", "real-live"], default="shadow", help="Execution mode")
+    parser.add_argument("--mode", choices=["shadow", "micro-live", "real-live"], default="shadow", help="Execution mode (micro-live = real trades with risk gates)")
     parser.add_argument("--bankroll", type=float, default=100.0, help="Bankroll in USD")
     parser.add_argument("--max-pos", type=float, default=20.0, help="Max position size in USD")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
