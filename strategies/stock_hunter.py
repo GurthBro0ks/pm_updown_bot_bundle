@@ -343,9 +343,11 @@ def optimize_stock_hunter_strategy(bankroll, max_pos_usd, mode="shadow"):
     if orders:
         logger.info(f"Top pick: {orders[0]['ticker']} (sentiment: {orders[0]['sentiment']:.2f})")
     
-    # Generate proof
-    from runner import generate_proof
+    # Generate proof (inline to avoid circular import)
     proof_id = f"phase3_stock_hunter_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    proof_path = Path(f"/opt/slimy/pm_updown_bot_bundle/proofs/{proof_id}.json")
+    proof_path.parent.mkdir(exist_ok=True)
+    
     proof_data = {
         "mode": mode,
         "bankroll": bankroll,
@@ -363,7 +365,8 @@ def optimize_stock_hunter_strategy(bankroll, max_pos_usd, mode="shadow"):
         }
     }
     
-    generate_proof(proof_id, proof_data)
+    with open(proof_path, 'w') as f:
+        json.dump(proof_data, f, indent=2)
     logger.info(f"Proof: {proof_id}")
     
     return len(orders)
