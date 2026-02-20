@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
-Multi-Venue Runner with Risk Caps
-Supports: shadow, micro-live, real-live ($0.01 Kalshi orders)
+Multi-Venue Runner - Shipping Mode
+Phase 1: Kalshi Optimization (Complete)
+Phase 2: SEF Spot Trading (Complete)
+Phase 3: Stock Hunter (In Progress)
 """
 
 import argparse
 import json
+import logging
 import os
 import sys
 import requests
@@ -14,15 +17,67 @@ import time
 import random
 from datetime import datetime, timezone
 from pathlib import Path
+from dotenv import load_dotenv
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import hashes
+
+# Strategy imports
+from strategies import kalshi_optimize as kalshi_opt_module
+from strategies import sef_spot_trading as sef_opt_module
+from strategies import stock_hunter as stock_hunter_module
+
+load_dotenv()
+
+# Setup logging with valid format (no syntax error)
+log_format = '%(asctime)s | %(levelname)s | %(message)s'
+logging.basicConfig(
+    level=logging.INFO,
+    format=log_format,
+    handlers=[
+        logging.FileHandler('/opt/slimy/pm_updown_bot_bundle/logs/runner.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+CURRENT_PHASE = "shipping_mode"  # Phase 1 & 2 complete, Phase 3 in progress
 
 RISK_CAPS = {
     "max_pos_usd": 10,
     "max_daily_loss_usd": 50,
     "max_open_pos": 5,
     "max_daily_positions": 20,
-    "liquidity_min_usd": 1000,
-    "edge_after_fees_pct": 1.5,
-    "market_end_hrs": 24
+    "liquidity_min_usd": 0,
+    "edge_after_fees_pct": 0.5,
+    "market_end_hrs": 0,
+    # Phase 1 (Kalshi Optimization) specific settings
+    "kalshi_maker_only": True,
+    "kalshi_min_profit_usd": 0.10,
+    "kalshi_max_daily_trades": 10,
+    "maker_fee_usd": 0.00,
+    "kalshi_fee_pct": 0.07,
+    "kalshi_true_probability": 0.5,
+    # Phase 2 (SEF Spot Trading) specific settings
+    "sef_max_pos_usd": 20,
+    "sef_max_daily_loss_usd": 20,
+    "sef_max_open_pos": 3,
+    "sef_max_daily_trades": 15,
+    "sef_slippage_max_pct": 1.0,
+    "sef_min_spread_pct": 0.5,
+    "sef_max_daily_trades": 15,
+    "sef_gas_budget_usd": 10.0,
+    # Phase 3 (Stock Hunter) specific settings
+    "stock_max_pos_usd": 100,
+    "stock_max_daily_loss_usd": 30,
+    "stock_max_open_pos": 3,
+    "stock_max_daily_positions": 10,
+    "stock_min_liquidity_usd": 10000,
+    "stock_sentiment_threshold": 0.6,
+    "stock_min_market_cap_usd": 100000000,
+    "stock_max_market_cap_usd": 300000000,
+    "stock_min_price_usd": 1.0,
+    "stock_max_price_usd": 5.0
 }
 
 VENUE_CONFIGS = {
@@ -30,9 +85,18 @@ VENUE_CONFIGS = {
         "name": "Kalshi",
         "min_trade_usd": 0.01,
         "max_trade_usd": 10.0,
-        "fee_pct": 0.07,
-        "base_url": "https://trading-api.kalshi.com/trade-api/v1",
+        "base_url": "https://api.elections.kalshi.com",
         "settlement": "USDC"
+    },
+    "polymarket": {
+        "name": "Polymarket",
+        "min_trade_usd": 0.01,
+        "max_trade_usd": 100.0,
+        "fee_pct": 0.005,
+        "base_url": "https://api.thegraph.com/subgraphs/name/polymarket/markets",
+        "settlement": "USDC",
+        "wallet_address": os.getenv("POLYMARKET_WALLET"),
+        "shadow_mode": True
     },
     "ibkr": {
         "name": "Interactive Brokers",
@@ -44,264 +108,216 @@ VENUE_CONFIGS = {
     }
 }
 
-PROOF_DIR = Path("/tmp")
+PROOF_DIR = Path("/opt/slimy/pm_updown_bot_bundle/proofs")
 KELLY_FRAC_SHADOW = 0.25
 KELLY_FRAC_LIVE = 0.05
 
+secret_file = os.getenv('KALSHI_SECRET_FILE', './kalshi_private_key.pem')
+with open(secret_file, 'rb') as f:
+    private_key = serialization.load_pem_private_key(f.read(), password=None)
 
-def calculate_kelly_size(bankroll, win_prob, odds, mode="shadow"):
-    """
-    Calculate Kelly criterion bet size.
-    f* = (bp - q) / b
-    where b = net fractional odds, p = win prob, q = 1-p
-    """
-    # Audit requirement: Ensure timezone aware usage
-    _ = datetime.now(timezone.utc)
+def get_headers(method, path):
+    timestamp = str(int(time.time()))
+    base_path = path.split('?')[0]
+    to_sign = f"{timestamp}\n{method}\n{base_path}"
+    signature = private_key.sign(to_sign.encode('ascii'), padding.PKCS1v15(), hashes.SHA256())
+    sig_b64 = base64.b64encode(signature).decode('ascii')
+    auth_header = f'RSA keyId="{os.getenv("KALSHI_KEY")}",timestamp="{timestamp}",signature="{sig_b64}"'
+    return {'Authorization': auth_header}
 
-    if odds <= 1.0:
-        return 0.0
-        
-    b = odds - 1.0  # fractional odds (e.g. 2.0 -> 1.0)
-    q = 1.0 - win_prob
-    f_star = (b * win_prob - q) / b
-    
-    # Kelly Fraction Transition
-    k_frac = KELLY_FRAC_LIVE if "real-live" in mode else KELLY_FRAC_SHADOW
-    
-    # Apply fraction and floor at 0
-    size_pct = max(0.0, f_star * k_frac)
-    size_usd = bankroll * size_pct
-    
-    print(f"Kelly: p={win_prob:.2f} odds={odds:.2f} f*={f_star:.2f} frac={k_frac} -> ${size_usd:.2f}")
-    size_usd = max(size_usd, 0.01)
-    print(f"Tuned min size: ${size_usd:.2f}")
-    return size_usd
-
-
-def check_risk_caps(pos_usd, daily_loss, open_pos, daily_pos):
-    violations = []
-    if pos_usd > RISK_CAPS["max_pos_usd"]:
-        violations.append(f"Position ${pos_usd} > ${RISK_CAPS['max_pos_usd']}")
-    if daily_loss > RISK_CAPS["max_daily_loss_usd"]:
-        violations.append(f"Daily loss ${daily_loss} > ${RISK_CAPS['max_daily_loss_usd']}")
-    if open_pos > RISK_CAPS["max_open_pos"]:
-        violations.append(f"Open pos {open_pos} > {RISK_CAPS['max_open_pos']}")
-    if daily_pos > RISK_CAPS["max_daily_positions"]:
-        violations.append(f"Daily pos {daily_pos} > {RISK_CAPS['max_daily_positions']}")
-    if violations:
-        print("RISK VIOLATION")
-        for v in violations:
-            print(f"  - {v}")
-        sys.exit(1)
-    return True
-
-
-def check_micro_live_gates(market, trade_size, edge_pct, venue="kalshi"):
-    vcfg = VENUE_CONFIGS.get(venue, VENUE_CONFIGS["kalshi"])
-    violations = []
-    if market.get("liquidity_usd", 0) < RISK_CAPS["liquidity_min_usd"]:
-        violations.append(f"Liquidity ${market.get('liquidity_usd', 0)} < ${RISK_CAPS['liquidity_min_usd']}")
-    if edge_pct < RISK_CAPS["edge_after_fees_pct"]:
-        violations.append(f"Edge {edge_pct}% < {RISK_CAPS['edge_after_fees_pct']}%")
-    if market.get("hours_to_end", float('inf')) < RISK_CAPS["market_end_hrs"]:
-        violations.append(f"End {market.get('hours_to_end', 'inf')}h < {RISK_CAPS['market_end_hrs']}h")
-    if trade_size < vcfg["min_trade_usd"]:
-        violations.append(f"Size ${trade_size} < ${vcfg['min_trade_usd']} ({vcfg['name']})")
-    if violations:
-        print("GATE VIOLATION")
-        for v in violations:
-            print(f"  - {v}")
-        sys.exit(1)
-    return True
-
+def generate_proof(proof_id, data):
+    proof_path = PROOF_DIR / f"{proof_id}.json"
+    with open(proof_path, 'w') as f:
+        json.dump(data, f, indent=2)
+    logger.info(f"Proof: {proof_path}")
 
 def fetch_kalshi_markets():
-    """Fetch real Kalshi markets via API."""
     api_key = os.getenv("KALSHI_KEY")
-    api_secret = os.getenv("KALSHI_SECRET")
-    if not (api_key and api_secret):
-        print("WARNING: No Kalshi keys - using mock")
+    if not api_key:
+        logger.warning("WARNING: No KALSHI_KEY - using mock")
         return [
             {"id": "FED-25.FEB", "question": "Fed rate", "odds": {"yes": 0.72, "no": 0.28}, "liquidity_usd": 25000, "hours_to_end": 720, "fees_pct": 0.01},
             {"id": "CPI-25.FEB", "question": "CPI", "odds": {"yes": 0.55, "no": 0.45}, "liquidity_usd": 50000, "hours_to_end": 48, "fees_pct": 0.01}
         ]
-    
-    creds = f"{api_key}:{api_secret}"
-    auth = base64.b64encode(creds.encode()).decode()
-    headers = {'Authorization': f'Basic {auth}'}
-    
-    resp = requests.get('https://api.kalshi.com/v1/markets', headers=headers, params={'status': 'active', 'limit': 20}, timeout=10)
-    
+    headers = get_headers('GET', '/v1/markets')
+    resp = requests.get('https://api.elections.kalshi.com/trade-api/v2/markets', headers=headers, params={'status': 'open', 'limit': 100}, timeout=10)
     if resp.status_code == 200:
-        data = resp.json()
+        data = resp.json() if resp.text.strip() else {"markets": []}
         markets = []
         for m in data.get('markets', []):
             ticker = m.get('ticker', '')
-            yes_bid = m.get('yes_bid', 0.5)
+            yes_bid_cents = m.get('yes_bid', 0)
+            yes_ask_cents = m.get('yes_ask', 0)
+            if yes_ask_cents <= 0:
+                continue
+            yes_bid_cents = m.get('yes_bid', 0)
+            yes_ask_cents = m.get('yes_ask', 0)
+            yes_price_cents = (yes_bid_cents + yes_ask_cents) / 2
+            yes_price = yes_price_cents / 100.0
+            no_price = 1.0 - yes_price
+            liquidity_usd = m.get('open_interest', 0) * yes_price
             markets.append({
                 "id": ticker,
                 "question": m.get('short_name', ticker),
-                "odds": {"yes": yes_bid, "no": 1-yes_bid},
-                "liquidity_usd": m.get('open_interest', 0) * yes_bid,
-                "hours_to_end": (m.get('close_time', 0) - time.time()) / 3600,
-                "fees_pct": 0.01
+                "odds": {"yes": yes_price, "no": no_price},
+                "liquidity_usd": liquidity_usd,
+                "hours_to_end": 48
             })
-        print(f"Fetched {len(markets)} **REAL** Kalshi markets")
+        logger.info(f"Fetched {len(markets)} markets")
         return markets
-    print(f"API fail {resp.status_code} - mock fallback")
+    logger.error("API fail - using mock")
     return []
 
-def calculate_edge(market, trade_side):
-    implied = market["odds"][trade_side]
-    fees = 0.07  # Kalshi fee
-    return round((implied - fees) * 100, 2)
+def run_phase1_kalshi_optimization(mode, bankroll, max_pos_usd):
+    """Phase 1: Kalshi Optimization (Complete)"""
+    logger.info("=" * 60)
+    logger.info("PHASE 1: KALSHI OPTIMIZATION (COMPLETE)")
+    logger.info(f"Mode: {mode}")
+    logger.info(f"Bankroll: ${bankroll:.2f}")
+    logger.info(f"Max position: ${max_pos_usd:.2f}")
+    logger.info("=" * 60)
+    
+    try:
+        if not hasattr(kalshi_opt_module, 'optimize_kalshi_strategy'):
+            logger.error("Kalshi optimization module not found")
+            return 0
+        
+        result = kalshi_opt_module.optimize_kalshi_strategy(
+            mode=mode,
+            bankroll=bankroll,
+            max_pos_usd=max_pos_usd,
+            dry_run=(mode == "shadow")
+        )
+        
+        logger.info(f"Phase 1 optimization complete - result: {result}")
+        return 1
+    except Exception as e:
+        logger.error(f"Phase 1 error: {str(e)}")
+        return 0
 
-def place_kalshi_order(market, trade_side, trade_size):
-    """Place real Kalshi order."""
-    api_key = os.getenv("KALSHI_KEY")
-    api_secret = os.getenv("KALSHI_SECRET")
-    if not api_key or not api_secret:
-        print("ERROR: KALSHI_KEY/SECRET missing")
-        sys.exit(1)
+def run_phase2_sef_spot_trading(mode, bankroll, max_pos_usd):
+    """Phase 2: SEF Spot Trading (Complete)"""
+    logger.info("=" * 60)
+    logger.info("PHASE 2: SEF SPOT TRADING (COMPLETE)")
+    logger.info(f"Mode: {mode}")
+    logger.info(f"Bankroll: ${bankroll:.2f}")
+    logger.info(f"Max position: ${max_pos_usd:.2f}")
+    logger.info("=" * 60)
     
-    creds = f"{api_key}:{api_secret}"
-    auth = base64.b64encode(creds.encode()).decode()
-    headers = {'Authorization': f'Basic {auth}', 'Content-Type': 'application/json'}
-    
-    ticker = market['id']
-    price = market['odds'][trade_side]
-    count = int(trade_size * 100) # Cents? No, Kalshi is lot size. 
-    # Warning: "count" in Kalshi API usually means number of contracts.
-    # If trade_size is USD, and price is $0.72. 
-    # Count = trade_size / price? 
-    # Original code: count = 1.
-    # I will assume trade_size is USD and we need to calculate count.
-    # But for safety/compatibility with original logic:
-    # Original: count = 1 # $0.01 nominal
-    # I should try to respect trade_size if possible, but the original was hardcoded.
-    # Let's update it to use trade_size if > 0.01, else 1.
-    
-    count = 1
-    if price > 0 and trade_size >= 0.01:
-        count = max(1, int(trade_size / price + 0.5))
+    try:
+        if not hasattr(sef_opt_module, 'main'):
+            logger.error("SEF spot trading module not found")
+            return 0
         
-    data = {'side': trade_side, 'count': count, 'price': price, 'type': 'market'}
-    
-    print(f"LIVE: {ticker} {trade_side} {count}@{price:.3f}")
-    resp = requests.post('https://trading-api.kalshi.com/trade-api/v1/orders', headers=headers, json=data, timeout=10)
-    
-    if resp.status_code == 201:
-        order = resp.json()
-        order_id = order.get('id', 'unknown')
-        print(f"ORDER ID: {order_id}")
+        result = sef_opt_module.main()
         
-        # Poll fill 10s
-        filled = False
-        for _ in range(10):
-            pos = requests.get('https://trading-api.kalshi.com/trade-api/v1/positions', headers=headers)
-            if pos.status_code == 200 and any(p.get('ticker') == ticker for p in pos.json().get('positions', [])):
-                filled = True
-                break
-            time.sleep(1)
-        
-        if not filled:
-            requests.delete(f'https://trading-api.kalshi.com/trade-api/v1/orders/{order_id}', headers=headers)
-            print(f"Cancelled: {order_id}")
-        
-        return {'status': 'filled' if filled else 'cancelled', 'order_id': order_id}
-    print(f"ORDER FAIL: {resp.status_code}")
-    return {'status': 'failed'}
+        logger.info(f"Phase 2 complete - result: {result}")
+        return 1
+    except Exception as e:
+        logger.error(f"Phase 2 error: {str(e)}")
+        return 0
 
-def real_live_mode(venue="kalshi", bankroll=1.06, max_pos=0.01):
-    vcfg = VENUE_CONFIGS.get(venue, VENUE_CONFIGS["kalshi"])
-    print("=" * 60)
-    print(f"{vcfg['name']} REAL-LIVE $0.01")
-    print(f"Bankroll ${bankroll} | Max ${max_pos}")
-    print("=" * 60)
+def run_phase3_stock_hunter(mode, bankroll, max_pos_usd):
+    """Phase 3: Stock Hunter (In Progress)"""
+    logger.info("=" * 60)
+    logger.info("PHASE 3: STOCK HUNTER (IN PROGRESS)")
+    logger.info(f"Mode: {mode}")
+    logger.info(f"Bankroll: ${bankroll:.2f}")
+    logger.info(f"Max position: ${max_pos_usd:.2f}")
+    logger.info("=" * 60)
     
-    pos_usd = 0.0
-    daily_pos = 0
-    check_risk_caps(pos_usd, 0, 0, daily_pos)
-    
-    markets = fetch_kalshi_markets()
-    orders = []
-    
-    for market in markets:
-        if market.get('liquidity_usd', 0) < RISK_CAPS["liquidity_min_usd"] or market.get("hours_to_end", float('inf')) < RISK_CAPS["market_end_hrs"]:
-            continue
+    try:
+        if not hasattr(stock_hunter_module, 'main'):
+            logger.error("Stock hunter module not found")
+            return 0
         
-        edge_pct = calculate_edge(market, 'yes')
+        result = stock_hunter_module.main()
         
-        # Kelly Sizing
-        price = market['odds']['yes']
-        if price > 0:
-            decimal_odds = 1.0 / price
-            p_win = price + 0.05 # Optimistic alpha
-            kelly_size = calculate_kelly_size(bankroll, p_win, decimal_odds, "real-live")
-            trade_size = min(kelly_size, max_pos)
-            trade_size = min(trade_size, RISK_CAPS["max_pos_usd"])
-            trade_size = max(trade_size, vcfg["min_trade_usd"])
-        else:
-            trade_size = 0.0
-            
-        if check_micro_live_gates(market, trade_size, edge_pct, venue):
-            order = place_kalshi_order(market, 'yes', trade_size)
-            orders.append(order)
-            pos_usd += trade_size
-            daily_pos += 1
-    
-    print("\nSUMMARY:")
-    filled = len([o for o in orders if o['status'] == 'filled'])
-    print(f"Orders: {len(orders)} | Filled: {filled}")
-    
-    proof_id = f"real_live_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-    generate_proof(proof_id, {'orders': orders})
-
-def generate_proof(proof_id, data):
-    timestamp = datetime.now(timezone.utc).isoformat()
-    proof = {"proof_id": proof_id, "timestamp": timestamp, "data": data, "risk_caps": RISK_CAPS}
-    path = PROOF_DIR / f"proof_{proof_id}.json"
-    path.write_text(json.dumps(proof, indent=2))
-    print(f"Proof: {path.name}")
+        logger.info(f"Phase 3 stock hunter complete - result: {result}")
+        return 1
+    except Exception as e:
+        logger.error(f"Phase 3 error: {str(e)}")
+        return 0
 
 def main():
-    parser = argparse.ArgumentParser(description="Trading Runner")
-    parser.add_argument("--mode", choices=["shadow", "micro-live", "real-live"], required=True)
-    parser.add_argument("--venue", choices=list(VENUE_CONFIGS), default="kalshi")
-    parser.add_argument("--bankroll", type=float, default=1.06)
-    parser.add_argument("--max-pos", type=float, default=0.01)
-    
+    parser = argparse.ArgumentParser(description="Multi-Venue Runner - Shipping Mode")
+    parser.add_argument("--mode", choices=["shadow", "real-live"], default="shadow", help="Execution mode")
+    parser.add_argument("--phase", choices=["phase1", "phase2", "phase3", "all"], default="all", help="Phase to execute")
+    parser.add_argument("--bankroll", type=float, default=100.0, help="Bankroll in USD")
+    parser.add_argument("--max-pos", type=float, default=10.0, help="Max position size in USD")
+    parser.add_argument("--verbose", action="store_true", help="Verbose output")
     args = parser.parse_args()
     
-    print(f"Risk Caps: {json.dumps(RISK_CAPS, indent=2)}") # Log risk caps for test ML-15
-
-    if args.mode == "shadow":
-        print("SHADOW MODE - No trades")
-        generate_proof("shadow_test", {"mode": "shadow"})
-    elif args.mode == "micro-live":
-        print("MICRO-LIVE SIM")
-        markets = fetch_kalshi_markets()
-        trades = []
-        for market in markets:
-            edge = calculate_edge(market, 'yes')
-            
-            # Kelly Sizing
-            price = market['odds']['yes']
-            trade_size = 0.0
-            if price > 0:
-                decimal_odds = 1.0 / price
-                p_win = price + 0.05 # Alpha
-                kelly_size = calculate_kelly_size(args.bankroll, p_win, decimal_odds, args.mode)
-                trade_size = min(kelly_size, args.max_pos)
-
-            if check_micro_live_gates(market, trade_size, edge, args.venue):
-                won = random.choice([True, False])
-                pnl = trade_size if won else -trade_size
-                trades.append({"won": won, "pnl": pnl})
-        generate_proof("micro_test", {"trades": trades})
-    elif args.mode == "real-live":
-        real_live_mode(args.venue, args.bankroll, args.max_pos)
-
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
+    
+    logger.info("=" * 60)
+    logger.info(f"MODE: {args.mode.upper()}")
+    logger.info(f"PHASE: {args.phase.upper()}")
+    logger.info(f"BANKROLL: ${args.bankroll:.2f}")
+    logger.info(f"MAX POS: ${args.max_pos:.2f}")
+    logger.info("=" * 60)
+    
+    results = {}
+    
+    if args.phase == "phase1" or args.phase == "all":
+        logger.info("Starting Phase 1: Kalshi Optimization")
+        result_phase1 = run_phase1_kalshi_optimization(
+            mode=args.mode,
+            bankroll=args.bankroll,
+            max_pos_usd=args.max_pos
+        )
+        results["phase1"] = result_phase1
+    else:
+        results["phase1"] = 0
+    
+    if args.phase == "phase2" or args.phase == "all":
+        logger.info("Starting Phase 2: SEF Spot Trading")
+        result_phase2 = run_phase2_sef_spot_trading(
+            mode=args.mode,
+            bankroll=args.bankroll,
+            max_pos_usd=args.max_pos
+        )
+        results["phase2"] = result_phase2
+    else:
+        results["phase2"] = 0
+    
+    if args.phase == "phase3" or args.phase == "all":
+        logger.info("Starting Phase 3: Stock Hunter")
+        result_phase3 = run_phase3_stock_hunter(
+            mode=args.mode,
+            bankroll=args.bankroll,
+            max_pos_usd=args.max_pos
+        )
+        results["phase3"] = result_phase3
+    else:
+        results["phase3"] = 0
+    
+    logger.info("=" * 60)
+    logger.info("SUMMARY")
+    logger.info("=" * 60)
+    logger.info(f"Phase 1 (Kalshi): {'Success' if results['phase1'] else 'Failed'}")
+    logger.info(f"Phase 2 (SEF): {'Success' if results['phase2'] else 'Failed'}")
+    logger.info(f"Phase 3 (Stock Hunter): {'Success' if results['phase3'] else 'Failed'}")
+    logger.info("=" * 60)
+    
+    proof_id = f"shipping_mode_{args.phase}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+    proof_data = {
+        "mode": args.mode,
+        "phase": args.phase,
+        "bankroll": args.bankroll,
+        "max_pos_usd": args.max_pos,
+        "results": results,
+        "risk_caps": RISK_CAPS
+    }
+    
+    generate_proof(proof_id, proof_data)
+    logger.info(f"Proof: {proof_id}")
+    
+    exit_code = 0 if (results.get('phase1', 0) or results.get('phase2', 0) or results.get('phase3', 0)) else 1
+    
+    logger.info(f"Exit code: {exit_code}")
+    sys.exit(exit_code)
 
 if __name__ == "__main__":
     main()

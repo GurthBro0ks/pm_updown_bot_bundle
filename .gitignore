@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.env
+*.egg-info/
+dist/
+build/
+
+# Secrets - NEVER COMMIT
+*.pem
+*.key
+*.crt
+.env
+.env.local
+secrets.json
+
+# Logs
+logs/
+*.log
+
+# Proofs (generated)
+proofs/
+
+# Backups
+backup*/
+*.backup
+*.bak
+
+# Temp files
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Test artifacts
+test_*.json
+test_output/
