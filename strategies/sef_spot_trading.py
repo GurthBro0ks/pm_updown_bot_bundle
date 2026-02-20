@@ -316,7 +316,7 @@ def optimize_sef_strategy(bankroll, max_pos_usd, mode="shadow"):
     }
     
     # Import generate_proof from runner module
-    from runner import generate_proof
+    from utils.proof import generate_proof
     generate_proof(proof_id, proof_data)
     
     logger.info(f"Proof: {proof_id}")

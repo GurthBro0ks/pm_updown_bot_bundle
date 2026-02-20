@@ -15,7 +15,9 @@ from pathlib import Path
 sys.path.insert(0, '/opt/slimy/pm_updown_bot_bundle')
 
 # Import runner module
-from runner import fetch_kalshi_markets, generate_proof
+# Local imports (avoid circular import)
+from utils.proof import generate_proof
+from utils.kalshi import fetch_kalshi_markets
 
 # Stub for missing function
 def check_micro_live_gates(market, size, price, risk_caps, venue):
@@ -516,7 +518,7 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
         "risk_caps": risk_caps
     }
     
-    from runner import generate_proof
+    from utils.proof import generate_proof
     generate_proof(proof_id, proof_data)
     
     logger.info(f"Proof: {proof_id}")
