@@ -39,6 +39,15 @@ ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY')
 MASSIVE_API_KEY = os.getenv('MASSIVE_API_KEY')
 MARKETAUX_API_KEY = os.getenv('MARKETAUX_API_KEY')
 
+# Cache for API responses (avoid rate limits)
+_price_cache = {}
+_sentiment_cache = {}
+CACHE_DURATION_S = 900  # 15 minutes
+
+# Rate limiting
+MASSIVE_DELAY_S = 12  # 5 calls/min max
+last_massive_call = 0
+
 # Risk Caps
 RISK_CAPS = {
     "max_pos_usd": 100,
@@ -50,8 +59,8 @@ RISK_CAPS = {
     "sentiment_threshold": 0.5,  # Lower threshold for real data
 }
 
-# Target tickers to analyze
-TARGET_TICKERS = ["AAPL", "TSLA", "NVDA", "GME", "AMC", "META", "AMZN", "GOOGL", "MSFT", "AMD"]
+# Target tickers to analyze (reduced to 5 to avoid rate limits)
+TARGET_TICKERS = ["AAPL", "TSLA", "NVDA", "GME", "META"]
 
 
 def fetch_marketaux_sentiment(ticker):
@@ -170,15 +179,63 @@ def fetch_alpha_vantage_sentiment(ticker):
         return None
 
 
+def fetch_alpha_vantage_price(ticker):
+    """Fetch stock price from Alpha Vantage (backup - limited to 25/day)"""
+    if not ALPHA_VANTAGE_API_KEY:
+        logger.warning("ALPHA_VANTAGE_API_KEY not set")
+        return None
+    
+    try:
+        url = f"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol={ticker}&apikey={ALPHA_VANTAGE_API_KEY}"
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        quote = data.get("Global Quote", {})
+        price_str = quote.get("05. price")
+        if price_str:
+            price = float(price_str)
+            logger.info(f"Alpha Vantage: {ticker} = ${price:.2f}")
+            return {"close": price, "source": "alpha_vantage"}
+        return None
+    except Exception as e:
+        logger.error(f"Alpha Vantage error for {ticker}: {e}")
+        return None
+
+
 def fetch_massive_price(ticker):
-    """Fetch stock price from Massive (Polygon) API"""
+    """Fetch stock price from Massive (Polygon) API - with rate limiting and caching"""
+    global last_massive_call
+    
+    # Check cache first
+    cache_key = f"price_{ticker}"
+    if cache_key in _price_cache:
+        cached = _price_cache[cache_key]
+        if time.time() - cached["timestamp"] < CACHE_DURATION_S:
+            logger.info(f"Using cached price for {ticker}: ${cached['price']['close']:.2f}")
+            return cached["price"]
+    
     if not MASSIVE_API_KEY:
         logger.warning("MASSIVE_API_KEY not set")
-        return None
+        return fetch_alpha_vantage_price(ticker)
+    
+    # Rate limiting - ensure 12s between calls
+    elapsed = time.time() - last_massive_call
+    if elapsed < MASSIVE_DELAY_S:
+        wait_time = MASSIVE_DELAY_S - elapsed
+        logger.debug(f"Rate limiting: waiting {wait_time:.1f}s before Massive call")
+        time.sleep(wait_time)
     
     try:
         url = f"https://api.massive.com/v2/aggs/ticker/{ticker}/prev?apiKey={MASSIVE_API_KEY}"
         resp = requests.get(url, timeout=10)
+        last_massive_call = time.time()
+        
+        # Handle rate limiting
+        if resp.status_code == 429:
+            logger.warning(f"Massive API rate limited for {ticker}, falling back to Alpha Vantage")
+            return fetch_alpha_vantage_price(ticker)
+        
         resp.raise_for_status()
         data = resp.json()
         
@@ -190,14 +247,18 @@ def fetch_massive_price(ticker):
                 "low": result.get("l"),
                 "close": result.get("c"),
                 "volume": result.get("v"),
-                "vwap": result.get("vw")
+                "vwap": result.get("vw"),
+                "source": "massive"
             }
+            # Cache the result
+            _price_cache[cache_key] = {"price": price, "timestamp": time.time()}
             logger.info(f"Massive: {ticker} = ${price['close']:.2f}")
             return price
         return None
     except Exception as e:
         logger.error(f"Massive error for {ticker}: {e}")
-        return None
+        # Try Alpha Vantage as fallback
+        return fetch_alpha_vantage_price(ticker)
 
 
 def fetch_stocktwits_sentiment(ticker):
