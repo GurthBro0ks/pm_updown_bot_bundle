@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """
 Stock Hunter - Phase 3 (Stock Hunter)
-Social Sentiment + News Scraping + Unusual Options Activity + Penny Stock Screener
+Social Sentiment + News Scraping + Real API Integration
+
+Uses:
+- Finnhub: News + headlines
+- Alpha Vantage: Sentiment scores
+- Massive (Polygon): Stock prices
+- Stocktwits: Social sentiment (free, no auth)
 """
 
 import argparse
@@ -13,362 +19,329 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from dotenv import load_dotenv
+import requests
 
 # Add to path
 sys.path.insert(0, '/opt/slimy/pm_updown_bot_bundle')
 
-# Import simple logging config
 from utils.logging_config import setup_logging
 
 load_dotenv()
 
-# Setup logging (no syntax errors)
 logger = setup_logging(
     log_file_path='/opt/slimy/pm_updown_bot_bundle/logs/stock_hunter.log',
     verbose=os.getenv('VERBOSE', 'false').lower() == 'true'
 )
 
-# Risk Caps for Phase 3 (Stock Hunter)
+# API Keys
+FINNHUB_API_KEY = os.getenv('FINNHUB_API_KEY')
+ALPHA_VANTAGE_API_KEY = os.getenv('ALPHA_VANTAGE_API_KEY')
+MASSIVE_API_KEY = os.getenv('MASSIVE_API_KEY')
+MARKETAUX_API_KEY = os.getenv('MARKETAUX_API_KEY')
+
+# Risk Caps
 RISK_CAPS = {
-    "max_pos_usd": 100,  # Phase 3: Higher limit for penny stocks
-    "max_daily_loss_usd": 30,  # Phase 3: Lower loss limit (stocks are volatile)
-    "max_open_pos": 3,  # Phase 3: Fewer concurrent positions
-    "max_daily_positions": 10,  # Phase 3: Fewer daily positions (quality)
-    "min_liquidity_usd": 10000,  # Phase 3: Higher minimum liquidity
-    "edge_after_fees_pct": 1.0,  # Phase 3: Higher edge threshold (stocks have fees)
-    "sentiment_threshold": 0.6,  # Phase 3: Bullish sentiment threshold
-    # Screener caps (flat structure for backward compatibility)
-    "min_market_cap_usd": 10000000,  # Phase 3: $10M minimum market cap (penny stocks)
-    "max_market_cap_usd": 300000000,  # Phase 3: $300M maximum (small caps)
-    "min_price_usd": 1.0,  # Phase 3: Minimum $1 price (not penny stocks)
-    "max_price_usd": 5.0,  # Phase 3: Maximum $5 price (small caps)
-    # Options caps
-    "min_volume_spike": 2.0,
-    "min_oi_spike": 1.5,
-    "min_iv_spike": 1.3,
+    "max_pos_usd": 100,
+    "max_daily_loss_usd": 30,
+    "max_open_pos": 3,
+    "max_daily_positions": 10,
+    "min_liquidity_usd": 10000,
+    "edge_after_fees_pct": 1.0,
+    "sentiment_threshold": 0.5,  # Lower threshold for real data
 }
 
-# Stock Sources Configuration
-STOCK_SOURCES = {
-    "reddit": {
-        "name": "Reddit",
-        "subreddits": ["wallstreetbets", "stocks", "pennystocks", "stockmarket"],
-        "min_mentions_per_hour": 10,
-        "min_sentiment_score": 0.7
-    },
-    "twitter": {
-        "name": "X/Twitter",
-        "min_mentions_per_hour": 20,
-        "min_sentiment_score": 0.7
-    },
-    "news": {
-        "name": "News Sources",
-        "sources": ["finnhub", "alpha_vantage", "stocknewsapi"],
-        "min_news_per_hour": 5,
-        "sentiment_keywords": ["beat", "missed", "raised", "downgraded"]
-    },
-    "options": {
-        "name": "Unusual Options Activity",
-        "min_volume_spike": 2.0,  # 2x normal volume
-        "min_oi_spike": 2.0,  # 2x normal open interest
-        "min_iv_spike": 2.0  # 2x normal implied volatility
-    },
-    "screener": {
-        "name": "Penny Stock Screener",
-        "min_volume_usd": 100000,  # $100K/day minimum volume
-        "max_spread_pct": 0.5,  # 0.5% bid-ask spread
-        "min_price": 1.0,
-        "max_price": 5.0
+# Target tickers to analyze
+TARGET_TICKERS = ["AAPL", "TSLA", "NVDA", "GME", "AMC", "META", "AMZN", "GOOGL", "MSFT", "AMD"]
+
+
+def fetch_marketaux_sentiment(ticker):
+    """Fetch news + sentiment from Marketaux"""
+    if not MARKETAUX_API_KEY:
+        logger.warning("MARKETAUX_API_KEY not set")
+        return None
+    
+    try:
+        url = f"https://api.marketaux.com/v1/news/all?api_token={MARKETAUX_API_KEY}&symbols={ticker}&limit=10"
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        articles = data.get("data", [])
+        if not articles:
+            return None
+        
+        # Calculate sentiment from entity sentiment scores
+        total_sentiment = 0
+        count = 0
+        for article in articles:
+            entities = article.get("entities", [])
+            for entity in entities:
+                if entity.get("symbol") == ticker:
+                    score = entity.get("sentiment_score")
+                    if score is not None:
+                        total_sentiment += score
+                        count += 1
+        
+        # Normalize to 0-1 range (Marketaux uses -1 to 1)
+        avg_sentiment = total_sentiment / count if count > 0 else 0
+        normalized = (avg_sentiment + 1) / 2
+        
+        result = {
+            "sentiment_score": normalized,
+            "articles_count": len(articles),
+            "entities_matched": count,
+            "raw_sentiment": avg_sentiment
+        }
+        
+        logger.info(f"Marketaux: {ticker} sentiment = {normalized:.2f} (from {count} mentions in {len(articles)} articles)")
+        return result
+    except Exception as e:
+        logger.error(f"Marketaux error for {ticker}: {e}")
+        return None
+
+
+def fetch_finnhub_news(ticker=None, limit=10):
+    """Fetch news from Finnhub API"""
+    if not FINNHUB_API_KEY:
+        logger.warning("FINNHUB_API_KEY not set")
+        return []
+    
+    try:
+        if ticker:
+            url = f"https://finnhub.io/api/v1/company-news?symbol={ticker}&from=2026-01-01&to=2026-12-31&token={FINNHUB_API_KEY}"
+        else:
+            url = f"https://finnhub.io/api/v1/news?category=general&token={FINNHUB_API_KEY}"
+        
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        news = []
+        for item in data[:limit]:
+            news.append({
+                "headline": item.get("headline", ""),
+                "summary": item.get("summary", ""),
+                "source": item.get("source", ""),
+                "url": item.get("url", ""),
+                "timestamp": item.get("datetime", 0)
+            })
+        
+        logger.info(f"Finnhub: {len(news)} news items for {ticker or 'general'}")
+        return news
+    except Exception as e:
+        logger.error(f"Finnhub error: {e}")
+        return []
+
+
+def fetch_alpha_vantage_sentiment(ticker):
+    """Fetch sentiment from Alpha Vantage"""
+    if not ALPHA_VANTAGE_API_KEY:
+        logger.warning("ALPHA_VANTAGE_API_KEY not set")
+        return None
+    
+    try:
+        url = f"https://www.alphavantage.co/query?function=NEWS_SENTIMENT&tickers={ticker}&apikey={ALPHA_VANTAGE_API_KEY}"
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        feed = data.get("feed", [])
+        if not feed:
+            return None
+        
+        # Calculate average sentiment
+        total_sentiment = 0
+        count = 0
+        for item in feed[:20]:
+            for ts in item.get("ticker_sentiment", []):
+                if ts.get("ticker") == ticker:
+                    score = float(ts.get("ticker_sentiment_score", 0))
+                    total_sentiment += score
+                    count += 1
+        
+        avg_sentiment = total_sentiment / count if count > 0 else 0
+        # Normalize to 0-1 range (Alpha Vantage uses -1 to 1)
+        normalized = (avg_sentiment + 1) / 2
+        
+        logger.info(f"Alpha Vantage: {ticker} sentiment = {normalized:.2f} (from {count} articles)")
+        return normalized
+    except Exception as e:
+        logger.error(f"Alpha Vantage error: {e}")
+        return None
+
+
+def fetch_massive_price(ticker):
+    """Fetch stock price from Massive (Polygon) API"""
+    if not MASSIVE_API_KEY:
+        logger.warning("MASSIVE_API_KEY not set")
+        return None
+    
+    try:
+        url = f"https://api.massive.com/v2/aggs/ticker/{ticker}/prev?apiKey={MASSIVE_API_KEY}"
+        resp = requests.get(url, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        
+        if data.get("status") == "OK" and data.get("results"):
+            result = data["results"][0]
+            price = {
+                "open": result.get("o"),
+                "high": result.get("h"),
+                "low": result.get("l"),
+                "close": result.get("c"),
+                "volume": result.get("v"),
+                "vwap": result.get("vw")
+            }
+            logger.info(f"Massive: {ticker} = ${price['close']:.2f}")
+            return price
+        return None
+    except Exception as e:
+        logger.error(f"Massive error for {ticker}: {e}")
+        return None
+
+
+def fetch_stocktwits_sentiment(ticker):
+    """Fetch social sentiment from Stocktwits (DISABLED - 403 Forbidden)"""
+    # Stocktwits has blocked unauthenticated access
+    # Return None to use other sentiment sources
+    return None
+
+
+def analyze_ticker(ticker):
+    """Analyze a single ticker using all available APIs"""
+    logger.info(f"Analyzing {ticker}...")
+    
+    # Fetch data from all sources
+    price_data = fetch_massive_price(ticker)
+    marketaux = fetch_marketaux_sentiment(ticker)
+    av_sentiment = fetch_alpha_vantage_sentiment(ticker)
+    news = fetch_finnhub_news(ticker, limit=5)
+    
+    # Build analysis result
+    result = {
+        "ticker": ticker,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "price": price_data.get("close") if price_data else None,
+        "volume": price_data.get("volume") if price_data else None,
     }
-}
-
-def calculate_sentiment_score(mentions, sentiment_scores, volume):
-    """
-    Calculate sentiment score from social media mentions
-    Simple model: more bullish mentions + higher volume = higher score
-    """
-    if not mentions:
-        return 0.0
     
-    # Normalize sentiment scores (assuming range -1 to 1)
-    avg_sentiment = sum(sentiment_scores) / len(sentiment_scores) if sentiment_scores else 0
-    volume_score = min(volume / 1000.0, 1.0)  # Normalize to 0-1 range
+    # Calculate combined sentiment score
+    scores = []
+    weights = []
     
-    # Combined score (weighted average)
-    sentiment_weight = 0.7
-    volume_weight = 0.3
+    if marketaux:
+        scores.append(marketaux.get("sentiment_score", 0.5))
+        weights.append(0.35)  # Marketaux weighted high (news + sentiment)
+        result["marketaux"] = marketaux
     
-    sentiment_score = (avg_sentiment * sentiment_weight) + (volume_score * volume_weight)
-    logger.debug(f"Sentiment Score: avg={avg_sentiment:.2f}, volume={volume_score:.2f}, combined={sentiment_score:.2f}")
+    if av_sentiment is not None:
+        scores.append(av_sentiment)
+        weights.append(0.35)  # Alpha Vantage news sentiment
+        result["alpha_vantage_sentiment"] = av_sentiment
     
-    return sentiment_score
-
-def analyze_news_sentiment(news_headlines, keywords):
-    """
-    Analyze news sentiment based on keywords
-    Returns bullish/bearish/neutral score
-    """
-    if not news_headlines:
-        return 0.0
+    if news:
+        # Simple news sentiment based on headline keywords
+        bullish_words = ["beat", "raise", "surge", "rally", "gain", "up", "buy", "bullish"]
+        bearish_words = ["miss", "cut", "drop", "fall", "loss", "down", "sell", "bearish"]
+        
+        news_score = 0.5
+        for item in news:
+            headline = item.get("headline", "").lower()
+            for word in bullish_words:
+                if word in headline:
+                    news_score += 0.05
+            for word in bearish_words:
+                if word in headline:
+                    news_score -= 0.05
+        
+        news_score = max(0, min(1, news_score))  # Clamp to 0-1
+        scores.append(news_score)
+        weights.append(0.2)
+        result["news_count"] = len(news)
+        result["news_score"] = news_score
     
-    bullish_count = 0
-    bearish_count = 0
-    
-    for headline in news_headlines:
-        headline_lower = headline.lower()
-        for keyword in keywords.get("bullish", []):
-            if keyword in headline_lower:
-                bullish_count += 1
-                break
-        for keyword in keywords.get("bearish", []):
-            if keyword in headline_lower:
-                bearish_count += 1
-                break
-    
-    # Calculate sentiment (-1 to 1)
-    total = bullish_count + bearish_count
-    if total == 0:
-        return 0.0
-    elif bullish_count > bearish_count:
-        return (bullish_count - bearish_count) / total  # Positive = bullish
+    # Weighted average
+    if scores and weights:
+        total_weight = sum(weights)
+        combined = sum(s * w for s, w in zip(scores, weights)) / total_weight
     else:
-        return (bearish_count - bullish_count) / total  # Negative = bearish
+        combined = 0.5
+    
+    result["combined_sentiment"] = combined
+    result["passes_threshold"] = combined >= RISK_CAPS["sentiment_threshold"]
+    
+    logger.info(f"  {ticker}: combined sentiment = {combined:.2f}, passes = {result['passes_threshold']}")
+    
+    return result
 
-def detect_unusual_options_activity(ticker, volume, oi, iv):
-    """
-    Detect unusual options activity
-    Volume spike, OI spike, IV spike
-    """
-    # Mock data (would fetch from API)
-    historical_volume = 100000  # Normal daily volume
-    historical_oi = 1000  # Normal open interest
-    historical_iv = 0.25  # Normal implied volatility (25%)
-    
-    # Calculate ratios
-    volume_ratio = volume / historical_volume if historical_volume > 0 else 0.0
-    oi_ratio = oi / historical_oi if historical_oi > 0 else 0.0
-    iv_ratio = iv / historical_iv if historical_iv > 0 else 0.0
-    
-    # Check thresholds
-    unusual_flags = []
-    if volume_ratio >= RISK_CAPS["min_volume_spike"]:
-        unusual_flags.append("volume_spike")
-        logger.info(f"Unusual Volume: {ticker} ({volume_ratio:.1f}x normal)")
-    if oi_ratio >= RISK_CAPS["min_oi_spike"]:
-        unusual_flags.append("oi_spike")
-        logger.info(f"Unusual OI: {ticker} ({oi_ratio:.1f}x normal)")
-    if iv_ratio >= RISK_CAPS["min_iv_spike"]:
-        unusual_flags.append("iv_spike")
-        logger.info(f"Unusual IV: {ticker} ({iv_ratio:.1f}x normal)")
-    
-    unusual_score = len(unusual_flags) / 3  # Normalize to 0-1
-    return unusual_score
-
-def screen_penny_stocks(ticker, price, market_cap, volume, bid_spread):
-    """
-    Screen penny stocks based on liquidity, spread, price, market cap
-    Returns True if stock passes screener, False otherwise
-    """
-    # Market cap check
-    if market_cap < RISK_CAPS["min_market_cap_usd"]:
-        logger.debug(f"Skipping {ticker}: market cap ${market_cap/1000000:.0f}B < ${RISK_CAPS['min_market_cap_usd']/1000000:.0f}B")
-        return False
-    if market_cap > RISK_CAPS["max_market_cap_usd"]:
-        logger.debug(f"Skipping {ticker}: market cap ${market_cap/1000000:.0f}B > ${RISK_CAPS['max_market_cap_usd']/1000000:.0f}B")
-        return False
-    
-    # Price check
-    if price < RISK_CAPS["min_price_usd"] or price > RISK_CAPS["max_price_usd"]:
-        logger.debug(f"Skipping {ticker}: price ${price:.2f} outside range ${RISK_CAPS['min_price_usd']:.2f}-${RISK_CAPS['max_price_usd']:.2f}")
-        return False
-    
-    # Volume check
-    if volume < RISK_CAPS["min_liquidity_usd"]:
-        logger.debug(f"Skipping {ticker}: volume ${volume:.0f} < ${RISK_CAPS['screener']['min_volume_usd']:.0f}")
-        return False
-    
-    # Spread check
-    if bid_spread > RISK_CAPS["screener"]["max_spread_pct"]:
-        logger.debug(f"Skipping {ticker}: spread {bid_spread:.1f}% > {RISK_CAPS['screener']['max_spread_pct']}%")
-        return False
-    
-    logger.info(f"Passed screener: {ticker} (cap: ${market_cap/1000000:.0f}B, price: ${price:.2f}, volume: ${volume:.0f}, spread: {bid_spread:.1f}%)")
-    return True
-
-def find_best_stocks(stock_data, min_score=0.6):
-    """
-    Find best stocks based on sentiment, news, unusual activity
-    """
-    best_stocks = []
-    
-    for stock in stock_data:
-        ticker = stock.get("ticker", "")
-        sentiment_score = stock.get("sentiment_score", 0.0)
-        news_score = stock.get("news_score", 0.0)
-        unusual_score = stock.get("unusual_score", 0.0)
-        
-        # Combined score (sentiment + news + unusual activity)
-        # Higher is better for trading
-        combined_score = (sentiment_score * 0.4) + (news_score * 0.4) + (unusual_score * 0.2)
-        
-        if combined_score >= min_score:
-            if screen_penny_stocks(
-                ticker=ticker,
-                price=stock.get("price", 1.0),
-                market_cap=stock.get("market_cap", 0),
-                volume=stock.get("volume", 0),
-                bid_spread=stock.get("bid_spread", 0)
-            ):
-                best_stocks.append(stock)
-                logger.debug(f"Best stock: {ticker} (combined: {combined_score:.2f}, sentiment: {sentiment_score:.2f}, news: {news_score:.2f}, unusual: {unusual_score:.2f})")
-    
-    logger.info(f"Found {len(best_stocks)} best stocks (score >= {min_score})")
-    return best_stocks
 
 def optimize_stock_hunter_strategy(bankroll, max_pos_usd, mode="shadow"):
-    """
-    Main function for Phase 3: Stock Hunter
-    """
+    """Main function for Phase 3: Stock Hunter"""
     logger.info("=" * 60)
-    logger.info("PHASE 3: STOCK HUNTER")
+    logger.info("PHASE 3: STOCK HUNTER (REAL APIs)")
     logger.info(f"Mode: {mode}")
     logger.info(f"Bankroll: ${bankroll:.2f}")
     logger.info(f"Max position: ${max_pos_usd:.2f}")
+    logger.info(f"Target tickers: {TARGET_TICKERS}")
     logger.info("=" * 60)
     
-    # Mock stock data (would fetch from APIs)
-    mock_stock_data = [
-        {
-            "ticker": "AAPL",
-            "name": "Apple Inc.",
-            "price": 1.75,
-            "market_cap": 2750000000000,
-            "volume": 50000000,
-            "bid_spread": 0.01,
-            "sentiment_score": 0.65,  # Moderate bullish
-            "news_score": 0.70,  # Slightly bullish (beat earnings)
-            "unusual_score": 0.30  # Slightly elevated options activity
-        },
-        {
-            "ticker": "TSLA",
-            "name": "Tesla, Inc.",
-            "price": 0.85,
-            "market_cap": 2750000000000,
-            "volume": 120000000,
-            "bid_spread": 0.02,
-            "sentiment_score": 0.80,  # Very bullish (Reddit hype)
-            "news_score": 0.85,  # Very bullish (beat expectations)
-            "unusual_score": 0.45  # Elevated options activity (EV calls)
-        },
-        {
-            "ticker": "NVDA",
-            "name": "NVIDIA Corporation",
-            "price": 2.50,
-            "market_cap": 2200000000000,
-            "volume": 80000000,
-            "bid_spread": 0.01,
-            "sentiment_score": 0.90,  # Extremely bullish (AI boom)
-            "news_score": 0.80,  # Bullish (beat estimates)
-            "unusual_score": 0.20  # Normal options activity
-        },
-        {
-            "ticker": "GME",
-            "name": "GameStop Corp.",
-            "price": 1.20,
-            "market_cap": 13000000000,
-            "volume": 5000000,
-            "bid_spread": 0.05,
-            "sentiment_score": 0.85,  # Very bullish (Reddit meme stock)
-            "news_score": 0.60,  # Neutral
-            "unusual_score": 0.80  # Extremely elevated (Reddit hype, short squeeze)
-        },
-        {
-            "ticker": "AMC",
-            "name": "AMC Entertainment Holdings Inc.",
-            "price": 2.50,
-            "market_cap": 13000000000,
-            "volume": 3000000,
-            "bid_spread": 0.10,
-            "sentiment_score": 0.60,  # Slightly bearish
-            "news_score": 0.50,  # Bearish
-            "unusual_score": 0.10  # Normal options activity
-        },
-        {
-            "ticker": "BTC-USD",
-            "name": "Bitcoin USD",
-            "price": 35000.00,
-            "market_cap": 650000000000,
-            "volume": 25000000000,
-            "bid_spread": 0.00,
-            "sentiment_score": 0.75,  # Bullish (institutional adoption)
-            "news_score": 0.80,  # Bullish (ETF approval)
-            "unusual_score": 0.00  # No options data
-        }
-    ]
+    # Analyze all target tickers
+    results = []
+    for ticker in TARGET_TICKERS:
+        try:
+            analysis = analyze_ticker(ticker)
+            results.append(analysis)
+            time.sleep(0.5)  # Rate limiting
+        except Exception as e:
+            logger.error(f"Error analyzing {ticker}: {e}")
     
-    logger.info(f"Loaded {len(mock_stock_data)} stock candidates")
+    # Filter to passing stocks
+    passing = [r for r in results if r.get("passes_threshold")]
     
-    # Find best stocks
-    min_score_threshold = RISK_CAPS["sentiment_threshold"]
-    best_stocks = find_best_stocks(mock_stock_data, min_score=min_score_threshold)
+    logger.info("=" * 60)
+    logger.info("RESULTS")
+    logger.info("=" * 60)
+    logger.info(f"Tickers analyzed: {len(results)}")
+    logger.info(f"Passing threshold: {len(passing)}")
     
-    logger.info(f"Found {len(best_stocks)} high-conviction stocks")
+    # Sort by combined sentiment
+    passing.sort(key=lambda x: x.get("combined_sentiment", 0), reverse=True)
     
     # Calculate optimal order size
-    if len(best_stocks) > 0:
-        optimal_size = bankroll / len(best_stocks)
+    if len(passing) > 0:
+        optimal_size = min(bankroll / len(passing), max_pos_usd)
     else:
         optimal_size = 0.0
     
-    optimal_size = max(optimal_size, 0.01)
-    optimal_size = min(optimal_size, max_pos_usd)
-    
-    logger.info(f"Optimal order size: ${optimal_size:.2f} per stock")
-    
-    # Generate orders (in shadow mode for now)
+    # Generate orders
     orders = []
-    total_volume = 0.0
-    
-    for stock in best_stocks:
-        ticker = stock.get("ticker", "")
-        order_side = "buy"  # Always buy for stock hunter (momentum trading)
-        order_price = stock.get("price", 1.0)
+    for stock in passing[:5]:  # Top 5 only
+        ticker = stock.get("ticker")
+        price = stock.get("price")
         
-        # Risk check
-        if optimal_size < 0.01:
-            logger.debug(f"Skipping {ticker}: size too small")
+        if not price:
+            logger.warning(f"Skipping {ticker}: no price data")
             continue
         
-        # Create order
         order = {
             "ticker": ticker,
-            "side": order_side,
-            "size": optimal_size,
-            "price": order_price,
-            "sentiment_score": stock.get("sentiment_score", 0.0),
-            "news_score": stock.get("news_score", 0.0),
-            "unusual_score": stock.get("unusual_score", 0.0),
+            "side": "buy",
+            "size": round(optimal_size, 2),
+            "price": price,
+            "sentiment": round(stock.get("combined_sentiment", 0), 2),
             "mode": mode,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
-        
         orders.append(order)
-        total_volume += optimal_size
+        logger.info(f"Order: {ticker} ${optimal_size:.2f} @ ${price:.2f} (sentiment: {order['sentiment']:.2f})")
     
     # Summary
     logger.info("=" * 60)
     logger.info("SUMMARY")
     logger.info("=" * 60)
-    logger.info(f"Stocks analyzed: {len(mock_stock_data)}")
-    logger.info(f"Best stocks: {len(best_stocks)}")
     logger.info(f"Total orders: {len(orders)}")
-    logger.info(f"Total volume: ${total_volume:.2f}")
-    
-    if best_stocks:
-        best_stock = max(best_stocks, key=lambda x: x.get("sentiment_score", 0) + x.get("news_score", 0) if isinstance(x, dict) else 0)
-        logger.info(f"Best stock: {best_stock.get('ticker')} (combined score: {(best_stock.get('sentiment_score', 0) + best_stock.get('news_score', 0)):.2f})")
-    
-    logger.info("=" * 60)
+    if orders:
+        logger.info(f"Top pick: {orders[0]['ticker']} (sentiment: {orders[0]['sentiment']:.2f})")
     
     # Generate proof
     from runner import generate_proof
@@ -378,31 +351,34 @@ def optimize_stock_hunter_strategy(bankroll, max_pos_usd, mode="shadow"):
         "bankroll": bankroll,
         "max_pos_usd": max_pos_usd,
         "data": {
-            "orders": orders,
-            "summary": {
-                "total_stocks": len(mock_stock_data),
-                "best_stocks": len(best_stocks),
-                "total_orders": len(orders),
-                "total_volume": total_volume,
-                "best_stock": best_stocks[0].get("ticker") if best_stocks else None
-            }
+            "results": results,
+            "orders": orders
         },
-        "risk_caps": RISK_CAPS
+        "risk_caps": RISK_CAPS,
+        "apis": {
+            "finnhub": bool(FINNHUB_API_KEY),
+            "alpha_vantage": bool(ALPHA_VANTAGE_API_KEY),
+            "massive": bool(MASSIVE_API_KEY),
+            "marketaux": bool(MARKETAUX_API_KEY)
+        }
     }
     
     generate_proof(proof_id, proof_data)
-    
     logger.info(f"Proof: {proof_id}")
     
     return len(orders)
 
+
 def main():
     parser = argparse.ArgumentParser(description="Stock Hunter - Phase 3")
-    parser.add_argument("--mode", choices=["shadow", "real-live"], default="shadow", help="Execution mode")
-    parser.add_argument("--bankroll", type=float, default=1000.0, help="Bankroll in USD")
-    parser.add_argument("--max-pos", type=float, default=100.0, help="Max position size in USD")
-    parser.add_argument("--verbose", action="store_true", help="Verbose output")
+    parser.add_argument("--mode", choices=["shadow", "micro-live", "real-live"], default="shadow")
+    parser.add_argument("--bankroll", type=float, default=100.0)
+    parser.add_argument("--max-pos", type=float, default=10.0)
+    parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
+    
+    if args.verbose:
+        logging.getLogger().setLevel(logging.DEBUG)
     
     result = optimize_stock_hunter_strategy(
         mode=args.mode,
@@ -410,10 +386,8 @@ def main():
         max_pos_usd=args.max_pos
     )
     
-    logger.info("=" * 60)
-    logger.info(f"Exit code: {result}")
-    
     return result
 
+
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

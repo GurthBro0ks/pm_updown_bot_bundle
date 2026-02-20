@@ -17,7 +17,9 @@ build/
 *.crt
 .env
 .env.local
+*.env
 secrets.json
+config/*.env
 
 # Logs
 logs/

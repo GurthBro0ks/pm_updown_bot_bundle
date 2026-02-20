@@ -241,7 +241,7 @@ def run_phase3_stock_hunter(mode, bankroll, max_pos_usd):
 
 def main():
     parser = argparse.ArgumentParser(description="Multi-Venue Runner - Shipping Mode")
-    parser.add_argument("--mode", choices=["shadow", "real-live"], default="shadow", help="Execution mode")
+    parser.add_argument("--mode", choices=["shadow", "micro-live", "real-live"], default="shadow", help="Execution mode (micro-live = real trades with risk gates)")
     parser.add_argument("--phase", choices=["phase1", "phase2", "phase3", "all"], default="all", help="Phase to execute")
     parser.add_argument("--bankroll", type=float, default=100.0, help="Bankroll in USD")
     parser.add_argument("--max-pos", type=float, default=10.0, help="Max position size in USD")

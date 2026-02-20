@@ -19,8 +19,51 @@ from runner import fetch_kalshi_markets, generate_proof
 
 # Stub for missing function
 def check_micro_live_gates(market, size, price, risk_caps, venue):
-    """Placeholder for micro-live gates check"""
-    return True, []
+    """
+    Micro-live risk gates - must pass ALL to execute real trades
+    
+    Returns: (passed: bool, violations: list)
+    """
+    violations = []
+    
+    # Gate 1: Position size limit
+    if size > risk_caps.get("max_pos_usd", 10):
+        violations.append(f"Size ${size:.2f} > max ${risk_caps['max_pos_usd']}")
+    
+    # Gate 2: Minimum liquidity
+    liquidity = market.get("volume_usd", 0) or market.get("liquidity", 0)
+    min_liq = risk_caps.get("liquidity_min_usd", 1000)
+    if liquidity < min_liq:
+        violations.append(f"Liquidity ${liquidity:.0f} < min ${min_liq}")
+    
+    # Gate 3: Edge after fees
+    edge = market.get("edge_pct", 0) or market.get("expected_edge_pct", 0)
+    min_edge = risk_caps.get("edge_after_fees_pct", 0.5)
+    if edge < min_edge:
+        violations.append(f"Edge {edge:.1f}% < min {min_edge}%")
+    
+    # Gate 4: Market end time (must be > 24h away for Kalshi)
+    end_time = market.get("close_time") or market.get("expiration_date")
+    if end_time:
+        try:
+            from datetime import datetime
+            if isinstance(end_time, str):
+                end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+            else:
+                end_dt = end_time
+            hours_left = (end_dt - datetime.now(end_dt.tzinfo)).total_seconds() / 3600
+            min_hours = risk_caps.get("market_end_hrs", 24)
+            if hours_left < min_hours:
+                violations.append(f"Market ends in {hours_left:.1f}h < min {min_hours}h")
+        except:
+            pass  # If we can't parse time, allow it
+    
+    # Gate 5: Price sanity (not too extreme)
+    if price < 0.02 or price > 0.98:
+        violations.append(f"Price {price:.2f} too extreme")
+    
+    passed = len(violations) == 0
+    return passed, violations
 
 # Load environment
 from dotenv import load_dotenv
