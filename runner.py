@@ -4,6 +4,8 @@ Multi-Venue Runner - Shipping Mode
 Phase 1: Kalshi Optimization (Complete)
 Phase 2: SEF Spot Trading (Complete)
 Phase 3: Stock Hunter (In Progress)
+
+Configuration centralized in config.py
 """
 
 import argparse
@@ -22,10 +24,329 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
 
+# Import centralized config
+from config import (
+    RISK_CAPS, VENUE_CONFIGS, PHASES, MEME_TICKERS,
+    KELLY_FRAC_SHADOW, KELLY_FRAC_LIVE,
+    PROOF_DIR, PAPER_BALANCE_FILE, TRADE_LOG_FILE,
+    FINNHUB_API_KEY, is_phase_enabled, get_risk_cap
+)
+
 # Strategy imports
 from strategies import kalshi_optimize as kalshi_opt_module
 from strategies import sef_spot_trading as sef_opt_module
 from strategies import stock_hunter as stock_hunter_module
+from strategies import airdrop_farmer as airdrop_farmer_module
+from strategies import weather_signals
+from strategies import ibkr_forecast
+
+# PnL Database
+from utils.pnl_database import record_trade, snapshot_equity
+
+# Rotation Manager (2026 Playbook)
+try:
+    from utils.rotation_manager import RotationManager
+    ROTATION_MANAGER = RotationManager()
+except:
+    ROTATION_MANAGER = None
+
+def fetch_live_prices(tickers: list) -> dict:
+    """Fetch current stock prices from Finnhub API.
+
+    Args:
+        tickers: List of stock ticker symbols (e.g., ['AAPL', 'TSLA'])
+
+    Returns:
+        Dict mapping ticker -> current price. Missing tickers excluded.
+    """
+    if not FINNHUB_API_KEY:
+        logging.warning("[EXIT] FINNHUB_API_KEY not set, cannot fetch live prices")
+        return {}
+
+    prices = {}
+    for ticker in tickers:
+        try:
+            url = f"https://finnhub.io/api/v1/quote?symbol={ticker}&token={FINNHUB_API_KEY}"
+            resp = requests.get(url, timeout=5)
+            data = resp.json()
+            # Finnhub response: {"c": current, "h": high, "l": low, "o": open, "pc": prev_close, "t": timestamp}
+            if data.get("c") and data["c"] > 0:
+                prices[ticker] = data["c"]
+                logging.debug(f"[EXIT] {ticker}: fetched ${data['c']:.2f}")
+        except Exception as e:
+            logging.warning(f"[EXIT] Failed to fetch {ticker}: {e}")
+    return prices
+
+# Paper Money Tracker (PAPER_BALANCE_FILE imported from config.py)
+
+class PaperMoneyTracker:
+    """Track virtual trades with $100 starting balance"""
+    
+    STARTING_BALANCE = 100.00
+    
+    def __init__(self):
+        self.cash = self.STARTING_BALANCE
+        self.positions = []  # [{"venue": "stock", "ticker": "AAPL", "shares": 0.1, "entry_price": 272.14, "size_usd": 10.0}]
+        self.trades = []  # [{"time": "...", "action": "buy/sell", "ticker": "...", "shares": ..., "price": ..., "pnl": ...}]
+        self.load()
+    
+    def load(self):
+        """Load balance from file"""
+        if PAPER_BALANCE_FILE.exists():
+            try:
+                data = json.loads(PAPER_BALANCE_FILE.read_text())
+                self.cash = data.get("cash", self.STARTING_BALANCE)
+                self.positions = data.get("positions", [])
+                self.trades = data.get("trades", [])
+            except:
+                self.cash = self.STARTING_BALANCE
+                self.positions = []
+                self.trades = []
+    
+    def save(self):
+        """Save balance to file"""
+        data = {
+            "cash": self.cash,
+            "positions": self.positions,
+            "trades": self.trades,
+            "last_updated": datetime.now(timezone.utc).isoformat()
+        }
+        PAPER_BALANCE_FILE.write_text(json.dumps(data, indent=2))
+    
+    def reset(self):
+        """Reset to starting balance"""
+        self.cash = self.STARTING_BALANCE
+        self.positions = []
+        self.trades = []
+        self.save()
+        logger.info(f"Paper balance RESET to ${self.cash:.2f}")
+    
+    def can_afford(self, size_usd):
+        """Check if we can afford a trade"""
+        return self.cash >= size_usd
+    
+    def execute_buy(self, venue, ticker, size_usd, price):
+        """Execute a virtual BUY"""
+        if not self.can_afford(size_usd):
+            logger.warning(f"[PAPER] Cannot afford {ticker}: need ${size_usd:.2f}, have ${self.cash:.2f}")
+            return False
+        
+        shares = size_usd / price
+        self.cash -= size_usd
+        self.positions.append({
+            "venue": venue,
+            "ticker": ticker,
+            "shares": shares,
+            "entry_price": price,
+            "size_usd": size_usd,
+            "entry_time": datetime.now(timezone.utc).isoformat()
+        })
+        self.trades.append({
+            "time": datetime.now(timezone.utc).isoformat(),
+            "action": "buy",
+            "venue": venue,
+            "ticker": ticker,
+            "shares": shares,
+            "price": price,
+            "size_usd": size_usd
+        })
+        self.save()
+        # Record trade to SQLite database
+        venue_to_phase = {"kalshi": "kalshi", "sef": "crypto", "stock": "stocks", "airdrop": "airdrop"}
+        phase = venue_to_phase.get(venue, venue)
+        record_trade(phase, ticker, "BUY", price, size_usd)
+        logger.info(f"[PAPER] BUY {ticker}: {shares:.4f} @ ${price:.2f} = ${size_usd:.2f} | Cash: ${self.cash:.2f}")
+        return True
+
+    def execute_sell(self, venue, ticker, shares, price):
+        """Execute a virtual SELL - calculates P&L"""
+        # Find position
+        pos = None
+        for p in self.positions:
+            if p["ticker"] == ticker and p["venue"] == venue:
+                pos = p
+                break
+        
+        if not pos:
+            logger.warning(f"[PAPER] No position found for {ticker}")
+            return False
+        
+        # Calculate P&L
+        cost = pos["shares"] * pos["entry_price"]
+        proceeds = shares * price
+        pnl = proceeds - cost
+        
+        self.cash += proceeds
+        self.positions = [p for p in self.positions if not (p["ticker"] == ticker and p["venue"] == venue)]
+        
+        self.trades.append({
+            "time": datetime.now(timezone.utc).isoformat(),
+            "action": "sell",
+            "venue": venue,
+            "ticker": ticker,
+            "shares": shares,
+            "price": price,
+            "size_usd": proceeds,
+            "pnl": pnl,
+            "cost_basis": cost
+        })
+        self.save()
+        # Record trade to SQLite database
+        pnl_pct = (pnl / cost * 100) if cost > 0 else 0
+        venue_to_phase = {"kalshi": "kalshi", "sef": "crypto", "stock": "stocks", "airdrop": "airdrop"}
+        phase = venue_to_phase.get(venue, venue)
+        record_trade(phase, ticker, "EXIT", price, proceeds, pnl_usd=pnl, pnl_pct=pnl_pct)
+        logger.info(f"[PAPER] SELL {ticker}: {shares:.4f} @ ${price:.2f} = ${proceeds:.2f} | P&L: ${pnl:+.2f} | Cash: ${self.cash:.2f}")
+        return True
+
+    def get_current_value(self, prices=None):
+        """Get current portfolio value. prices = {ticker: price}"""
+        positions_value = 0.0
+        if prices:
+            for p in self.positions:
+                current_price = prices.get(p["ticker"], p["entry_price"])
+                positions_value += p["shares"] * current_price
+        else:
+            # Use entry prices if no current prices provided
+            positions_value = sum(p["shares"] * p["entry_price"] for p in self.positions)
+        return self.cash + positions_value
+    
+    def get_pnl(self, current_prices=None):
+        """Calculate total P&L from starting balance"""
+        current_value = self.get_current_value(current_prices)
+        return current_value - self.STARTING_BALANCE
+    
+    def summary(self):
+        """Get summary string"""
+        # Load from file to get latest state
+        self.load()
+        pnl = self.get_pnl()
+        return {
+            "cash": self.cash,
+            "positions": len(self.positions),
+            "total_value": self.cash + sum(p["shares"] * p["entry_price"] for p in self.positions),
+            "pnl": pnl,
+            "starting": self.STARTING_BALANCE,
+            "trades_today": len([t for t in self.trades if t["time"].startswith(datetime.now(timezone.utc).strftime("%Y-%m-%d"))])
+        }
+    
+    def check_exits(self, rotation_manager=None, current_prices=None):
+        """
+        Check all positions for invalidation or profit-taking.
+        Returns list of positions to exit.
+        """
+        if not rotation_manager:
+            return []
+        
+        exits = []
+        
+        # Use entry prices if no current prices
+        if not current_prices:
+            current_prices = {p["ticker"]: p["entry_price"] for p in self.positions}
+        
+        for position in self.positions[:]:  # Copy list
+            ticker = position.get("ticker")
+            if not ticker:
+                continue
+            
+            current_price = current_prices.get(ticker, position.get("entry_price"))
+            position_with_price = position.copy()
+            position_with_price["current_price"] = current_price
+            
+            # Check invalidation
+            should_exit, reason = rotation_manager.check_invalidation(position_with_price)
+            if should_exit:
+                exits.append({
+                    "ticker": ticker,
+                    "reason": f"invalidation: {reason}",
+                    "position": position
+                })
+                continue
+            
+            # Check profit taking
+            should_take, pct = rotation_manager.check_profit_taking(position_with_price)
+            if should_take:
+                exits.append({
+                    "ticker": ticker,
+                    "reason": f"profit_take: {pct:.0%} at {((current_price/position['entry_price'])-1)*100:.0f}% gain",
+                    "position": position,
+                    "pct_to_take": pct
+                })
+        
+        return exits
+
+# Global tracker instance
+paper_money = PaperMoneyTracker()
+
+# Trade Log Functions (for entries, checks, exits)
+def log_trade_entry(entry_data: dict):
+    """Log a trade entry to trade_log.json"""
+    try:
+        if TRADE_LOG_FILE.exists():
+            with open(TRADE_LOG_FILE, 'r') as f:
+                data = json.load(f)
+        else:
+            data = {"entries": [], "checks": [], "exits": [], "metadata": {}}
+
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **entry_data
+        }
+        data["entries"].append(entry)
+
+        with open(TRADE_LOG_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+
+        logger.debug(f"Logged trade entry: {entry_data.get('ticker', 'unknown')}")
+    except Exception as e:
+        logger.warning(f"Failed to log trade entry: {e}")
+
+
+def log_trade_check(check_data: dict):
+    """Log a position check to trade_log.json"""
+    try:
+        if TRADE_LOG_FILE.exists():
+            with open(TRADE_LOG_FILE, 'r') as f:
+                data = json.load(f)
+        else:
+            data = {"entries": [], "checks": [], "exits": [], "metadata": {}}
+
+        check = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **check_data
+        }
+        data["checks"].append(check)
+
+        with open(TRADE_LOG_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+
+        logger.debug(f"Logged position check: {check_data.get('ticker', 'unknown')}")
+    except Exception as e:
+        logger.warning(f"Failed to log trade check: {e}")
+
+
+def log_trade_exit(exit_data: dict):
+    """Log a trade exit to trade_log.json"""
+    try:
+        if TRADE_LOG_FILE.exists():
+            with open(TRADE_LOG_FILE, 'r') as f:
+                data = json.load(f)
+        else:
+            data = {"entries": [], "checks": [], "exits": [], "metadata": {}}
+
+        exit_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **exit_data
+        }
+        data["exits"].append(exit_entry)
+
+        with open(TRADE_LOG_FILE, 'w') as f:
+            json.dump(data, f, indent=2)
+
+        logger.debug(f"Logged trade exit: {exit_data.get('ticker', 'unknown')}")
+    except Exception as e:
+        logger.warning(f"Failed to log trade exit: {e}")
+
 
 load_dotenv()
 
@@ -43,74 +364,8 @@ logger = logging.getLogger(__name__)
 
 CURRENT_PHASE = "shipping_mode"  # Phase 1 & 2 complete, Phase 3 in progress
 
-RISK_CAPS = {
-    "max_pos_usd": 10,
-    "max_daily_loss_usd": 50,
-    "max_open_pos": 5,
-    "max_daily_positions": 20,
-    "liquidity_min_usd": 0,
-    "edge_after_fees_pct": 0.5,
-    "market_end_hrs": 0,
-    # Phase 1 (Kalshi Optimization) specific settings
-    "kalshi_maker_only": True,
-    "kalshi_min_profit_usd": 0.10,
-    "kalshi_max_daily_trades": 10,
-    "maker_fee_usd": 0.00,
-    "kalshi_fee_pct": 0.07,
-    "kalshi_true_probability": 0.5,
-    # Phase 2 (SEF Spot Trading) specific settings
-    "sef_max_pos_usd": 20,
-    "sef_max_daily_loss_usd": 20,
-    "sef_max_open_pos": 3,
-    "sef_max_daily_trades": 15,
-    "sef_slippage_max_pct": 1.0,
-    "sef_min_spread_pct": 0.5,
-    "sef_max_daily_trades": 15,
-    "sef_gas_budget_usd": 10.0,
-    # Phase 3 (Stock Hunter) specific settings
-    "stock_max_pos_usd": 100,
-    "stock_max_daily_loss_usd": 30,
-    "stock_max_open_pos": 3,
-    "stock_max_daily_positions": 10,
-    "stock_min_liquidity_usd": 10000,
-    "stock_sentiment_threshold": 0.6,
-    "stock_min_market_cap_usd": 100000000,
-    "stock_max_market_cap_usd": 300000000,
-    "stock_min_price_usd": 1.0,
-    "stock_max_price_usd": 5.0
-}
-
-VENUE_CONFIGS = {
-    "kalshi": {
-        "name": "Kalshi",
-        "min_trade_usd": 0.01,
-        "max_trade_usd": 10.0,
-        "base_url": "https://api.elections.kalshi.com",
-        "settlement": "USDC"
-    },
-    "polymarket": {
-        "name": "Polymarket",
-        "min_trade_usd": 0.01,
-        "max_trade_usd": 100.0,
-        "fee_pct": 0.005,
-        "base_url": "https://api.thegraph.com/subgraphs/name/polymarket/markets",
-        "settlement": "USDC",
-        "wallet_address": os.getenv("POLYMARKET_WALLET"),
-        "shadow_mode": True
-    },
-    "ibkr": {
-        "name": "Interactive Brokers",
-        "min_trade_usd": 1.00,
-        "max_trade_usd": 1000.0,
-        "fee_pct": 0.01,
-        "base_url": "mock://ibkr",
-        "settlement": "USD"
-    }
-}
-
-PROOF_DIR = Path("/opt/slimy/pm_updown_bot_bundle/proofs")
-KELLY_FRAC_SHADOW = 0.25
-KELLY_FRAC_LIVE = 0.05
+# RISK_CAPS now imported from config.py
+# VENUE_CONFIGS now imported from config.py
 
 secret_file = os.getenv('KALSHI_SECRET_FILE', './kalshi_private_key.pem')
 with open(secret_file, 'rb') as f:
@@ -195,6 +450,39 @@ def run_phase1_kalshi_optimization(mode, bankroll, max_pos_usd):
         logger.error(f"Phase 1 error: {str(e)}")
         return 0
 
+def normalize_trading_pairs(trading_pairs):
+    """
+    Normalize trading pairs to list of dicts format expected by SEF module
+    
+    Args:
+        trading_pairs: Could be list of tokens or list of token pair dicts
+    
+    Returns:
+        List of token pair dicts: [{"token_in": "WBTC", "token_out": "USDC"}, ...]
+    """
+    normalized = []
+    
+    if not trading_pairs:
+        return []
+    
+    for item in trading_pairs:
+        # If already a dict with correct format
+        if isinstance(item, dict) and "token_in" in item and "token_out" in item:
+            normalized.append(item)
+            continue
+        
+        # If it's just a token string, convert to pair
+        if isinstance(item, str):
+            # Assume token -> USDC for spot trading
+            token_in = item
+            token_out = "USDC"
+            normalized.append({"token_in": token_in, "token_out": token_out})
+            continue
+    
+    logger.debug(f"Normalized {len(normalized)} trading pairs")
+    return normalized
+
+
 def run_phase2_sef_spot_trading(mode, bankroll, max_pos_usd):
     """Phase 2: SEF Spot Trading (Complete)"""
     logger.info("=" * 60)
@@ -204,12 +492,24 @@ def run_phase2_sef_spot_trading(mode, bankroll, max_pos_usd):
     logger.info(f"Max position: ${max_pos_usd:.2f}")
     logger.info("=" * 60)
     
+    # Normalize trading pairs if needed
+    # trading_pairs = [  # TODO: Configure which pairs to trade
+    # ]
+    # normalized = normalize_trading_pairs(trading_pairs)
+    
     try:
         if not hasattr(sef_opt_module, 'main'):
             logger.error("SEF spot trading module not found")
             return 0
         
-        result = sef_opt_module.main()
+        # Check if module has trading_pairs config
+        if hasattr(sef_opt_module, 'trading_pairs'):
+            pairs = sef_opt_module.trading_pairs
+        else:
+            # Default to WBTC-USDC if no config
+            pairs = [{"token_in": "WBTC", "token_out": "USDC"}]
+        
+        result = sef_opt_module.main(mode=mode, bankroll=bankroll, max_pos_usd=max_pos_usd)
         
         logger.info(f"Phase 2 complete - result: {result}")
         return 1
@@ -224,25 +524,86 @@ def run_phase3_stock_hunter(mode, bankroll, max_pos_usd):
     logger.info(f"Mode: {mode}")
     logger.info(f"Bankroll: ${bankroll:.2f}")
     logger.info(f"Max position: ${max_pos_usd:.2f}")
+
+    # BUG 4 FIX: Enforce max positions
+    current_positions = len(paper_money.positions)
+    max_positions = RISK_CAPS.get("max_open_pos", 5)
+    logger.info(f"Positions: {current_positions}/{max_positions}")
+
+    if current_positions >= max_positions:
+        logger.info(f"[ENTRY] Skipping — max positions ({max_positions}) reached. Current: {current_positions}")
+        return 0
+
+    # Fetch weather-driven commodity signals (MONITOR ONLY - don't auto-trade)
+    logger.info("Checking weather-driven commodity signals...")
+    weather_signals_list = weather_signals.fetch_weather_signals()
+    for sig in weather_signals_list:
+        logger.info(f"[WEATHER→TRADE] Consider {sig['direction']} {sig['etf']}: "
+                    f"{sig['trigger']} ({sig['strength']:.0%} confidence, region={sig['region']})")
+
     logger.info("=" * 60)
-    
+
     try:
         if not hasattr(stock_hunter_module, 'main'):
             logger.error("Stock hunter module not found")
             return 0
-        
-        result = stock_hunter_module.main()
-        
+
+        # FIXED: Pass RISK_CAPS to stock_hunter so it uses the same thresholds
+        result = stock_hunter_module.main(
+            mode=mode,
+            bankroll=bankroll,
+            max_pos_usd=max_pos_usd,
+            risk_caps=RISK_CAPS  # Sync thresholds between runner and stock_hunter
+        )
+
         logger.info(f"Phase 3 stock hunter complete - result: {result}")
         return 1
     except Exception as e:
         logger.error(f"Phase 3 error: {str(e)}")
         return 0
 
+def run_phase4_airdrop_farming(mode):
+    """Phase 4: Airdrop Farming Automation (TRACKER MODE)"""
+    logger.info("=" * 60)
+    logger.info("PHASE 4: AIRDROP FARMING (TRACKER MODE)")
+    logger.info(f"Mode: {mode}")
+    logger.info("=" * 60)
+
+    try:
+        if not hasattr(airdrop_farmer_module, 'main'):
+            logger.error("Airdrop farmer module not found")
+            return 0
+
+        result = airdrop_farmer_module.main(mode=mode)
+
+        logger.info(f"Phase 4 complete - result: {result}")
+        return 1
+    except Exception as e:
+        logger.error(f"Phase 4 error: {str(e)}")
+        return 0
+
+
+def run_phase5_ibkr_forecast(mode):
+    """Phase 5: IBKR ForecastTrader (DISABLED by default)"""
+    logger.info("=" * 60)
+    logger.info("PHASE 5: IBKR FORECASTTRADER")
+    logger.info(f"Mode: {mode}")
+    logger.info("=" * 60)
+
+    try:
+        result = ibkr_forecast.run_ibkr_forecast(mode=mode)
+
+        logger.info(f"Phase 5 complete - result: {result}")
+        return 1 if result else 0
+    except Exception as e:
+        logger.error(f"Phase 5 error: {str(e)}")
+        return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Multi-Venue Runner - Shipping Mode")
     parser.add_argument("--mode", choices=["shadow", "micro-live", "real-live"], default="shadow", help="Execution mode (micro-live = real trades with risk gates)")
-    parser.add_argument("--phase", choices=["phase1", "phase2", "phase3", "all"], default="all", help="Phase to execute")
+    parser.add_argument("--phase", choices=["phase1", "phase2", "phase3", "phase4", "phase5", "all"], default="all", help="Phase to execute")
     parser.add_argument("--bankroll", type=float, default=100.0, help="Bankroll in USD")
     parser.add_argument("--max-pos", type=float, default=10.0, help="Max position size in USD")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
@@ -257,48 +618,163 @@ def main():
     logger.info(f"BANKROLL: ${args.bankroll:.2f}")
     logger.info(f"MAX POS: ${args.max_pos:.2f}")
     logger.info("=" * 60)
-    
+
+    # Check for Discord force exits (from OpenClaw bot)
+    try:
+        from utils.discord_alerts import get_force_exits
+        force_exits = get_force_exits()
+        if force_exits:
+            logger.warning(f"[DISCORD] Force exits requested: {[e['ticker'] for e in force_exits]}")
+            # Execute force exits
+            for exit_req in force_exits:
+                ticker = exit_req.get("ticker")
+                if ticker:
+                    # Find and close position
+                    for p in paper_money.positions[:]:
+                        if p["ticker"] == ticker:
+                            current_prices = fetch_live_prices([ticker])
+                            sell_price = current_prices.get(ticker, p["entry_price"])
+                            paper_money.execute_sell(p["venue"], ticker, p["shares"], sell_price)
+                            logger.warning(f"[DISCORD] Force exit executed: {ticker} @ ${sell_price:.2f}")
+    except Exception as e:
+        logger.debug(f"[DISCORD] Signal bridge not available: {e}")
+
+    # Check rotation manager for exits (shadow mode only)
+    if args.mode == "shadow" and ROTATION_MANAGER:
+        # Get rotation recommendation
+        logger.info(f"[ROTATION] {ROTATION_MANAGER.get_rotation()}: {ROTATION_MANAGER.get_recommendation().split(chr(10))[0]}")
+
+        # Check for exits using LIVE prices (Bug 1 fix)
+        if paper_money.positions:
+            position_tickers = [p["ticker"] for p in paper_money.positions]
+            current_prices = fetch_live_prices(position_tickers)
+
+            # Fallback: if price fetch fails, use entry_price (safe - won't trigger false exits)
+            for p in paper_money.positions:
+                if p["ticker"] not in current_prices:
+                    current_prices[p["ticker"]] = p["entry_price"]
+                    logger.warning(f"[EXIT] Using entry price for {p['ticker']} (live fetch failed)")
+
+            # Log PnL for each position
+            for p in paper_money.positions:
+                ticker = p["ticker"]
+                entry = p["entry_price"]
+                current = current_prices.get(ticker, entry)
+                pnl_pct = (current - entry) / entry * 100
+                logger.info(f"[EXIT] {ticker}: entry=${entry:.2f} current=${current:.2f} PnL={pnl_pct:+.1f}%")
+
+            exits = paper_money.check_exits(ROTATION_MANAGER, current_prices)
+        else:
+            exits = []
+
+        if exits:
+            logger.warning(f"[ROTATION] {len(exits)} positions to exit:")
+            for exit_info in exits:
+                logger.warning(f"  - {exit_info['ticker']}: {exit_info['reason']}")
+                # Execute exit
+                position = exit_info["position"]
+                pct = exit_info.get("pct_to_take", 1.0)
+
+                # Calculate shares to sell
+                shares_to_sell = position["shares"] * pct
+                if shares_to_sell > 0:
+                    # Use live price if available, otherwise entry price
+                    sell_price = current_prices.get(position["ticker"], position["entry_price"])
+                    paper_money.execute_sell(
+                        position["venue"],
+                        position["ticker"],
+                        shares_to_sell,
+                        sell_price
+                    )
+
     results = {}
-    
+
+    # Phase enable/disable checks (from config.py)
+    phase1_enabled = is_phase_enabled("phase1_kalshi")
+    phase2_enabled = is_phase_enabled("phase2_sef")
+    phase3_enabled = is_phase_enabled("phase3_stock_hunter")
+    phase4_enabled = is_phase_enabled("phase4_airdrop")
+    phase5_enabled = is_phase_enabled("phase5_ibkr")
+
     if args.phase == "phase1" or args.phase == "all":
-        logger.info("Starting Phase 1: Kalshi Optimization")
-        result_phase1 = run_phase1_kalshi_optimization(
-            mode=args.mode,
-            bankroll=args.bankroll,
-            max_pos_usd=args.max_pos
-        )
-        results["phase1"] = result_phase1
+        if not phase1_enabled:
+            logger.info("Phase 1 (Kalshi) disabled in config - skipping")
+            results["phase1"] = 0
+        else:
+            logger.info("Starting Phase 1: Kalshi Optimization")
+            result_phase1 = run_phase1_kalshi_optimization(
+                mode=args.mode,
+                bankroll=args.bankroll,
+                max_pos_usd=args.max_pos
+            )
+            results["phase1"] = result_phase1
     else:
         results["phase1"] = 0
-    
+
     if args.phase == "phase2" or args.phase == "all":
-        logger.info("Starting Phase 2: SEF Spot Trading")
-        result_phase2 = run_phase2_sef_spot_trading(
-            mode=args.mode,
-            bankroll=args.bankroll,
-            max_pos_usd=args.max_pos
-        )
-        results["phase2"] = result_phase2
+        if not phase2_enabled:
+            logger.info("Phase 2 (SEF) disabled in config - skipping")
+            results["phase2"] = 0
+        else:
+            logger.info("Starting Phase 2: SEF Spot Trading")
+            result_phase2 = run_phase2_sef_spot_trading(
+                mode=args.mode,
+                bankroll=args.bankroll,
+                max_pos_usd=args.max_pos
+            )
+            results["phase2"] = result_phase2
     else:
         results["phase2"] = 0
-    
+
     if args.phase == "phase3" or args.phase == "all":
-        logger.info("Starting Phase 3: Stock Hunter")
-        result_phase3 = run_phase3_stock_hunter(
-            mode=args.mode,
-            bankroll=args.bankroll,
-            max_pos_usd=args.max_pos
-        )
-        results["phase3"] = result_phase3
+        if not phase3_enabled:
+            logger.info("Phase 3 (Stock Hunter) disabled in config - skipping")
+            results["phase3"] = 0
+        else:
+            logger.info("Starting Phase 3: Stock Hunter")
+            result_phase3 = run_phase3_stock_hunter(
+                mode=args.mode,
+                bankroll=args.bankroll,
+                max_pos_usd=args.max_pos
+            )
+            results["phase3"] = result_phase3
     else:
         results["phase3"] = 0
-    
+
+    if args.phase == "phase4" or args.phase == "all":
+        if not phase4_enabled:
+            logger.info("Phase 4 (Airdrop) disabled in config - skipping")
+            results["phase4"] = 0
+        else:
+            logger.info("Starting Phase 4: Airdrop Farming")
+            result_phase4 = run_phase4_airdrop_farming(
+                mode=args.mode
+        )
+        results["phase4"] = result_phase4
+    else:
+        results["phase4"] = 0
+
+    if args.phase == "phase5" or args.phase == "all":
+        if not phase5_enabled:
+            logger.info("Phase 5 (IBKR ForecastTrader) disabled in config - skipping")
+            results["phase5"] = 0
+        else:
+            logger.info("Starting Phase 5: IBKR ForecastTrader")
+            result_phase5 = run_phase5_ibkr_forecast(
+                mode=args.mode
+            )
+            results["phase5"] = result_phase5
+    else:
+        results["phase5"] = 0
+
     logger.info("=" * 60)
     logger.info("SUMMARY")
     logger.info("=" * 60)
     logger.info(f"Phase 1 (Kalshi): {'Success' if results['phase1'] else 'Failed'}")
     logger.info(f"Phase 2 (SEF): {'Success' if results['phase2'] else 'Failed'}")
     logger.info(f"Phase 3 (Stock Hunter): {'Success' if results['phase3'] else 'Failed'}")
+    logger.info(f"Phase 4 (Airdrop Farming): {'Success' if results['phase4'] else 'Failed'}")
+    logger.info(f"Phase 5 (IBKR ForecastTrader): {'Success' if results['phase5'] else 'Failed'}")
     logger.info("=" * 60)
     
     proof_id = f"shipping_mode_{args.phase}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
@@ -314,6 +790,23 @@ def main():
     generate_proof(proof_id, proof_data)
     logger.info(f"Proof: {proof_id}")
     
+    # Paper money summary (always shown)
+    if args.mode == "shadow":
+        paper_money.load()  # Reload to get latest trades from sub-modules
+        summary = paper_money.summary()
+        logger.info("=" * 60)
+        logger.info("PAPER MONEY TRACKER")
+        logger.info("=" * 60)
+        logger.info(f"Starting: ${summary['starting']:.2f}")
+        logger.info(f"Cash: ${summary['cash']:.2f}")
+        logger.info(f"Positions: {summary['positions']}")
+        logger.info(f"Total Value: ${summary['total_value']:.2f}")
+        logger.info(f"P&L: ${summary['pnl']:+.2f}")
+        logger.info(f"Trades Today: {summary['trades_today']}")
+        logger.info("=" * 60)
+        # Record equity snapshot to SQLite database
+        snapshot_equity(summary['cash'], summary['total_value'] - summary['cash'], summary['positions'])
+
     exit_code = 0 if (results.get('phase1', 0) or results.get('phase2', 0) or results.get('phase3', 0)) else 1
     
     logger.info(f"Exit code: {exit_code}")
