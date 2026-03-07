@@ -41,6 +41,7 @@ PHASES = {
     "phase3_stock_hunter": True,
     "phase4_airdrop": True,
     "phase5_ibkr": os.getenv("IBKR_ENABLED", "false").lower() == "true",
+    "phase6_wallet_arb": True,  # Wallet tokens + arbitrage scanner
 }
 
 # ============================================================================
@@ -55,6 +56,9 @@ RISK_CAPS = {
     "max_daily_positions": 10,
     "liquidity_min_usd": 0,
     "edge_after_fees_pct": 1.5,
+    
+    # Exit controls (mirrors rotation_config.json)
+    "max_hold_hours": 168,  # Max 7 days per position
 
     # Phase 1: Kalshi Optimization
     "kalshi_maker_only": True,

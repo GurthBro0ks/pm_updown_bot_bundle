@@ -50,6 +50,125 @@ try:
 except:
     ROTATION_MANAGER = None
 
+# Wallet Token Discovery (airdrop farming + holdings)
+try:
+    from utils.wallet_tokens import get_wallet_tokens, get_holdings_summary, enrich_with_prices
+    WALLET_TOKENS_ENABLED = True
+except ImportError as e:
+    logger.warning(f"[WALLET] Could not import wallet_tokens: {e}")
+    WALLET_TOKENS_ENABLED = False
+
+# DEX Prices & Arbitrage
+try:
+    from utils.dex_prices import (
+        get_dex_price,
+        get_token_price_by_symbol, 
+        get_cex_price, 
+        check_arbitrage_opportunity,
+        scan_for_arbitrage,
+        get_token_pairs_dexscreener,
+        POPULAR_TOKENS
+    )
+    DEX_PRICES_ENABLED = True
+except ImportError as e:
+    logger.warning(f"[DEX] Could not import dex_prices: {e}")
+    DEX_PRICES_ENABLED = False
+
+
+# ============================================================
+# WALLET & ARBITRAGE FUNCTIONS
+# ============================================================
+
+def check_wallet_holdings(verbose: bool = True) -> dict:
+    """
+    Check wallet token holdings across chains.
+    
+    Returns:
+        Summary dict with tokens and total value.
+    """
+    if not WALLET_TOKENS_ENABLED:
+        return {"error": "Wallet tokens module not available"}
+    
+    try:
+        summary = get_holdings_summary()
+        if verbose:
+            logger.info(f"[WALLET] Total holdings: ${summary.get('total_usd', 0):.2f}")
+            for chain, data in summary.get("chains", {}).items():
+                logger.info(f"[WALLET]   {chain}: ${data.get('total_usd', 0):.2f}")
+        return summary
+    except Exception as e:
+        logger.error(f"[WALLET] Failed to get holdings: {e}")
+        return {"error": str(e)}
+
+
+def check_arbitrage_for_holdings(min_spread: float = 2.0) -> list:
+    """
+    Check arbitrage opportunities for tokens in wallet.
+    
+    Args:
+        min_spread: Minimum spread percentage to report
+    
+    Returns:
+        List of arbitrage opportunities.
+    """
+    if not DEX_PRICES_ENABLED or not WALLET_TOKENS_ENABLED:
+        return []
+    
+    try:
+        # Get wallet tokens
+        summary = get_holdings_summary()
+        
+        # Extract token symbols from holdings
+        token_symbols = []
+        for chain, data in summary.get("chains", {}).items():
+            for token in data.get("tokens", []):
+                symbol = token.get("symbol", "").upper()
+                if symbol and symbol not in token_symbols:
+                    token_symbols.append(symbol)
+        
+        if not token_symbols:
+            logger.info("[ARB] No tokens in wallet to check")
+            return []
+        
+        # Check each for arbitrage
+        opportunities = []
+        for symbol in token_symbols:
+            result = check_arbitrage_opportunity(symbol, min_spread)
+            if result and result.arbitrage_opportunity:
+                opportunities.append(result)
+                logger.info(f"[ARB] 🎯 {symbol}: DEX ${result.dex_price:.4f} vs CEX ${result.cex_price:.4f} | Spread: {result.spread_percent:.2f}%")
+        
+        return opportunities
+        
+    except Exception as e:
+        logger.error(f"[ARB] Failed to check arbitrage: {e}")
+        return []
+
+
+def scan_popular_arbitrage(min_spread: float = 2.0) -> list:
+    """
+    Scan popular tokens for arbitrage opportunities.
+    
+    Args:
+        min_spread: Minimum spread percentage
+    
+    Returns:
+        List of opportunities found.
+    """
+    if not DEX_PRICES_ENABLED:
+        return []
+    
+    try:
+        return scan_for_arbitrage(POPULAR_TOKENS, min_spread)
+    except Exception as e:
+        logger.error(f"[ARB] Scan failed: {e}")
+        return []
+
+
+# ============================================================
+# MAIN TRADING FUNCTIONS
+# ============================================================
+
 def fetch_live_prices(tickers: list) -> dict:
     """Fetch current stock prices from Finnhub API.
 
@@ -125,7 +244,7 @@ class PaperMoneyTracker:
         """Check if we can afford a trade"""
         return self.cash >= size_usd
     
-    def execute_buy(self, venue, ticker, size_usd, price):
+    def execute_buy(self, venue, ticker, size_usd, price, sentiment=0.5):
         """Execute a virtual BUY"""
         if not self.can_afford(size_usd):
             logger.warning(f"[PAPER] Cannot afford {ticker}: need ${size_usd:.2f}, have ${self.cash:.2f}")
@@ -139,7 +258,8 @@ class PaperMoneyTracker:
             "shares": shares,
             "entry_price": price,
             "size_usd": size_usd,
-            "entry_time": datetime.now(timezone.utc).isoformat()
+            "entry_time": datetime.now(timezone.utc).isoformat(),
+            "sentiment": sentiment  # FIX: Save sentiment to position
         })
         self.trades.append({
             "time": datetime.now(timezone.utc).isoformat(),
@@ -154,7 +274,11 @@ class PaperMoneyTracker:
         # Record trade to SQLite database
         venue_to_phase = {"kalshi": "kalshi", "sef": "crypto", "stock": "stocks", "airdrop": "airdrop"}
         phase = venue_to_phase.get(venue, venue)
-        record_trade(phase, ticker, "BUY", price, size_usd)
+        try:
+            record_trade(phase, ticker, "BUY", price, size_usd)
+            logger.debug(f"[DB] Trade recorded: BUY {ticker} ${size_usd}")
+        except Exception as e:
+            logger.error(f"[DB] Failed to record BUY trade: {e}")
         logger.info(f"[PAPER] BUY {ticker}: {shares:.4f} @ ${price:.2f} = ${size_usd:.2f} | Cash: ${self.cash:.2f}")
         return True
 
@@ -525,14 +649,47 @@ def run_phase3_stock_hunter(mode, bankroll, max_pos_usd):
     logger.info(f"Bankroll: ${bankroll:.2f}")
     logger.info(f"Max position: ${max_pos_usd:.2f}")
 
-    # BUG 4 FIX: Enforce max positions
-    current_positions = len(paper_money.positions)
-    max_positions = RISK_CAPS.get("max_open_pos", 5)
-    logger.info(f"Positions: {current_positions}/{max_positions}")
+    # FIX: Check for exits EVERY cycle before checking new entries
+    # This ensures positions held too long are recycled
+    if paper_money.positions and ROTATION_MANAGER:
+        stock_tickers = [p["ticker"] for p in paper_money.positions if p.get("venue") == "stock"]
+        if stock_tickers:
+            logger.info("[EXIT CHECK] Fetching live prices for exit check...")
+            current_prices = fetch_live_prices(stock_tickers)
+            
+            # Fallback to entry price if live fetch fails
+            for p in paper_money.positions:
+                if p["ticker"] not in current_prices:
+                    current_prices[p["ticker"]] = p["entry_price"]
+            
+            # Check for exits (includes max_hold_hours check from rotation_config.json)
+            exits = paper_money.check_exits(ROTATION_MANAGER, current_prices)
+            
+            if exits:
+                logger.warning(f"[EXIT CHECK] {len(exits)} positions to exit:")
+                for exit_info in exits:
+                    logger.warning(f"  - {exit_info['ticker']}: {exit_info['reason']}")
+                    position = exit_info["position"]
+                    sell_price = current_prices.get(position["ticker"], position["entry_price"])
+                    paper_money.execute_sell(
+                        position["venue"],
+                        position["ticker"],
+                        position["shares"],
+                        sell_price
+                    )
+                logger.info("[EXIT CHECK] Exits completed, rechecking positions...")
+            else:
+                logger.info("[EXIT CHECK] No exits triggered")
+
+    # BUG 4 FIX: Enforce max positions (count only STOCK positions, not kalshi/SEF)
+    stock_positions = [p for p in paper_money.positions if p.get("venue") == "stock"]
+    current_positions = len(stock_positions)
+    max_positions = RISK_CAPS.get("stock_max_open_pos", 3)
+    logger.info(f"Stock Positions: {current_positions}/{max_positions}")
 
     if current_positions >= max_positions:
         logger.info(f"[ENTRY] Skipping — max positions ({max_positions}) reached. Current: {current_positions}")
-        return 0
+        return 1 # Success - max positions reached, no action needed
 
     # Fetch weather-driven commodity signals (MONITOR ONLY - don't auto-trade)
     logger.info("Checking weather-driven commodity signals...")
@@ -600,10 +757,70 @@ def run_phase5_ibkr_forecast(mode):
         return 0
 
 
+def run_phase6_wallet_arbitrage(mode, min_spread: float = 2.0):
+    """Phase 6: Wallet Tokens + Arbitrage Scanner"""
+    logger.info("=" * 60)
+    logger.info("PHASE 6: WALLET TOKENS + ARBITRAGE")
+    logger.info(f"Mode: {mode}")
+    logger.info(f"Min spread: {min_spread}%")
+    logger.info("=" * 60)
+
+    results = {"holdings": None, "arbitrage": []}
+
+    # 1. Check wallet holdings
+    if WALLET_TOKENS_ENABLED:
+        try:
+            holdings = check_wallet_holdings(verbose=True)
+            results["holdings"] = holdings
+        except Exception as e:
+            logger.error(f"[WALLET] Error: {e}")
+
+    # 2. Scan for arbitrage on held tokens
+    if DEX_PRICES_ENABLED and WALLET_TOKENS_ENABLED:
+        try:
+            opportunities = check_arbitrage_for_holdings(min_spread=min_spread)
+            results["arbitrage"] = [
+                {
+                    "token": opp.token,
+                    "dex_price": opp.dex_price,
+                    "cex_price": opp.cex_price,
+                    "spread": opp.spread_percent,
+                    "profit": opp.profit_margin
+                }
+                for opp in opportunities
+            ]
+            if opportunities:
+                logger.info(f"[ARB] Found {len(opportunities)} opportunity(ies)")
+        except Exception as e:
+            logger.error(f"[ARB] Error: {e}")
+
+    # 3. Also scan popular tokens if no wallet holdings
+    if DEX_PRICES_ENABLED and not results["arbitrage"]:
+        try:
+            popular_opps = scan_popular_arbitrage(min_spread=min_spread)
+            results["arbitrage"] = [
+                {
+                    "token": opp.token,
+                    "dex_price": opp.dex_price,
+                    "cex_price": opp.cex_price,
+                    "spread": opp.spread_percent,
+                    "profit": opp.profit_margin
+                }
+                for opp in popular_opps
+            ]
+            if popular_opps:
+                logger.info(f"[ARB] Found {len(popular_opps)} popular token opportunity(ies)")
+        except Exception as e:
+            logger.debug(f"[ARB] Popular scan error: {e}")
+
+    logger.info(f"Phase 6 complete")
+    return 1
+
+
 def main():
     parser = argparse.ArgumentParser(description="Multi-Venue Runner - Shipping Mode")
     parser.add_argument("--mode", choices=["shadow", "micro-live", "real-live"], default="shadow", help="Execution mode (micro-live = real trades with risk gates)")
-    parser.add_argument("--phase", choices=["phase1", "phase2", "phase3", "phase4", "phase5", "all"], default="all", help="Phase to execute")
+    parser.add_argument("--phase", choices=["phase1", "phase2", "phase3", "phase4", "phase5", "phase6", "all"], default="all", help="Phase to execute")
     parser.add_argument("--bankroll", type=float, default=100.0, help="Bankroll in USD")
     parser.add_argument("--max-pos", type=float, default=10.0, help="Max position size in USD")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
@@ -695,6 +912,7 @@ def main():
     phase3_enabled = is_phase_enabled("phase3_stock_hunter")
     phase4_enabled = is_phase_enabled("phase4_airdrop")
     phase5_enabled = is_phase_enabled("phase5_ibkr")
+    phase6_enabled = is_phase_enabled("phase6_wallet_arb")  # New phase
 
     if args.phase == "phase1" or args.phase == "all":
         if not phase1_enabled:
@@ -749,8 +967,31 @@ def main():
             logger.info("Starting Phase 4: Airdrop Farming")
             result_phase4 = run_phase4_airdrop_farming(
                 mode=args.mode
-        )
-        results["phase4"] = result_phase4
+            )
+            results["phase4"] = result_phase4
+
+            # Show airdrop todo after phase 4 completes
+            try:
+                from utils.airdrop_tracker import get_weekly_todo
+                todos = get_weekly_todo()
+                if todos:
+                    logger.info("=" * 60)
+                    logger.info("AIRDROP TODO - Next Actions Recommended")
+                    logger.info("=" * 60)
+                    for todo in todos[:5]:  # Show top 5
+                        logger.info(f"  [{todo['priority'].upper()}] {todo['name']}: {todo['action']}")
+                    logger.info("=" * 60)
+            except Exception as e:
+                logger.debug(f"Airdrop todo not available: {e}")
+
+            # Snapshot wallet balances after phase 4
+            try:
+                from utils.wallet_tracker import snapshot_balances
+                wallet_snapped = snapshot_balances()
+                if wallet_snapped:
+                    logger.info("Wallet balance snapshot recorded")
+            except Exception as e:
+                logger.debug(f"Wallet snapshot not available: {e}")
     else:
         results["phase4"] = 0
 
@@ -767,6 +1008,21 @@ def main():
     else:
         results["phase5"] = 0
 
+    # Phase 6: Wallet Tokens + Arbitrage
+    if args.phase == "phase6" or args.phase == "all":
+        if not phase6_enabled:
+            logger.info("Phase 6 (Wallet+Arbitrage) disabled in config - skipping")
+            results["phase6"] = 0
+        else:
+            logger.info("Starting Phase 6: Wallet Tokens + Arbitrage")
+            result_phase6 = run_phase6_wallet_arbitrage(
+                mode=args.mode,
+                min_spread=2.0
+            )
+            results["phase6"] = result_phase6
+    else:
+        results["phase6"] = 0
+
     logger.info("=" * 60)
     logger.info("SUMMARY")
     logger.info("=" * 60)
@@ -775,6 +1031,7 @@ def main():
     logger.info(f"Phase 3 (Stock Hunter): {'Success' if results['phase3'] else 'Failed'}")
     logger.info(f"Phase 4 (Airdrop Farming): {'Success' if results['phase4'] else 'Failed'}")
     logger.info(f"Phase 5 (IBKR ForecastTrader): {'Success' if results['phase5'] else 'Failed'}")
+    logger.info(f"Phase 6 (Wallet+Arbitrage): {'Success' if results.get('phase6', 0) else 'Failed'}")
     logger.info("=" * 60)
     
     proof_id = f"shipping_mode_{args.phase}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"

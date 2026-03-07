@@ -2,6 +2,8 @@
 """
 Kalshi Optimization Strategy - Phase 1 (Quick Wins)
 Maker order logic, probability-weighted edge detection, trade frequency optimization
+
+Configuration centralized in config.py
 """
 
 import argparse
@@ -14,6 +16,15 @@ from pathlib import Path
 
 # Add to path
 sys.path.insert(0, '/opt/slimy/pm_updown_bot_bundle')
+
+# Import centralized config
+from config import RISK_CAPS, KALSHI_KEY
+
+# Tiered edge thresholds based on effective fee
+# For series with fee_multiplier <= 0.035 (halved fees, effective 3.5%): 0.75%
+# For series with fee_multiplier > 0.035 (normal fees, effective 7%): 1.25%
+EDGE_THRESHOLD_LOW_FEE = 0.75   # 0.75% for halved-fee markets (S&P/Nasdaq)
+EDGE_THRESHOLD_HIGH_FEE = 1.25  # 1.25% for normal-fee markets
 
 # Import runner module
 # Local imports (avoid circular import)
@@ -39,9 +50,14 @@ def check_micro_live_gates(market, size, price, risk_caps, venue):
     if liquidity < min_liq:
         violations.append(f"Liquidity ${liquidity:.0f} < min ${min_liq}")
     
-    # Gate 3: Edge after fees
+    # Gate 3: Edge after fees (tiered based on fee_multiplier)
     edge = market.get("edge_pct", 0) or market.get("expected_edge_pct", 0)
-    min_edge = risk_caps.get("edge_after_fees_pct", 0.5)
+    fee_multiplier = market.get("fee_multiplier", 1.0)
+    effective_fee = 0.07 * fee_multiplier
+    if effective_fee <= 0.035:
+        min_edge = EDGE_THRESHOLD_LOW_FEE  # 0.75% for halved-fee markets
+    else:
+        min_edge = EDGE_THRESHOLD_HIGH_FEE  # 1.25% for normal-fee markets
     if edge < min_edge:
         violations.append(f"Edge {edge:.1f}% < min {min_edge}%")
     
@@ -123,6 +139,117 @@ def get_maker_fee(price: float) -> float:
     
     return 0.7 * price  # Taker fee (maker orders charge taker fee on fill)
 
+
+def get_taker_fee(price: float, fee_multiplier: float = 1.0) -> float:
+    """
+    Calculate taker fee for a market
+    
+    Args:
+        price: Current market price
+        fee_multiplier: Fee multiplier (1.0 for normal, 0.5 for S&P/Nasdaq markets)
+    
+    Returns:
+        Taker fee in dollars
+    """
+    base_fee = 0.7 * price  # Base taker fee is 7% of price
+    return base_fee * fee_multiplier
+
+
+def is_taker_profitable(price: float, true_price: float, fee_multiplier: float = 1.0, min_edge_pct: float = 1.0) -> bool:
+    """
+    Determine if taker order would be profitable after fees
+    
+    For S&P/Nasdaq markets with halved fees (0.5 multiplier):
+    - 7% base fee becomes 3.5% effective fee
+    - At 3.5% fee, taker orders become viable for high-confidence signals
+    
+    Args:
+        price: Current market price
+        true_price: Your estimated true probability
+        fee_multiplier: Fee multiplier (1.0 for normal, 0.5 for S&P/Nasdaq)
+        min_edge_pct: Minimum edge after fees (default 1.0%)
+    
+    Returns:
+        True if expected profit > min_edge after fees
+    """
+    # Calculate taker fee
+    taker_fee = get_taker_fee(price, fee_multiplier)
+    
+    # Calculate expected value if we're right
+    expected_value = true_price
+    
+    # Cost = price + fee
+    cost = price + taker_fee
+    
+    # Expected profit
+    expected_profit = expected_value - cost
+    
+    # Edge percentage
+    if price > 0:
+        edge_pct = (expected_profit / price) * 100
+    else:
+        edge_pct = 0
+    
+    return edge_pct >= min_edge_pct
+
+
+def find_best_taker_market(markets: list, min_edge_pct: float = 1.0) -> dict:
+    """
+    Find best market for taker orders (S&P/Nasdaq with halved fees)
+    
+    Args:
+        markets: List of Kalshi markets
+        min_edge_pct: Minimum edge after fees (default 1.0%, ignored - uses tiered thresholds)
+    
+    Returns:
+        Dictionary with market ID, price, true_price, taker_fee, edge_pct
+    """
+    best_market = None
+    best_edge = 0
+    
+    for market in markets:
+        yes_price = market.get("odds", {}).get("yes", 0.0)
+        true_price = 0.5  # Assume fair 50/50 markets unless otherwise known
+        fee_multiplier = market.get("fee_multiplier", 1.0)  # 0.5 for S&P/Nasdaq
+        
+        # Skip if no halved fees (not worth taker at 7% fee)
+        if fee_multiplier != 0.5:
+            continue
+        
+        # Apply tiered threshold based on fee_multiplier
+        # fee_multiplier=0.5 → effective fee 3.5% → use EDGE_THRESHOLD_LOW_FEE (0.75%)
+        # fee_multiplier=1.0 → effective fee 7% → use EDGE_THRESHOLD_HIGH_FEE (1.25%)
+        effective_fee = 0.07 * fee_multiplier
+        if effective_fee <= 0.035:
+            threshold = EDGE_THRESHOLD_LOW_FEE
+        else:
+            threshold = EDGE_THRESHOLD_HIGH_FEE
+        
+        # Check if taker is profitable
+        if is_taker_profitable(yes_price, true_price, fee_multiplier, threshold):
+            taker_fee = get_taker_fee(yes_price, fee_multiplier)
+            edge_pct = ((true_price - (yes_price + taker_fee)) / true_price) * 100
+            
+            if edge_pct > best_edge:
+                best_edge = edge_pct
+                best_market = {
+                    "id": market.get("id"),
+                    "price": yes_price,
+                    "true_price": true_price,
+                    "taker_fee": taker_fee,
+                    "edge_pct": edge_pct,
+                    "fee_multiplier": fee_multiplier,
+                    "threshold_used": threshold
+                }
+    
+    if best_market:
+        logger.info(f"Best taker market: {best_market['id']} @ {best_market['price']:.4f} (taker fee: {best_market['taker_fee']:.2f}¢, edge: {best_market['edge_pct']:.2f}%, threshold: {best_market['threshold_used']:.2f}%)")
+    else:
+        logger.info("No profitable taker markets found")
+    
+    return best_market
+
+
 def is_maker_profitable(price: float, true_price: float, win_prob: float, min_edge_pct: float = 0.5) -> bool:
     """
     Determine if maker order would be profitable after fees
@@ -168,7 +295,7 @@ def find_best_maker_market(markets: list, min_edge_pct: float = 0.5) -> dict:
     
     Args:
         markets: List of Kalshi markets
-        min_edge_pct: Minimum edge to justify maker order (default 0.5%)
+        min_edge_pct: Minimum edge to justify maker order (default 0.5%, ignored - uses tiered thresholds)
     
     Returns:
         Dictionary with market ID, price, true_price, maker_fee
@@ -180,23 +307,37 @@ def find_best_maker_market(markets: list, min_edge_pct: float = 0.5) -> dict:
         # Get market data
         yes_price = market.get("odds", {}).get("yes")
         true_price = 0.5  # Assume fair 50/50 markets unless otherwise known
+        fee_multiplier = market.get("fee_multiplier", 1.0)
         maker_fee = get_maker_fee(yes_price)
+        
+        # Apply tiered threshold based on fee_multiplier
+        effective_fee = 0.07 * fee_multiplier
+        if effective_fee <= 0.035:
+            threshold = EDGE_THRESHOLD_LOW_FEE
+        else:
+            threshold = EDGE_THRESHOLD_HIGH_FEE
         
         # Calculate if maker is profitable
         edge_pct = 0.0  # Initialize
-        if is_maker_profitable(yes_price, true_price, 0.6):  # 60% win prob
+        if is_maker_profitable(yes_price, true_price, 0.6, threshold):  # 60% win prob
             current_edge_pct = ((0.5 - yes_price) / yes_price) * 100
             edge_pct = current_edge_pct
             
             # Check if this market has better edge than current best
             if edge_pct > best_edge_pct:
                 best_edge_pct = edge_pct
-                best_market = market
+                best_market = {
+                    **market,
+                    "edge_pct": edge_pct,
+                    "threshold_used": threshold
+                }
         
-        logger.debug(f"Market {market.get('id')}: price={yes_price:.4f}, true=50%, edge={edge_pct:.2f}%, maker_fee={maker_fee:.2f}¢")
+        logger.debug(f"Market {market.get('id')}: price={yes_price:.4f}, true=50%, edge={edge_pct:.2f}%, threshold={threshold:.2f}%, maker_fee={maker_fee:.2f}¢")
     
     if best_market is None:
         logger.warning("No profitable maker markets found")
+    elif best_edge_pct > 0:
+        logger.info(f"Best maker market: {best_market.get('id')} @ {best_market.get('odds', {}).get('yes', 0):.4f} (edge: {best_edge_pct:.2f}%, threshold: {best_market.get('threshold_used'):.2f}%)")
     
     return best_market
 
@@ -257,6 +398,105 @@ def optimize_trade_frequency(current_frequency: int, optimal_edge_pct: float, mi
     new_frequency = min(new_frequency, min_checks_per_hour)
     
     return new_frequency
+
+
+# Market category keywords for filtering
+FINANCIAL_KEYWORDS = ['SPX', 'SP500', 'S&P', 'NASDAQ', 'NDX', 'DOW', 'DJIA', 'RUSSELL', 'VIX', 
+                      'STOCK', 'INDEX', 'FUTURES', 'EQUITY']
+ECONOMIC_KEYWORDS = ['FED', 'FOMC', 'RATE', 'CPI', 'INFLATION', 'GDP', 'UNEMPLOY', 'NFP', 
+                     'JOBS', 'EMPLOYMENT', 'RECESSION', 'TREASURY', 'YIELD', 'BOND']
+POLITICAL_KEYWORDS = ['ELECTION', 'PRESIDENT', 'CONGRESS', 'SENATE', 'HOUSE', 'GOVERNOR', 
+                      'POLITICAL', 'VOTE', 'BALLOT', 'DEMOCRAT', 'REPUBLICAN']
+WEATHER_KEYWORDS = ['WEATHER', 'TEMPERATURE', 'RAIN', 'SNOW', 'HURRICANE', 'TORNADO', 
+                    'FLOOD', 'DROUGHT', 'DEGREE', 'COLD', 'HOT']
+
+# Sports/esports to EXCLUDE
+EXCLUDE_KEYWORDS = ['SPORT', 'ESPORT', 'GAME', 'MATCH', 'TEAM', 'PLAYER', 'NBA', 'NFL', 
+                    'MLB', 'NHL', 'SOCCER', 'FOOTBALL', 'BASKETBALL', 'BASEBALL', 'HOCKEY',
+                    'KXMV', 'MULTIGAME', 'VIDEO GAME', 'E-SPORT', 'ESL', 'TOURNAMENT']
+
+
+def filter_markets_by_category(markets: list, include_categories: list = None) -> list:
+    """
+    Filter markets to only include specified categories.
+    
+    Priority 0 fix: Bot was scanning only esports/sports markets which have:
+    - Low liquidity (wide spreads, thin books)
+    - High variance (esports outcomes are noisy)
+    - NOT where Kalshi's real volume lives
+    
+    Kalshi's $110M+ daily volume concentrates in:
+    - S&P 500 range markets (halved fee multiplier: 0.035 vs 0.07)
+    - Nasdaq-100 range markets (same halved fees)
+    - Fed rate decision markets
+    - CPI/inflation markets
+    - Presidential/political markets
+    - Weather event markets
+    
+    Args:
+        markets: List of markets with 'id' (ticker) and 'question' fields
+        include_categories: Categories to include ['financial', 'economic', 'political', 'weather']
+    
+    Returns:
+        Filtered markets in desired categories
+    """
+    if include_categories is None:
+        include_categories = ['financial', 'economic', 'political', 'weather']
+    
+    filtered = []
+    for market in markets:
+        ticker = market.get('id', '').upper()
+        question = market.get('question', '').upper()
+        text = f"{ticker} {question}"
+        
+        # First, exclude sports/esports
+        excluded = False
+        for keyword in EXCLUDE_KEYWORDS:
+            if keyword in text:
+                logger.debug(f"Excluding sports/esports market: {ticker}")
+                excluded = True
+                break
+        
+        if excluded:
+            continue
+        
+        # Then, include only specified categories
+        included = False
+        if 'financial' in include_categories:
+            for keyword in FINANCIAL_KEYWORDS:
+                if keyword in text:
+                    included = True
+                    market['category'] = 'financial'
+                    market['fee_multiplier'] = 0.5  # Halved fees for S&P/Nasdaq
+                    break
+        
+        if not included and 'economic' in include_categories:
+            for keyword in ECONOMIC_KEYWORDS:
+                if keyword in text:
+                    included = True
+                    market['category'] = 'economic'
+                    break
+        
+        if not included and 'political' in include_categories:
+            for keyword in POLITICAL_KEYWORDS:
+                if keyword in text:
+                    included = True
+                    market['category'] = 'political'
+                    break
+        
+        if not included and 'weather' in include_categories:
+            for keyword in WEATHER_KEYWORDS:
+                if keyword in text:
+                    included = True
+                    market['category'] = 'weather'
+                    break
+        
+        if included:
+            filtered.append(market)
+    
+    logger.info(f"Category filter: {len(filtered)} markets from {len(markets)} (categories: {include_categories})")
+    return filtered
+
 
 def filter_low_liquidity_markets(markets: list, min_liquidity_usd: float = 0.0, max_trades: int = 20) -> list:
     """
@@ -366,6 +606,14 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     
     logger.info(f"Fetched {len(markets)} markets")
     
+    # PRIORITY 0 FIX: Filter by category (financial/political/economic/weather only)
+    # Exclude sports/esports which have low liquidity and high variance
+    markets = filter_markets_by_category(markets, include_categories=['financial', 'economic', 'political', 'weather'])
+    
+    if not markets:
+        logger.warning("No markets in target categories (financial/political/economic/weather)")
+        return 0
+    
     # Filter for liquidity
     markets = filter_low_liquidity_markets(markets, min_liquidity_usd=0.0, max_trades=20)
     
@@ -380,6 +628,13 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     if best_maker_market:
         logger.info(f"Best maker market: {best_maker_market.get('id')} at {best_maker_market.get('odds', {}).get('yes', 0.0):.4f} (maker fee: {get_maker_fee(best_maker_market.get('odds', {}).get('yes', 0.0)):.2f}¢)")
     
+    # PRIORITY 1A: Find best taker markets (S&P/Nasdaq with halved fees)
+    logger.info("Finding best taker markets (S&P/Nasdaq with 3.5% fee)...")
+    best_taker_market = find_best_taker_market(markets, min_edge_pct=1.0)  # 1% min edge after fees
+    
+    if best_taker_market:
+        logger.info(f"Best taker market: {best_taker_market['id']} @ {best_taker_market['price']:.4f} (3.5% fee, edge: {best_taker_market['edge_pct']:.2f}%)")
+    
     # Track metrics
     total_trades = 0
     total_filled = 0
@@ -390,43 +645,56 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
         market_id = market.get("id")
         yes_price = market.get("odds", {}).get("yes", 0.0)
         true_price = 0.5  # Assume fair 50/50 markets
+        fee_multiplier = market.get("fee_multiplier", 1.0)
         
         # Calculate edge after fees
         edge_after_fees_pct = get_edge_after_fees(market)
         
-        # Check if this market is a best maker market
-        is_best_maker = (best_maker_market and market_id == best_maker_market.get("id"))
+        # Determine threshold based on fee_multiplier for logging
+        effective_fee = 0.07 * fee_multiplier
+        if effective_fee <= 0.035:
+            threshold = EDGE_THRESHOLD_LOW_FEE
+        else:
+            threshold = EDGE_THRESHOLD_HIGH_FEE
         
-        # Only trade if edge after fees is sufficient
-        if edge_after_fees_pct < risk_caps["edge_after_fees_pct"]:
-            logger.debug(f"Market {market_id}: edge={edge_after_fees_pct:.2f}% < {risk_caps['edge_after_fees_pct']}%, too low")
+        # Log trade decision with threshold
+        logger.info(f"[KALSHI] {market_id}: edge={edge_after_fees_pct:.4f} threshold={threshold:.4f} fee_mult={fee_multiplier} → {'TRADE' if edge_after_fees_pct > threshold else 'SKIP'}")
+        
+        # Check if this market is best maker OR best taker
+        is_best_maker = (best_maker_market and market_id == best_maker_market.get("id"))
+        is_best_taker = (best_taker_market and market_id == best_taker_market.get("id"))
+        
+        # Skip if not a best market
+        if not is_best_maker and not is_best_taker:
             continue
         
-        # Determine if maker order (if not best maker)
-        use_maker = not is_best_maker
-        
-        if use_maker and yes_price == 0.50:
-            # Market at exactly 50¢ - maker order costs $0
+        # Determine order type
+        use_maker = risk_caps.get("kalshi_maker_only", True)
+        if is_best_taker and fee_multiplier == 0.5:
+            # Taker order for S&P/Nasdaq market
+            order_type = "taker"
+            taker_fee = get_taker_fee(yes_price, fee_multiplier)
             order_side = "yes"
             order_price = yes_price  # Buy at current price
             logger.info(f"Market {market_id}: YES order (maker) at {order_price:.4f} (fee: $0.00)")
             fee_cost = 0.0
         else:
-            # Market not at 50¢ - maker order charges taker fee on fill
-            # Use limit order just inside spread
-            order_side = "yes"
-            order_price = yes_price * 0.99  # Slightly below current price
-            logger.info(f"Market {market_id}: YES order (limit) at {order_price:.4f} (will pay taker fee on fill)")
-            # Estimate taker fee if filled: 0.7% of order_price
-            # We'll pay taker fee only if our order is filled (someone crosses our spread)
-            # We want to earn the spread (market maker), not cross it
-            # If we're priced at 0.99 and someone crosses from 0.99 to 1.01, they get filled
-            # But if we're the taker, we get the spread
-            # Probability of being maker: Not 100%, but significant
-            # For simplicity, assume we pay 0.7% taker fee 50% of the time (when our order fills)
-            estimated_fee_pct = 0.35  # 0.7% taker fee / 2
-            fee_cost = order_price * estimated_fee_pct / 100  # 0.99 * 0.0035
+            # Taker order or maker order with fee
+            if is_best_taker and fee_multiplier == 0.5:
+                # S&P/Nasdaq taker order (3.5% fee)
+                order_side = "yes"
+                order_price = yes_price
+                estimated_fee_pct = 0.035  # 3.5% taker fee
+                logger.info(f"Market {market_id}: YES order (taker) at {order_price:.4f} (S&P/Nasdaq 3.5% fee)")
+            else:
+                # Maker order charges taker fee on fill
+                order_side = "yes"
+                order_price = yes_price * 0.99  # Slightly below current price
+                logger.info(f"Market {market_id}: YES order (limit) at {order_price:.4f} (will pay taker fee on fill)")
+                # For simplicity, assume we pay 0.7% taker fee 50% of the time
+                estimated_fee_pct = 0.35
             
+            fee_cost = order_price * estimated_fee_pct / 100
             logger.debug(f"Market {market_id}: Estimated fee: {estimated_fee_pct:.2f}% (${fee_cost:.4f})")
         
         # Calculate expected edge after fees
@@ -441,11 +709,14 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
             edge_after_fees_pct = edge_before_fees_pct - expected_taker_fee_pct
             logger.debug(f"Market {market_id}: Edge before fees: {edge_before_fees_pct:.2f}%, expected taker fee: {expected_taker_fee_pct:.2f}%")
         
+        # Set edge_pct on market dict for gate check (uses calculated edge_after_fees_pct)
+        market["edge_pct"] = edge_after_fees_pct
+
         # Check if order passes gates
         passed, violations = check_micro_live_gates(market, optimal_size, yes_price, risk_caps, "kalshi")
         
         if not passed:
-            logger.debug(f"Market {market_id}: Failed gates: {violations}")
+            logger.info(f"[KALSHI GATE] {market_id}: Failed gates: {violations}")
             continue
         
         # Execute trade (in real-live mode only)
