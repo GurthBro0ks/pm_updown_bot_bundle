@@ -13,6 +13,8 @@ import json
 import logging
 import os
 import sys
+import signal
+import threading
 import requests
 import base64
 import time
@@ -37,6 +39,7 @@ from strategies import kalshi_optimize as kalshi_opt_module
 from strategies import sef_spot_trading as sef_opt_module
 from strategies import stock_hunter as stock_hunter_module
 from strategies import airdrop_farmer as airdrop_farmer_module
+from strategies import base_farmer as base_farmer_module
 from strategies import weather_signals
 from strategies import ibkr_forecast
 
@@ -49,6 +52,30 @@ try:
     ROTATION_MANAGER = RotationManager()
 except:
     ROTATION_MANAGER = None
+
+# Setup logging early for import error handling
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)s | %(message)s',
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
+
+# Maximum total execution time for a single runner invocation
+MAX_EXECUTION_SECONDS = int(os.getenv("MAX_EXECUTION_SECONDS", "120"))  # 2 minutes
+
+def _timeout_handler(signum, frame):
+    """Handle SIGALRM - exit cleanly on global timeout."""
+    logger.error(f"[RUNNER] Global timeout after {MAX_EXECUTION_SECONDS}s. Exiting cleanly.")
+    try:
+        snapshot_equity()
+    except Exception as e:
+        logger.error(f"[RUNNER] Could not save equity snapshot: {e}")
+    sys.exit(2)
+
+# Install the timeout handler
+signal.signal(signal.SIGALRM, _timeout_handler)
+signal.alarm(MAX_EXECUTION_SECONDS)
 
 # Wallet Token Discovery (airdrop farming + holdings)
 try:
@@ -129,15 +156,13 @@ def check_arbitrage_for_holdings(min_spread: float = 2.0) -> list:
         if not token_symbols:
             logger.info("[ARB] No tokens in wallet to check")
             return []
-        
-        # Check each for arbitrage
-        opportunities = []
-        for symbol in token_symbols:
-            result = check_arbitrage_opportunity(symbol, min_spread)
-            if result and result.arbitrage_opportunity:
-                opportunities.append(result)
-                logger.info(f"[ARB] 🎯 {symbol}: DEX ${result.dex_price:.4f} vs CEX ${result.cex_price:.4f} | Spread: {result.spread_percent:.2f}%")
-        
+
+        # Use scan_for_arbitrage which fetches DEX/CEX prices and checks opportunities (2026-03-14)
+        opportunities = scan_for_arbitrage(token_symbols, min_spread)
+
+        for opp in opportunities:
+            logger.info(f"[ARB] 🎯 {opp.get('symbol', 'unknown')}: DEX ${opp.get('dex_price', 0):.4f} vs CEX ${opp.get('cex_price', 0):.4f} | Spread: {opp.get('spread_pct', 0):.2f}%")
+
         return opportunities
         
     except Exception as e:
@@ -547,6 +572,35 @@ def fetch_kalshi_markets():
     logger.error("API fail - using mock")
     return []
 
+
+def run_phase_with_timeout(phase_func, phase_name: str, timeout_secs: int = 30, *args, **kwargs):
+    """Run a phase with its own timeout. Returns True if completed, False if timed out."""
+    result = {"completed": False, "error": None}
+
+    def _run():
+        try:
+            phase_func(*args, **kwargs)
+            result["completed"] = True
+        except Exception as e:
+            result["error"] = str(e)
+            logger.error(f"[{phase_name}] Error: {e}")
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    thread.join(timeout=timeout_secs)
+
+    if thread.is_alive():
+        logger.error(f"[{phase_name}] TIMED OUT after {timeout_secs}s — skipping")
+        return False
+
+    if result["error"]:
+        logger.error(f"[{phase_name}] Failed: {result['error']}")
+        return False
+
+    logger.info(f"[{phase_name}] Completed successfully")
+    return True
+
+
 def run_phase1_kalshi_optimization(mode, bankroll, max_pos_usd):
     """Phase 1: Kalshi Optimization (Complete)"""
     logger.info("=" * 60)
@@ -919,13 +973,16 @@ def main():
             logger.info("Phase 1 (Kalshi) disabled in config - skipping")
             results["phase1"] = 0
         else:
-            logger.info("Starting Phase 1: Kalshi Optimization")
-            result_phase1 = run_phase1_kalshi_optimization(
+            logger.info("Starting Phase 1: Kalshi Optimization (timeout=30s)")
+            result_phase1 = run_phase_with_timeout(
+                run_phase1_kalshi_optimization,
+                "PHASE1_KALSHI",
+                timeout_secs=30,
                 mode=args.mode,
                 bankroll=args.bankroll,
                 max_pos_usd=args.max_pos
             )
-            results["phase1"] = result_phase1
+            results["phase1"] = 1 if result_phase1 else 0
     else:
         results["phase1"] = 0
 
@@ -934,13 +991,16 @@ def main():
             logger.info("Phase 2 (SEF) disabled in config - skipping")
             results["phase2"] = 0
         else:
-            logger.info("Starting Phase 2: SEF Spot Trading")
-            result_phase2 = run_phase2_sef_spot_trading(
+            logger.info("Starting Phase 2: SEF Spot Trading (timeout=30s)")
+            result_phase2 = run_phase_with_timeout(
+                run_phase2_sef_spot_trading,
+                "PHASE2_SEF",
+                timeout_secs=30,
                 mode=args.mode,
                 bankroll=args.bankroll,
                 max_pos_usd=args.max_pos
             )
-            results["phase2"] = result_phase2
+            results["phase2"] = 1 if result_phase2 else 0
     else:
         results["phase2"] = 0
 
@@ -949,13 +1009,16 @@ def main():
             logger.info("Phase 3 (Stock Hunter) disabled in config - skipping")
             results["phase3"] = 0
         else:
-            logger.info("Starting Phase 3: Stock Hunter")
-            result_phase3 = run_phase3_stock_hunter(
+            logger.info("Starting Phase 3: Stock Hunter (timeout=30s)")
+            result_phase3 = run_phase_with_timeout(
+                run_phase3_stock_hunter,
+                "PHASE3_STOCK",
+                timeout_secs=30,
                 mode=args.mode,
                 bankroll=args.bankroll,
                 max_pos_usd=args.max_pos
             )
-            results["phase3"] = result_phase3
+            results["phase3"] = 1 if result_phase3 else 0
     else:
         results["phase3"] = 0
 
@@ -964,11 +1027,14 @@ def main():
             logger.info("Phase 4 (Airdrop) disabled in config - skipping")
             results["phase4"] = 0
         else:
-            logger.info("Starting Phase 4: Airdrop Farming")
-            result_phase4 = run_phase4_airdrop_farming(
+            logger.info("Starting Phase 4: Airdrop Farming (timeout=30s)")
+            result_phase4 = run_phase_with_timeout(
+                run_phase4_airdrop_farming,
+                "PHASE4_AIRDROP",
+                timeout_secs=30,
                 mode=args.mode
             )
-            results["phase4"] = result_phase4
+            results["phase4"] = 1 if result_phase4 else 0
 
             # Show airdrop todo after phase 4 completes
             try:
@@ -992,6 +1058,24 @@ def main():
                     logger.info("Wallet balance snapshot recorded")
             except Exception as e:
                 logger.debug(f"Wallet snapshot not available: {e}")
+
+            # Base Farming - runs after airdrop farming (Phase 4.5)
+            logger.info("Starting Phase 4.5: Base Chain Farming (dry-run simulation)")
+            try:
+                # Check circuit breaker before farming
+                from utils.position_sizer import get_circuit_breaker
+                cb = get_circuit_breaker()
+                current_bankroll = paper_money.cash
+                if current_bankroll:
+                    cb.update(current_bankroll)
+                    cb_ok, cb_meta = cb.can_trade()
+                else:
+                    cb_ok = True
+
+                base_farmer_module.run(circuit_breaker_ok=cb_ok, dry_run=True)
+                results["phase4"] = results.get("phase4", 0) + 1  # Count farming as part of phase 4
+            except Exception as e:
+                logger.warning(f"Base farming failed: {e}")
     else:
         results["phase4"] = 0
 
@@ -1000,11 +1084,14 @@ def main():
             logger.info("Phase 5 (IBKR ForecastTrader) disabled in config - skipping")
             results["phase5"] = 0
         else:
-            logger.info("Starting Phase 5: IBKR ForecastTrader")
-            result_phase5 = run_phase5_ibkr_forecast(
+            logger.info("Starting Phase 5: IBKR ForecastTrader (timeout=30s)")
+            result_phase5 = run_phase_with_timeout(
+                run_phase5_ibkr_forecast,
+                "PHASE5_IBKR",
+                timeout_secs=30,
                 mode=args.mode
             )
-            results["phase5"] = result_phase5
+            results["phase5"] = 1 if result_phase5 else 0
     else:
         results["phase5"] = 0
 
@@ -1014,14 +1101,21 @@ def main():
             logger.info("Phase 6 (Wallet+Arbitrage) disabled in config - skipping")
             results["phase6"] = 0
         else:
-            logger.info("Starting Phase 6: Wallet Tokens + Arbitrage")
-            result_phase6 = run_phase6_wallet_arbitrage(
+            logger.info("Starting Phase 6: Wallet Tokens + Arbitrage (timeout=30s)")
+            result_phase6 = run_phase_with_timeout(
+                run_phase6_wallet_arbitrage,
+                "PHASE6_WALLET",
+                timeout_secs=30,
                 mode=args.mode,
                 min_spread=2.0
             )
-            results["phase6"] = result_phase6
+            results["phase6"] = 1 if result_phase6 else 0
     else:
         results["phase6"] = 0
+
+    # Cancel the global timeout alarm - we finished in time
+    signal.alarm(0)
+    logger.info("[RUNNER] All phases completed within deadline")
 
     logger.info("=" * 60)
     logger.info("SUMMARY")

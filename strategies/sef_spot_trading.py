@@ -65,7 +65,7 @@ SEF_CONFIGS = {
 CCXT_EXCHANGES = {
     "kraken": ccxt.kraken(),
     "coinbase": ccxt.coinbase(),
-    "binance": ccxt.binance(),
+    # "binance": ccxt.binance(),  # DISABLED 2026-03-14: geo-restricted in Michigan
 }
 
 # Trading pairs to monitor
@@ -548,13 +548,14 @@ def main(mode="shadow", bankroll=100.0, max_pos_usd=20.0, verbose=False):
 
     logger.info("=" * 60)
     logger.info("PHASE 2: CRYPTO SPOT TRADING (MONITOR MODE)")
-    logger.info("Legal venues: Kraken, Coinbase, Binance (spot only)")
+    logger.info("Legal venues: Kraken, Coinbase (spot only)")
     logger.info("dYdX/GMX/Hyperliquid REMOVED - illegal derivatives")
     logger.info("=" * 60)
 
     # Log legal compliance status
     logger.info("[SEF] REMOVED dYdX, GMX, Hyperliquid (legal compliance - CFTC unregistered derivatives)")
-    logger.info("[SEF] Active venues: Kraken, Coinbase, Binance, 0x API, Uniswap V3")
+    logger.info("[SEF] Active venues: Kraken, Coinbase, 0x API, Uniswap V3")
+    logger.info("[SEF] DISABLED: Binance (MI geo-restricted)")
 
     # Fetch prices from multiple exchanges using ccxt
     prices = fetch_ccxt_prices()
@@ -584,7 +585,7 @@ def main(mode="shadow", bankroll=100.0, max_pos_usd=20.0, verbose=False):
         "mode": mode,
         "prices": prices,
         "opportunities": opps,
-        "legal_venues": ["kraken", "coinbase", "binance"],
+        "legal_venues": ["kraken", "coinbase"],  # binance removed 2026-03-14: MI geo-restricted
         "removed_venues": ["dydx", "gmx", "hyperliquid"],
     }
 

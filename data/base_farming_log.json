@@ -1,0 +1,47 @@
+[
+  {
+    "type": "aave_deposit",
+    "protocol": "aave_v3",
+    "token": "DAI",
+    "amount_usd": 2.0936,
+    "chain": "base",
+    "timestamp": "2026-03-14T03:09:34.809805+00:00",
+    "status": "simulated",
+    "est_gas_usd": 0.0233
+  },
+  {
+    "type": "nft_mint",
+    "protocol": "zora",
+    "chain": "base",
+    "timestamp": "2026-03-15T11:00:33.445413+00:00",
+    "status": "simulated",
+    "mint_cost_usd": 0.2722,
+    "est_gas_usd": 0.0112
+  },
+  {
+    "type": "swap",
+    "protocol": "uniswap_v3",
+    "pair": [
+      "WETH",
+      "USDC"
+    ],
+    "amount_usd": 2.0189,
+    "chain": "base",
+    "timestamp": "2026-03-16T01:00:33.234693+00:00",
+    "status": "simulated",
+    "est_gas_usd": 0.0091
+  },
+  {
+    "type": "swap",
+    "protocol": "aerodrome",
+    "pair": [
+      "WETH",
+      "cbETH"
+    ],
+    "amount_usd": 1.986,
+    "chain": "base",
+    "timestamp": "2026-03-17T01:00:35.502600+00:00",
+    "status": "simulated",
+    "est_gas_usd": 0.0116
+  }
+]

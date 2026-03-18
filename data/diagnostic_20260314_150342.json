@@ -1,0 +1,335 @@
+{
+  "timestamp": "2026-03-14T15:03:42.564830+00:00",
+  "summary": {
+    "passed": 63,
+    "failed": 1,
+    "warnings": 1
+  },
+  "results": [
+    {
+      "name": ".env file exists",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "WALLET_ADDRESS is set",
+      "pass": true,
+      "detail": "Length: 42, Value: 0xEA845110...5878a8"
+    },
+    {
+      "name": "WALLET_ADDRESS is not placeholder",
+      "pass": true,
+      "detail": "0xEA845110a8e8FAE57c"
+    },
+    {
+      "name": "WALLET_ADDRESS format valid",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "KELLY_FRACTION is set",
+      "pass": true,
+      "detail": "Value: 0.20"
+    },
+    {
+      "name": "MAX_POSITION_PCT is set",
+      "pass": true,
+      "detail": "Value: 0.05"
+    },
+    {
+      "name": "MIN_EDGE_THRESHOLD is set",
+      "pass": true,
+      "detail": "Value: 0.05"
+    },
+    {
+      "name": "MAX_EXECUTION_SECONDS is set",
+      "pass": true,
+      "detail": "Value: 120"
+    },
+    {
+      "name": "FARMING_WEEKLY_BUDGET is set",
+      "pass": true,
+      "detail": "Value: 5.00"
+    },
+    {
+      "name": "config.py imports OK",
+      "pass": true,
+      "detail": "KELLY_FRAC_SHADOW=0.25, KELLY_FRAC_LIVE=0.05"
+    },
+    {
+      "name": "runner.py imports OK",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "RPC ethereum",
+      "pass": false,
+      "detail": "TIMEOUT after 8s \u2014 https://eth.llamarpc.com"
+    },
+    {
+      "name": "RPC base",
+      "pass": true,
+      "detail": "Balance: 0.050987 ETH (~$105.85)"
+    },
+    {
+      "name": "RPC arbitrum",
+      "pass": true,
+      "detail": "Balance: 0.000000 ETH (~$0.00)"
+    },
+    {
+      "name": "RPC optimism",
+      "pass": true,
+      "detail": "Balance: 0.000000 ETH (~$0.00)"
+    },
+    {
+      "name": "RPC linea",
+      "pass": true,
+      "detail": "Balance: 0.000000 ETH (~$0.00)"
+    },
+    {
+      "name": "RPC monad",
+      "pass": true,
+      "detail": "Balance: 475.651664 ETH (~$987452.86)"
+    },
+    {
+      "name": "wallet_tracker imports OK",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "get_full_balance() returns data",
+      "pass": true,
+      "detail": "Total: $124.61"
+    },
+    {
+      "name": "Wallet shows non-zero balance",
+      "pass": true,
+      "detail": "$124.61"
+    },
+    {
+      "name": "position_sizer imports OK",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "EV filter (p=0.60, market=0.45)",
+      "pass": true,
+      "detail": "EV=0.1500, edge=0.1500"
+    },
+    {
+      "name": "EV filter rejects low edge (p=0.52, market=0.50)",
+      "pass": true,
+      "detail": "EV=0.0200, edge=0.0200"
+    },
+    {
+      "name": "Kelly sizing works",
+      "pass": true,
+      "detail": "Size: $0.00, Full Kelly: 0.000 (negative odds \u2192 $0 expected)"
+    },
+    {
+      "name": "Kelly respects 5% cap",
+      "pass": true,
+      "detail": "$0.00 <= $4.98"
+    },
+    {
+      "name": "Full sizing pipeline works",
+      "pass": true,
+      "detail": "Size: $2.08"
+    },
+    {
+      "name": "CircuitBreaker loads",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "CircuitBreaker.update() works",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "CircuitBreaker.can_trade() works",
+      "pass": true,
+      "detail": "can_trade=True"
+    },
+    {
+      "name": "Trading is allowed",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "kalshi imports OK",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "TARGET_CATEGORIES removed (blocklist-only)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "get_kalshi_markets() executes",
+      "pass": true,
+      "detail": "Returned 0 priced markets (empty = normal outside hours)"
+    },
+    {
+      "name": "kalshi_optimize imports OK",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Category filter accepts None (blocklist-only)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "dex_prices imports OK",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "POPULAR_TOKENS is a list or dict",
+      "pass": true,
+      "detail": "Type: list, Count: 19"
+    },
+    {
+      "name": "DexScreener API responds",
+      "pass": null,
+      "detail": "Intermittent API failure - CEX fallback available"
+    },
+    {
+      "name": "CEX price fetch works",
+      "pass": true,
+      "detail": "ETH: $2074.89"
+    },
+    {
+      "name": "scan_for_arbitrage() executes",
+      "pass": true,
+      "detail": "Found 0 opportunities"
+    },
+    {
+      "name": "airdrop_farmer imports OK",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "AIRDROP_TARGETS has entries",
+      "pass": true,
+      "detail": "8 targets"
+    },
+    {
+      "name": "Monad marked as COMPLETED/F",
+      "pass": true,
+      "detail": "Status: COMPLETED, Tier: F"
+    },
+    {
+      "name": "Linea marked as COMPLETED/F",
+      "pass": true,
+      "detail": "Status: COMPLETED, Tier: F"
+    },
+    {
+      "name": "Polymarket is Tier S/CONFIRMED",
+      "pass": true,
+      "detail": "Status: CONFIRMED, Tier: S"
+    },
+    {
+      "name": "get_airdrop_status() works",
+      "pass": true,
+      "detail": "8 targets returned"
+    },
+    {
+      "name": "base_farmer imports OK",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "get_farming_report() works",
+      "pass": true,
+      "detail": "Quality: LOW, Actions: 1"
+    },
+    {
+      "name": "base_farmer.run(dry_run=True) executes",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "Farming state file exists",
+      "pass": true,
+      "detail": "data/base_farming_state.json"
+    },
+    {
+      "name": "Farming log file exists",
+      "pass": true,
+      "detail": "data/base_farming_log.json"
+    },
+    {
+      "name": "stock_hunter imports OK (old Kelly)",
+      "pass": true,
+      "detail": "Note: May be using old Kelly \u2014 should use position_sizer"
+    },
+    {
+      "name": "stock_hunter module loads",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "API server responding on :8510",
+      "pass": true,
+      "detail": "Status: 200"
+    },
+    {
+      "name": "GET /api/farming/status",
+      "pass": true,
+      "detail": "Status: success, Keys: ['airdrops', 'farming', 'status']"
+    },
+    {
+      "name": "GET /api/farming/log?n=3",
+      "pass": true,
+      "detail": "Status: success, Keys: ['entries', 'status', 'total']"
+    },
+    {
+      "name": "GET /api/farming/airdrop-targets",
+      "pass": true,
+      "detail": "Status: success, Keys: ['status', 'targets']"
+    },
+    {
+      "name": "POST /api/farming/trigger",
+      "pass": true,
+      "detail": "Status: success, Keys: ['dry_run', 'message', 'report', 'status']"
+    },
+    {
+      "name": "Cron jobs exist",
+      "pass": true,
+      "detail": "23 active jobs"
+    },
+    {
+      "name": "Trading bot in cron",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "data/ directory exists",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "data/base_farming_state.json",
+      "pass": true,
+      "detail": "Size: 265B, Modified: 2026-03-14 15:03"
+    },
+    {
+      "name": "data/base_farming_log.json",
+      "pass": true,
+      "detail": "Size: 239B, Modified: 2026-03-14 03:09"
+    },
+    {
+      "name": "data/circuit_breaker.json",
+      "pass": true,
+      "detail": "Size: 110B, Modified: 2026-03-14 15:03"
+    },
+    {
+      "name": "Proofs directory has files",
+      "pass": true,
+      "detail": "1402 proof files"
+    }
+  ]
+}

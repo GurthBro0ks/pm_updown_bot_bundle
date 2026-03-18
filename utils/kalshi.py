@@ -15,40 +15,22 @@ import base64
 
 logger = logging.getLogger(__name__)
 
-# Kalshi Series Category Filter Configuration
-# These are the categories where our edge thesis works
-# (maker orders, halved fees on indexes, LIP rebates)
-# Updated based on actual API categories from debug (2026-02-27)
-KALSHI_TARGET_CATEGORIES = {
-    "Economics",            # Fed rate, CPI, jobs, GDP, S&P 500 range (378 series)
-    "Politics",             # Elections, policy, government (2527 series)
-    "Financials",           # Financial markets - THIS IS THE ACTUAL API NAME (181 series)
-    "Elections",            # Elections (409 series)
-    "Companies",            # Company events (308 series)
-    "Climate and Weather",  # Temperature, hurricane (249 series)
-    "World",                # Geopolitical events (152 series)
-    "Crypto",               # Crypto markets (213 series)
-    "Science and Technology",  # Tech events (190 series)
-    "Financial",            # Keep for backwards compatibility
-}
+# REMOVED 2026-03-14: KALSHI_TARGET_CATEGORIES - legacy allowlist, now using blocklist-only filtering
+# Previously defined categories: Economics, Politics, Financials, Elections, Companies,
+# Climate and Weather, World, Crypto, Science and Technology
 
 # Explicit blocklist — never trade these
 KALSHI_BLOCKED_CATEGORIES = {
-    "Sports",
-    "Esports",
     "Entertainment",    # 2138 series - mostly celebrity/TV
     "Mentions",        # 271 series - social media mentions
     "Social",          # 75 series - social events
     "Exotics",         # 8 series - weird exotic markets
+    # REMOVED 2026-03-14: Sports, Esports - needed for current active markets
 }
 
-# Blocked ticker prefixes as safety net
-KALSHI_BLOCKED_PREFIXES = (
-    "KXMV",             # Esports
-    "KXMVESPORTS",      # Esports extended
-    "KXNFL", "KXNBA", "KXMLB", "KXNHL",  # US sports leagues
-    "KXEPL", "KXUCL",   # Soccer
-)
+# REMOVED 2026-03-14: All prefixes removed to allow esports/sports markets
+# Previously blocked: KXMV, KXMVESPORTS, KXNFL, KXNBA, KXMLB, KXNHL, KXEPL, KXUCL
+KALSHI_BLOCKED_PREFIXES = ()
 
 
 def get_kalshi_headers(method, path, api_key, private_key):
@@ -108,13 +90,13 @@ def fetch_kalshi_series(api_key, private_key):
                 blocked_count += 1
                 continue
             
-            # Check category
+            # Check category - blocklist only (2026-03-14)
             if category in KALSHI_BLOCKED_CATEGORIES:
                 blocked_count += 1
                 continue
-            
-            if category in KALSHI_TARGET_CATEGORIES:
-                target_series.append(s)
+
+            # All non-blocked categories now pass through
+            target_series.append(s)
         
         logger.info(f"[KALSHI] Series filter: {len(target_series)} target, {blocked_count} blocked")
         
@@ -257,9 +239,9 @@ def fetch_kalshi_markets():
             })
 
         if len(markets) == 0:
-            logger.warning("[KALSHI] No markets found in target categories (Economics/Financials/Politics/Elections). "
-                          "This is normal if there are no open financial markets. "
-                          "All current open markets are likely esports/sports.")
+            logger.warning("[KALSHI] No markets with active trading prices. "
+                          "This is normal outside market hours or if markets have closed. "
+                          f"Found {len(all_markets)} markets from API but none have yes_ask_cents > 0.")
         else:
             logger.info(f"[KALSHI] Returning {len(markets)} filtered markets")
 
@@ -335,7 +317,7 @@ def kalshi_debug_discovery():
 
     # Get ALL series
     url = "https://api.elections.kalshi.com/trade-api/v2/series"
-    resp = requests.get(url, params={"include_volume": True})
+    resp = requests.get(url, params={"include_volume": True}, timeout=15)
     series_data = resp.json()
 
     categories = {}
@@ -359,7 +341,7 @@ def kalshi_debug_discovery():
 
     # Get first 100 open markets (no filter)
     url2 = "https://api.elections.kalshi.com/trade-api/v2/markets"
-    resp2 = requests.get(url2, params={"status": "open", "limit": 100})
+    resp2 = requests.get(url2, params={"status": "open", "limit": 100}, timeout=15)
     markets = resp2.json().get("markets", [])
 
     ticker_prefixes = {}
@@ -379,3 +361,7 @@ def kalshi_debug_discovery():
     logger.info(f"[KALSHI DEBUG] Output written to kalshi_debug.json and kalshi_markets_debug.json")
 
     return categories
+
+
+# Alias for backwards compatibility
+get_kalshi_markets = fetch_kalshi_markets

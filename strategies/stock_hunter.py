@@ -35,6 +35,7 @@ from config import (
 )
 
 from utils.sentiment import apply_earnings_multiplier
+from utils.position_sizer import size_position, get_circuit_breaker, update_bankroll
 
 from utils.logging_config import setup_logging
 
@@ -512,27 +513,57 @@ def optimize_stock_hunter_strategy(bankroll, max_pos_usd, mode="shadow"):
     # Sort by combined sentiment
     passing.sort(key=lambda x: x.get("combined_sentiment", 0), reverse=True)
     
+    # Update circuit breaker with current bankroll
+    update_bankroll(bankroll)
+
+    # Get current open positions
+    try:
+        from runner import paper_money
+        current_positions = len(paper_money.positions) if hasattr(paper_money, 'positions') else 0
+    except Exception:
+        current_positions = 0
+
     # Generate orders with Kelly criterion sizing
     orders = []
     for stock in passing[:5]:  # Top 5 only
         ticker = stock.get("ticker")
         price = stock.get("price")
         sentiment = stock.get("combined_sentiment", 0)
-        
+
         if not price:
             logger.warning(f"Skipping {ticker}: no price data")
             continue
+
+        # Use position_sizer for Kelly criterion with EV filter
+        # For stocks: sentiment = confidence, price = stock price
+        kelly_size, sizing_meta = size_position(
+            market_id=f"stock_{ticker}",
+            market_price=1.0,  # Stock purchase at market
+            bankroll=bankroll,
+            current_positions=current_positions,
+            estimated_prob=sentiment,  # Use sentiment as our probability estimate
+            odds=price,  # Stock price as odds proxy
+            fees_pct=0.0,  # No fees for stock trades
+        )
+
+        if sizing_meta.get("blocked"):
+            logger.info(f"Skipping {ticker}: {sizing_meta.get('block_reason', 'blocked')}")
+            continue
+
+        # Track positions for next iteration
+        current_positions += 1
         
-        # Kelly criterion position sizing
-        kelly_size = calculate_kelly_position_size(sentiment, max_pos_usd)
-        
+        # Calculate multiplier based on max position
+        kelly_mult = sizing_meta.get("kelly", {}).get("kelly_fraction", 0) if kelly_size > 0 else 0
+
         order = {
             "ticker": ticker,
             "side": "buy",
             "size": round(kelly_size, 2),
             "price": price,
             "sentiment": round(sentiment, 2),
-            "kelly_multiplier": round(kelly_size / max_pos_usd, 2) if max_pos_usd > 0 else 0,
+            "kelly_multiplier": kelly_mult,
+            "position_meta": sizing_meta,
             "mode": mode,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }

@@ -45,7 +45,18 @@ logger = logging.getLogger(__name__)
 MAX_MONTHLY_GAS_USD = 50.0
 
 # Target protocols and actions (weekly/monthly frequency)
+# Priority tiers: S (confirmed), A (exploring), B (pending), F (failed/completed)
 WEEKLY_ACTIONS = [
+    {
+        "name": "Polymarket Trading",
+        "chain": "polymarket",
+        "action": "place_bet",
+        "protocol": "polymarket",
+        "amount_usd": 5,
+        "frequency": "weekly",
+        "airdrop_target": "$POLY (CONFIRMED)",
+        "priority": "S",
+    },
     {
         "name": "Base: Aerodrome Swap",
         "chain": "base",
@@ -53,7 +64,8 @@ WEEKLY_ACTIONS = [
         "protocol": "aerodrome",
         "amount_usd": 5,
         "frequency": "weekly",
-        "airdrop_target": "Base token + Aerodrome",
+        "airdrop_target": "Base token + Aerodrome (#1 PRIORITY)",
+        "priority": "S",
     },
     {
         "name": "MetaMask: Portfolio Swap",
@@ -61,15 +73,8 @@ WEEKLY_ACTIONS = [
         "action": "metamask_swap",
         "amount_usd": 5,
         "frequency": "weekly",
-        "airdrop_target": "$MASK",
-    },
-    {
-        "name": "Linea DeFi",
-        "chain": "linea",
-        "action": "swap_or_lp",
-        "amount_usd": 5,
-        "frequency": "weekly",
-        "airdrop_target": "Linea token",
+        "airdrop_target": "$MASK (CONFIRMED)",
+        "priority": "S",
     },
 ]
 
@@ -86,64 +91,131 @@ MONTHLY_ACTIONS = [
 ]
 
 # Testnets (FREE — no capital needed)
+# NOTE: Monad testnet is COMPLETED - users EXCLUDED from airdrop, DO NOT FARM
 TESTNET_ACTIONS = [
-    {"name": "Monad Testnet", "chain": "testnet", "url": "https://testnet.monad.xyz", "frequency": "weekly"},
-    {"name": "MegaETH Testnet", "chain": "testnet", "frequency": "weekly"},
+    {"name": "MegaETH Testnet", "chain": "testnet", "frequency": "weekly", "warning": "Check if still active"},
     {"name": "Aztec Sandbox", "chain": "testnet", "action": "run_sandbox", "frequency": "monthly"},
 ]
 
 # All actions combined
 ALL_ACTIONS = WEEKLY_ACTIONS + MONTHLY_ACTIONS + TESTNET_ACTIONS
 
+def get_airdrop_status() -> list:
+    """
+    Get airdrop status sorted by tier (S first, then A, then F).
+
+    Returns:
+        List of dicts with: protocol, token, status, tier, est_value, action, note
+    """
+    tier_order = {"S": 0, "A": 1, "F": 2, "B": 3}
+
+    results = []
+    for protocol, target in AIRDROP_TARGETS.items():
+        results.append({
+            "protocol": protocol,
+            "token": target.get("token", "TBD"),
+            "status": target.get("status", "UNKNOWN"),
+            "tier": target.get("tier", "B"),
+            "est_value": target.get("est_value", "unknown"),
+            "action": target.get("action", ""),
+            "note": target.get("name", ""),
+        })
+
+    # Sort by tier: S first, then A, then F
+    results.sort(key=lambda x: (tier_order.get(x["tier"], 3), x["protocol"]))
+
+    return results
+
+
 # Airdrop targets with TGE timeline (2026)
+# Priority: S (confirmed), A (exploring), B (pending), F (failed/completed)
 AIRDROP_TARGETS = {
     "opensea": {
         "name": "OpenSea ($SEA)",
+        "token": "$SEA",
         "tge": "Q1 2026",
-        "status": "imminent",
-        "action": "URGENT: TGE could launch ANY DAY. Use OS2, swap tokens, earn XP, claim when live",
+        "status": "CONFIRMED",
+        "confirmed": True,
+        "completed": False,
+        "tier": "S",
+        "action": "URGENT: TGE launched Q1 2026. 50% to community. Use OS2, swap tokens, earn XP, claim NOW",
         "est_value": "$100-$2,000+"
     },
     "polymarket": {
         "name": "Polymarket ($POLY)",
+        "token": "$POLY",
         "tge": "Q1-Q2 2026",
-        "status": "confirmed",
-        "action": "Trade actively on Polymarket (prediction markets)",
+        "status": "CONFIRMED",
+        "confirmed": True,
+        "completed": False,
+        "tier": "S",
+        "action": "SNAPSHOT NOT YET TAKEN - FARM NOW. Trade prediction markets, create markets, claim fees",
         "est_value": "$200-$5,000+"
     },
     "metamask": {
         "name": "MetaMask ($MASK)",
+        "token": "$MASK",
         "tge": "2026",
-        "status": "pending",
-        "action": "Use MetaMask Swaps, Bridge, Portfolio weekly",
+        "status": "CONFIRMED",
+        "confirmed": True,
+        "completed": False,
+        "tier": "S",
+        "action": "CONFIRMED 'sooner than expected'. Use MetaMask Swaps, Bridge, Portfolio weekly",
         "est_value": "$100-$3,000+"
     },
     "base": {
         "name": "Base (Coinbase L2)",
-        "tge": "TBD",
-        "status": "no token confirmed",
-        "action": "Weekly swaps on Aerodrome, use dApps",
-        "est_value": "unknown"
+        "token": "TBD",
+        "tge": "Q2-Q4 2026",
+        "status": "EXPLORING",
+        "confirmed": False,
+        "completed": False,
+        "tier": "S",
+        "action": "#1 PRIORITY. NO TOKEN YET but exploring Q2-Q4 2026. Weekly swaps on Aerodrome, use dApps",
+        "est_value": "unknown (potential huge)"
     },
     "monad": {
-        "name": "Monad Ecosystem",
-        "tge": "Nov 2025 (CLAIMED/MISSED)",
-        "status": "airdrop_closed",
-        "action": "MON airdrop closed Nov 3 2025. Farm ecosystem project airdrops (Ambient, Magic Eden, aPriori). Use mainnet DEXs.",
-        "est_value": "MON already distributed"
+        "name": "Monad ($MON)",
+        "token": "$MON",
+        "tge": "Oct 2025 (COMPLETED)",
+        "status": "COMPLETED",
+        "confirmed": True,
+        "completed": True,
+        "tier": "F",
+        "action": "AIRDROP COMPLETE Oct 2025. Testnet users EXCLUDED. Do NOT waste gas on testnet. Farm ecosystem: Ambient, Magic Eden, aPriori",
+        "est_value": "Already distributed - too late"
     },
     "layerzero": {
         "name": "LayerZero S2",
+        "token": "TBD",
         "tge": "2026",
-        "status": "season 2 active",
-        "action": "Bridge via Stargate across chains weekly",
+        "status": "SEASON_2_LIVE",
+        "confirmed": True,
+        "completed": False,
+        "tier": "A",
+        "action": "Season 2 LIVE. Bridge via Stargate across chains weekly",
         "est_value": "unknown"
     },
     "linea": {
-        "name": "Linea (ConsenSys)",
-        "tge": "TBD",
-        "status": "LXP points ongoing",
-        "action": "Swaps, bridges, DeFi on Linea",
+        "name": "Linea ($LINEA)",
+        "token": "$LINEA",
+        "tge": "Sep 2025 (COMPLETED)",
+        "status": "COMPLETED",
+        "confirmed": True,
+        "completed": True,
+        "tier": "F",
+        "action": "AIRDROP COMPLETE Sep 2025. Claim closed Dec 9. Do NOT waste gas farming Linea.",
+        "est_value": "Already distributed - too late"
+    },
+    "ethena": {
+        "name": "Ethena ($ENA)",
+        "token": "$ENA",
+        "tge": "2026",
+        "status": "SEASON_5_LIVE",
+        "confirmed": True,
+        "completed": False,
+        "tier": "A",
+        "action": "Season 5 LIVE. Repeat distributor. Use Ethena for restaking/perp.",
         "est_value": "unknown"
     },
 }
@@ -227,20 +299,28 @@ def log_airdrop_status():
     logger.info("[AIRDROP] === Weekly Airdrop Farming Status ===")
     logger.info("=" * 60)
 
-    # Tier S - Confirmed/Imminent TGE
-    logger.info("[AIRDROP] TIER S - Confirmed/Imminent TGE:")
-    for key in ["opensea", "polymarket", "metamask"]:
+    # Tier S - Confirmed TGE (highest priority)
+    logger.info("[AIRDROP] TIER S - CONFIRMED AIRDROP (Farm NOW):")
+    for key in ["opensea", "polymarket", "metamask", "base"]:
         target = AIRDROP_TARGETS[key]
-        logger.info(f"  {target['name']}: TGE {target['tge']} | Status: {target['status']}")
-        logger.info(f"    Action: {target['action']}")
-        logger.info(f"    Est. Value: {target['est_value']}")
+        if not target.get("completed", False):
+            logger.info(f"  {target['name']}: TGE {target['tge']} | Status: {target['status']}")
+            logger.info(f"    Action: {target['action']}")
+            logger.info(f"    Est. Value: {target['est_value']}")
 
-    # Tier A - Strong Signals
-    logger.info("[AIRDROP] TIER A - Strong Signals, 2026 TGE Expected:")
-    for key in ["base", "monad", "layerzero", "linea"]:
+    # Tier A - Season/Exploring
+    logger.info("[AIRDROP] TIER A - SEASON LIVE / EXPLORING:")
+    for key in ["layerzero", "ethena"]:
         target = AIRDROP_TARGETS[key]
         logger.info(f"  {target['name']}: TGE {target['tge']} | Status: {target['status']}")
         logger.info(f"    Action: {target['action']}")
+
+    # Tier F - Failed/Completed (WARNING - do not farm)
+    logger.info("[AIRDROP] TIER F - COMPLETED/EXCLUDED (DO NOT FARM):")
+    for key in ["monad", "linea"]:
+        target = AIRDROP_TARGETS[key]
+        logger.info(f"  {target['name']}: {target['status']}")
+        logger.info(f"    WARNING: {target['action']}")
 
     # Gas budget
     state = load_airdrop_state()

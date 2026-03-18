@@ -45,6 +45,13 @@ PHASES = {
 }
 
 # ============================================================================
+# Farming Configuration (Base Chain Airdrop)
+# ============================================================================
+
+FARMING_WEEKLY_BUDGET = float(os.getenv("FARMING_WEEKLY_BUDGET", "5.00"))
+MIN_BASE_ETH_FOR_FARMING = float(os.getenv("MIN_BASE_ETH_FOR_FARMING", "0.002"))
+
+# ============================================================================
 # Risk Caps (unified across all phases)
 # ============================================================================
 
@@ -204,3 +211,9 @@ def get_venue_config(venue: str) -> dict:
 # Ensure directories exist
 for directory in [PROOF_DIR, LOGS_DIR, PAPER_TRADING_DIR, CONFIG_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
+
+# ─── Sentiment Scorer ─────────────────────────────────────────
+SENTIMENT_PROVIDERS = ["grok_420", "grok_fast", "glm"]  # Grok primary, GLM fallback, MiniMax disabled (insufficient balance)
+# PRODUCTION: ["grok_420", "grok_fast", "minimax", "glm"]
+SENTIMENT_MAX_MARKETS = 50
+SENTIMENT_CACHE_TTL = 600

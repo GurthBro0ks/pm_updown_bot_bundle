@@ -30,6 +30,7 @@ EDGE_THRESHOLD_HIGH_FEE = 1.25  # 1.25% for normal-fee markets
 # Local imports (avoid circular import)
 from utils.proof import generate_proof
 from utils.kalshi import fetch_kalshi_markets
+from utils.position_sizer import size_position, update_bankroll, get_bayesian_tracker
 
 # Stub for missing function
 def check_micro_live_gates(market, size, price, risk_caps, venue):
@@ -440,8 +441,13 @@ def filter_markets_by_category(markets: list, include_categories: list = None) -
     Returns:
         Filtered markets in desired categories
     """
+    # If include_categories is explicitly None, skip filtering entirely (2026-03-14)
     if include_categories is None:
-        include_categories = ['financial', 'economic', 'political', 'weather']
+        return markets
+
+    # Default to empty list if not provided (not None)
+    if not include_categories:
+        include_categories = []
     
     filtered = []
     for market in markets:
@@ -595,7 +601,17 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
         "edge_after_fees_pct": 0.5,
         "market_end_hrs": 0
     }
-    
+
+    # Initialize position sizer with current bankroll
+    update_bankroll(bankroll)
+
+    # Get current open positions
+    try:
+        from runner import paper_money
+        current_positions = len(paper_money.positions) if hasattr(paper_money, 'positions') else 0
+    except Exception:
+        current_positions = 0
+
     # Fetch Kalshi markets
     logger.info("Fetching Kalshi markets...")
     markets = fetch_kalshi_markets()
@@ -606,21 +622,21 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     
     logger.info(f"Fetched {len(markets)} markets")
     
-    # PRIORITY 0 FIX: Filter by category (financial/political/economic/weather only)
-    # Exclude sports/esports which have low liquidity and high variance
-    markets = filter_markets_by_category(markets, include_categories=['financial', 'economic', 'political', 'weather'])
+    # PRIORITY 0 FIX: Disable category filtering (2026-03-14)
+    # Using blocklist only - all categories that pass KALSHI_BLOCKED_CATEGORIES are scanned
+    markets = filter_markets_by_category(markets, include_categories=None)
     
     if not markets:
-        logger.warning("No markets in target categories (financial/political/economic/weather)")
+        logger.warning("No markets fetched or all markets filtered by liquidity")
         return 0
     
     # Filter for liquidity
     markets = filter_low_liquidity_markets(markets, min_liquidity_usd=0.0, max_trades=20)
-    
-    # Calculate optimal order size
-    optimal_size = calculate_optimal_order_size(bankroll, len(markets), risk_caps["max_pos_usd"])
-    logger.info(f"Optimal order size: ${optimal_size:.2f} per market")
-    
+
+    # Fallback optimal size (will be overridden by position_sizer)
+    optimal_size = max_pos_usd
+    logger.info(f"Max position: ${optimal_size:.2f} (position_sizer will determine actual size)")
+
     # Find best maker markets
     logger.info("Finding best maker markets...")
     best_maker_market = find_best_maker_market(markets, risk_caps["edge_after_fees_pct"])
@@ -712,13 +728,36 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
         # Set edge_pct on market dict for gate check (uses calculated edge_after_fees_pct)
         market["edge_pct"] = edge_after_fees_pct
 
-        # Check if order passes gates
+        # Check if order passes gates (legacy check)
         passed, violations = check_micro_live_gates(market, optimal_size, yes_price, risk_caps, "kalshi")
-        
+
         if not passed:
             logger.info(f"[KALSHI GATE] {market_id}: Failed gates: {violations}")
             continue
-        
+
+        # Use position_sizer for Kelly-based sizing with EV filter
+        # Estimate true probability from edge (true_price = market_price + edge)
+        estimated_prob = min(1.0, yes_price + (edge_after_fees_pct / 100))
+        estimated_fee_pct = 0.035 if fee_multiplier == 0.5 else 0.7  # 3.5% or 7%
+
+        order_size, sizing_meta = size_position(
+            market_id=market_id,
+            market_price=yes_price,
+            bankroll=bankroll,
+            current_positions=current_positions,
+            estimated_prob=estimated_prob,
+            odds=1.0/yes_price if yes_price > 0 else 1.0,
+            fees_pct=estimated_fee_pct / 100,
+        )
+
+        if sizing_meta.get("blocked"):
+            logger.info(f"[KALSHI] {market_id}: Blocked by position_sizer - {sizing_meta.get('block_reason', 'unknown')}")
+            continue
+
+        # Update position count
+        current_positions += 1
+        optimal_size = order_size
+
         # Execute trade (in real-live mode only)
         if mode == "real-live" and not dry_run:
             # This is where actual order placement would happen
@@ -758,7 +797,9 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
             "size": optimal_size,
             "price": order_price,
             "fee": fee_cost if "fee_cost" in locals() else 0.7 * yes_price / 100,
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "sizing_meta": sizing_meta,
+            "edge_pct": edge_after_fees_pct,
         })
     
     # Summary

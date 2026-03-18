@@ -1,0 +1,108 @@
+{
+  "total_open_markets": 100,
+  "ticker_prefix_counts": {
+    "KXMVES": 100
+  },
+  "sample_markets": [
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S2026B01CA4C4FA3-AD0B8AB4A36",
+      "title": "yes Ausar Thompson: 3+,yes Cade Cunningham: 6+,yes Boston,yes Detroit,yes Oklahoma City,yes New York,yes Michael Porter Jr.: 20+,yes Cade Cunningham: 20+,yes Cameron Johnson: 10+,yes Nikola Joki\u0107: 25+,yes Shai Gilgeous-Alexander: 20+,yes Jalen Brunson: 20+,yes Karl-Anthony Towns: 15+,yes Jarrett Allen: 6+,yes Over 233.5 points scored",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S2026F9A506899F5-710CAF66AED",
+      "title": "yes Michael Porter Jr.: 15+,yes Jaylen Brown: 25+,yes Jarrett Allen: 15+,yes Cade Cunningham: 20+,yes Shai Gilgeous-Alexander: 20+,yes Kevin Porter Jr.: 15+,yes Jalen Brunson: 20+,yes Karl-Anthony Towns: 10+",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S20263A622154FB5-979B53958F8",
+      "title": "yes Nikola Joki\u0107: 2+,yes Cade Cunningham: 6+,yes Michael Porter Jr.: 15+,yes Jaylen Brown: 20+,yes Evan Mobley: 10+,yes Jarrett Allen: 15+,yes Cade Cunningham: 20+,yes Nikola Joki\u0107: 25+,yes Shai Gilgeous-Alexander: 20+,yes Karl-Anthony Towns: 10+,yes Jarrett Allen: 8+,yes Nikola Joki\u0107: 10+,yes Shai Gilgeous-Alexander: 4+,yes Karl-Anthony Towns: 10+",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S20269D7B68F223C-24009578153",
+      "title": "yes Aston Villa,yes Jarrett Allen: 10+,no Detroit wins by over 5.5 Points,yes Miami (OH)",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S2026A162CCF8CE8-8C9B8200740",
+      "title": "yes Boston,yes Detroit,yes Oklahoma City,yes Dallas,yes New York,yes Cade Cunningham: 2+,yes Nikola Joki\u0107: 10+,yes Shai Gilgeous-Alexander: 2+",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S2026B3BCD6EB2DE-919B8A6A20B",
+      "title": "yes Michael Porter Jr.: 2+,yes Jaylen Brown: 1+,yes Michael Porter Jr.: 15+,yes Derrick White: 15+,yes Jaylen Brown: 20+,yes Nic Claxton: 6+,yes Jaylen Brown: 4+,no Over 206.5 points scored",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S2026D30E545E61C-E6FD069DB3D",
+      "title": "yes Boston,yes Oklahoma City,yes Cade Cunningham: 20+,yes Shai Gilgeous-Alexander: 25+,yes Karl-Anthony Towns: 10+",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S2026DA9224A9421-2CD21266DAC",
+      "title": "yes Over 1.5 goals scored,yes Over 1.5 goals scored,yes Aston Villa,yes Brentford,yes Manchester City,yes Liverpool,yes Newcastle,yes Over 1.5 goals scored,yes Over 1.5 goals scored,yes Over 1.5 goals scored,yes Over 1.5 goals scored,yes Over 1.5 goals scored,yes Como,yes Over 1.5 goals scored",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S2026F5446287BBE-6C117E9BDE7",
+      "title": "yes Shai Gilgeous-Alexander: 1+,yes Oklahoma City,yes Houston,yes Shai Gilgeous-Alexander: 20+",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S202679A7AB31886-67488BAC8B3",
+      "title": "yes Duncan Robinson: 1+,yes Nic Claxton: 2+,yes Cade Cunningham: 6+,yes Boston,yes Michael Porter Jr.: 15+,yes Nic Claxton: 10+,yes Jarrett Allen: 10+,yes Derrick White: 2+,yes Jaylen Brown: 4+,yes Neemias Queta: 4+,yes Ausar Thompson: 2+,yes Cade Cunningham: 2+,yes Tobias Harris: 2+,yes Detroit wins by over 2.5 Points",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S20265F5F958C5F1-4860BA9B6B0",
+      "title": "yes Evan Mobley: 15+,yes Jarrett Allen: 10+,yes Cade Cunningham: 20+,yes Duncan Robinson: 10+,yes Tobias Harris: 10+,yes Cade Cunningham: 2+",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S2026C5AFD1AEBE9-BD5A9A04981",
+      "title": "yes Jalen Brunson: 5+,yes Karl-Anthony Towns: 1+",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S202685E731486BE-D0293AFB97D",
+      "title": "yes Detroit,yes New York,yes Cade Cunningham: 6+",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S20265BAEB8BED9C-056042402FF",
+      "title": "yes Jarrett Allen: 10+,yes Cade Cunningham: 15+,yes Kyle Kuzma: 10+,yes Kevin Porter Jr.: 15+,yes Karl-Anthony Towns: 10+,yes Mikal Bridges: 10+,yes Detroit wins by over 5.5 Points,yes Oklahoma City wins by over 6.5 Points,yes Dallas wins by over 3.5 Points,no New York wins by over 11.5 Points",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S20268CACB13CE8E-53FF27490A2",
+      "title": "yes Payton Pritchard: 1+,yes Duncan Robinson: 2+,yes Karl-Anthony Towns: 1+,yes Cade Cunningham: 20+,yes Shai Gilgeous-Alexander: 25+",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S2026F9A506899F5-49C2CCF81C3",
+      "title": "yes Michael Porter Jr.: 15+,yes Jaylen Brown: 25+,yes Jarrett Allen: 15+,yes Cade Cunningham: 20+,yes Shai Gilgeous-Alexander: 20+,yes Kevin Porter Jr.: 15+,yes Jalen Brunson: 20+,yes Karl-Anthony Towns: 15+",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S20268510F771B08-ECC5052C9DD",
+      "title": "yes Michael Porter Jr.: 15+,yes Jaylen Brown: 20+,yes Evan Mobley: 10+,yes Jarrett Allen: 10+,yes Jalen Brunson: 20+,yes Karl-Anthony Towns: 10+",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S20263A622154FB5-FABD892142D",
+      "title": "yes Nikola Joki\u0107: 1+,yes Cade Cunningham: 6+,yes Michael Porter Jr.: 15+,yes Jaylen Brown: 20+,yes Evan Mobley: 10+,yes Jarrett Allen: 15+,yes Cade Cunningham: 20+,yes Nikola Joki\u0107: 25+,yes Shai Gilgeous-Alexander: 20+,yes Karl-Anthony Towns: 10+,yes Jarrett Allen: 8+,yes Nikola Joki\u0107: 10+,yes Shai Gilgeous-Alexander: 4+,yes Karl-Anthony Towns: 10+",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S2026733013E8014-37E53EA3E4D",
+      "title": "yes Jalen Brunson: 4+,yes Jalen Brunson: 25+,yes Karl-Anthony Towns: 15+,yes Mikal Bridges: 10+,yes Myles Turner: 4+,yes Jalen Brunson: 2+,yes Mikal Bridges: 2+,yes OG Anunoby: 2+,yes New York wins by over 2.5 Points",
+      "volume_24h": 0
+    },
+    {
+      "ticker": "KXMVESPORTSMULTIGAMEEXTENDED-S2026C27B067ADEC-88165FE17E5",
+      "title": "yes Over 206.5 points scored,no Over 231.5 points scored,yes Over 215.5 points scored",
+      "volume_24h": 0
+    }
+  ]
+}

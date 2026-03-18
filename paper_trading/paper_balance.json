@@ -1,0 +1,145 @@
+{
+  "cash": 99.41644658026968,
+  "positions": [],
+  "trades": [
+    {
+      "time": "2026-02-27T22:15:13.650443+00:00",
+      "action": "buy",
+      "venue": "stock",
+      "ticker": "AAPL",
+      "shares": 0.018318373328448434,
+      "price": 272.95,
+      "size_usd": 5.0
+    },
+    {
+      "time": "2026-02-27T22:15:13.691898+00:00",
+      "action": "buy",
+      "venue": "stock",
+      "ticker": "META",
+      "shares": 0.00761023424301,
+      "price": 657.01,
+      "size_usd": 5.0
+    },
+    {
+      "time": "2026-02-28T16:43:18.095163+00:00",
+      "action": "buy",
+      "venue": "stock",
+      "ticker": "NVDA",
+      "shares": 0.028218296743608557,
+      "price": 177.19,
+      "size_usd": 5.0
+    },
+    {
+      "time": "2026-02-28T21:04:30.000000+00:00",
+      "action": "sell",
+      "venue": "stock",
+      "ticker": "NVDA",
+      "shares": 0.028218296743608557,
+      "price": 177.19,
+      "size_usd": 5.0
+    },
+    {
+      "time": "2026-02-28T21:04:44.563907+00:00",
+      "action": "buy",
+      "venue": "stock",
+      "ticker": "NVDA",
+      "shares": 0.056436593487217114,
+      "price": 177.19,
+      "size_usd": 10.0
+    },
+    {
+      "time": "2026-03-08T04:37:29.674135+00:00",
+      "action": "sell",
+      "venue": "stock",
+      "ticker": "AAPL",
+      "shares": 0.018318373328448434,
+      "price": 257.46,
+      "size_usd": 4.7162483971423335,
+      "pnl": -0.28375160285766654,
+      "cost_basis": 5.0
+    },
+    {
+      "time": "2026-03-08T04:37:29.690351+00:00",
+      "action": "sell",
+      "venue": "stock",
+      "ticker": "META",
+      "shares": 0.00761023424301,
+      "price": 644.86,
+      "size_usd": 4.907535653947429,
+      "pnl": -0.09246434605257114,
+      "cost_basis": 5.0
+    },
+    {
+      "time": "2026-03-08T04:37:29.705341+00:00",
+      "action": "sell",
+      "venue": "stock",
+      "ticker": "NVDA",
+      "shares": 0.056436593487217114,
+      "price": 177.82,
+      "size_usd": 10.035555053896946,
+      "pnl": 0.03555505389694602,
+      "cost_basis": 10.0
+    },
+    {
+      "time": "2026-03-08T08:00:41.059895+00:00",
+      "action": "buy",
+      "venue": "stock",
+      "ticker": "NVDA",
+      "shares": 0.028118321898549094,
+      "price": 177.82,
+      "size_usd": 5.0
+    },
+    {
+      "time": "2026-03-08T08:00:41.095505+00:00",
+      "action": "buy",
+      "venue": "stock",
+      "ticker": "TSLA",
+      "shares": 0.012603029768356313,
+      "price": 396.73,
+      "size_usd": 5.0
+    },
+    {
+      "time": "2026-03-08T08:00:41.129200+00:00",
+      "action": "buy",
+      "venue": "stock",
+      "ticker": "META",
+      "shares": 0.007753620940979437,
+      "price": 644.86,
+      "size_usd": 5.0
+    },
+    {
+      "time": "2026-03-15T11:00:04.074763+00:00",
+      "action": "sell",
+      "venue": "stock",
+      "ticker": "NVDA",
+      "shares": 0.028118321898549094,
+      "price": 180.25,
+      "size_usd": 5.068327522213474,
+      "pnl": 0.06832752221347427,
+      "cost_basis": 5.0
+    },
+    {
+      "time": "2026-03-15T11:00:04.102325+00:00",
+      "action": "sell",
+      "venue": "stock",
+      "ticker": "TSLA",
+      "shares": 0.012603029768356313,
+      "price": 391.2,
+      "size_usd": 4.930305245380989,
+      "pnl": -0.06969475461901098,
+      "cost_basis": 5.0
+    },
+    {
+      "time": "2026-03-15T11:00:04.124376+00:00",
+      "action": "sell",
+      "venue": "stock",
+      "ticker": "META",
+      "shares": 0.007753620940979437,
+      "price": 613.71,
+      "size_usd": 4.758474707688491,
+      "pnl": -0.24152529231150943,
+      "cost_basis": 5.0
+    }
+  ],
+  "last_updated": "2026-03-15T11:00:04.124415+00:00"
+}
