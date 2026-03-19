@@ -623,7 +623,7 @@ def run_phase1_kalshi_optimization(mode, bankroll, max_pos_usd):
         )
         
         logger.info(f"Phase 1 optimization complete - result: {result}")
-        return 1
+        return 1 if result and result > 0 else 0
     except Exception as e:
         logger.error(f"Phase 1 error: {str(e)}")
         return 0

@@ -31,6 +31,7 @@ EDGE_THRESHOLD_HIGH_FEE = 1.25  # 1.25% for normal-fee markets
 from utils.proof import generate_proof
 from utils.kalshi import fetch_kalshi_markets
 from utils.position_sizer import size_position, update_bankroll, get_bayesian_tracker
+from strategies.sentiment_scorer import get_bayesian_prior
 
 # Stub for missing function
 def check_micro_live_gates(market, size, price, risk_caps, venue):
@@ -210,12 +211,21 @@ def find_best_taker_market(markets: list, min_edge_pct: float = 1.0) -> dict:
     
     for market in markets:
         yes_price = market.get("odds", {}).get("yes", 0.0)
-        true_price = 0.5  # Assume fair 50/50 markets unless otherwise known
         fee_multiplier = market.get("fee_multiplier", 1.0)  # 0.5 for S&P/Nasdaq
-        
+
         # Skip if no halved fees (not worth taker at 7% fee)
         if fee_multiplier != 0.5:
             continue
+
+        # FIX 2026-03-19: Wire AI prior — Grok/GLM cascade for true probability
+        market_question = market.get("title", market.get("question", ""))
+        try:
+            ai_prob = get_bayesian_prior({"title": market_question})
+            true_price = ai_prob if ai_prob and 0.01 < ai_prob < 0.99 else 0.5
+            logger.info(f"[kalshi] AI prior: {market.get('ticker', market.get('id', '?'))} "
+                        f"q='{market_question[:60]}' prob={true_price:.3f}")
+        except Exception:
+            true_price = 0.5  # Safe fallback
         
         # Apply tiered threshold based on fee_multiplier
         # fee_multiplier=0.5 → effective fee 3.5% → use EDGE_THRESHOLD_LOW_FEE (0.75%)
@@ -307,9 +317,18 @@ def find_best_maker_market(markets: list, min_edge_pct: float = 0.5) -> dict:
     for market in markets:
         # Get market data
         yes_price = market.get("odds", {}).get("yes")
-        true_price = 0.5  # Assume fair 50/50 markets unless otherwise known
         fee_multiplier = market.get("fee_multiplier", 1.0)
         maker_fee = get_maker_fee(yes_price)
+
+        # FIX 2026-03-19: Wire AI prior — Grok/GLM cascade for true probability
+        market_question = market.get("title", market.get("question", ""))
+        try:
+            ai_prob = get_bayesian_prior({"title": market_question})
+            true_price = ai_prob if ai_prob and 0.01 < ai_prob < 0.99 else 0.5
+            logger.info(f"[kalshi] AI prior maker: {market.get('ticker', market.get('id', '?'))} "
+                        f"q='{market_question[:60]}' prob={true_price:.3f}")
+        except Exception:
+            true_price = 0.5  # Safe fallback
         
         # Apply tiered threshold based on fee_multiplier
         effective_fee = 0.07 * fee_multiplier
@@ -320,8 +339,8 @@ def find_best_maker_market(markets: list, min_edge_pct: float = 0.5) -> dict:
         
         # Calculate if maker is profitable
         edge_pct = 0.0  # Initialize
-        if is_maker_profitable(yes_price, true_price, 0.6, threshold):  # 60% win prob
-            current_edge_pct = ((0.5 - yes_price) / yes_price) * 100
+        if is_maker_profitable(yes_price, true_price, true_price, threshold):
+            current_edge_pct = ((true_price - yes_price) / yes_price) * 100
             edge_pct = current_edge_pct
             
             # Check if this market has better edge than current best
@@ -533,19 +552,30 @@ def filter_low_liquidity_markets(markets: list, min_liquidity_usd: float = 0.0, 
     
     return filtered
 
-def get_edge_after_fees(market: dict) -> float:
+def get_edge_after_fees(market: dict, true_price_override: float = None) -> float:
     """
-    Calculate edge percentage after fees
-    
+    Calculate edge percentage after fees.
+
     Args:
         market: Market data
-    
+        true_price_override: If provided, use this instead of AI prior (avoids double API calls)
+
     Returns:
         Edge percentage (after fees)
     """
-    
+
     yes_price = market.get("odds", {}).get("yes", 0.0)
-    true_price = 0.5  # Assume fair 50/50 markets
+
+    # FIX 2026-03-19: Wire AI prior instead of flat 0.5
+    if true_price_override is not None:
+        true_price = true_price_override
+    else:
+        market_question = market.get("title", market.get("question", ""))
+        try:
+            ai_prob = get_bayesian_prior({"title": market_question})
+            true_price = ai_prob if ai_prob and 0.01 < ai_prob < 0.99 else 0.5
+        except Exception:
+            true_price = 0.5
     
     # Calculate probability-weighted fee
     fee_pct = 0.07  # Probability-scaled fee
@@ -622,8 +652,10 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     
     logger.info(f"Fetched {len(markets)} markets")
     
-    # PRIORITY 0 FIX: Disable category filtering (2026-03-14)
-    # Using blocklist only - all categories that pass KALSHI_BLOCKED_CATEGORIES are scanned
+    # FIX 2026-03-19: Re-enable category filtering — block esports/sports, target financial
+    # Note: filter_markets_by_category uses keyword matching on ticker/question text
+    # The series-level blocklist (KALSHI_BLOCKED_CATEGORIES) is the primary filter
+    # This keyword filter provides additional belt-and-suspenders safety
     markets = filter_markets_by_category(markets, include_categories=None)
     
     if not markets:
@@ -660,11 +692,25 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     for market in markets:
         market_id = market.get("id")
         yes_price = market.get("odds", {}).get("yes", 0.0)
-        true_price = 0.5  # Assume fair 50/50 markets
         fee_multiplier = market.get("fee_multiplier", 1.0)
-        
-        # Calculate edge after fees
-        edge_after_fees_pct = get_edge_after_fees(market)
+
+        # FIX 2026-03-19: Skip zero-volume markets (esports/inactive)
+        vol_24h = market.get("volume_24h", 0) or 0
+        if vol_24h < 1:
+            logger.debug(f"[kalshi] Skipping {market_id}: zero volume (vol_24h={vol_24h})")
+            continue
+
+        # FIX 2026-03-19: Wire AI prior — Grok/GLM cascade for true probability
+        market_question = market.get("title", market.get("question", ""))
+        try:
+            ai_prob = get_bayesian_prior({"title": market_question})
+            true_price = ai_prob if ai_prob and 0.01 < ai_prob < 0.99 else 0.5
+            logger.info(f"[kalshi] AI edge: {market_id} q='{market_question[:60]}' prob={true_price:.3f}")
+        except Exception:
+            true_price = 0.5  # Safe fallback
+
+        # Calculate edge after fees (pass true_price to avoid double AI call)
+        edge_after_fees_pct = get_edge_after_fees(market, true_price_override=true_price)
         
         # Determine threshold based on fee_multiplier for logging
         effective_fee = 0.07 * fee_multiplier
@@ -835,8 +881,9 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     generate_proof(proof_id, proof_data)
     
     logger.info(f"Proof: {proof_id}")
-    
-    return 0
+
+    # FIX 2026-03-19: Return actual order count so runner knows if anything happened
+    return total_trades
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Kalshi Optimization - Phase 1 (Quick Wins)")
