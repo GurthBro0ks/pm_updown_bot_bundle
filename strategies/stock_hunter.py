@@ -538,7 +538,7 @@ def optimize_stock_hunter_strategy(bankroll, max_pos_usd, mode="shadow"):
         # For stocks: sentiment = confidence, price = stock price
         kelly_size, sizing_meta = size_position(
             market_id=f"stock_{ticker}",
-            market_price=1.0,  # Stock purchase at market
+            market_price=sentiment,  # Use sentiment as probability estimate
             bankroll=bankroll,
             current_positions=current_positions,
             estimated_prob=sentiment,  # Use sentiment as our probability estimate

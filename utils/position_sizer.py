@@ -40,9 +40,9 @@ CIRCUIT_BREAKER_FILE = DATA_DIR / "circuit_breaker.json"
 DEFAULT_CONFIG = {
     "kelly_fraction": 0.20,          # Fractional Kelly (20% = 0.2)
     "max_position_pct": 0.05,         # Max 5% of bankroll per position
-    "min_position_usd": 0.01,        # Minimum $0.01 position (was 1.00)
+    "min_position_usd": 1.00,        # Minimum $1.00 position
     "max_concurrent_positions": 10,  # Max open positions
-    "min_edge_threshold": 0.0,       # Min 0% edge to trade (was 0.05)
+    "min_edge_threshold": 0.05,       # Min 5% edge to trade
     "max_drawdown_pct": 0.30,        # Halt at 30% drawdown
 }
 
