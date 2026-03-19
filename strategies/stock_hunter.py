@@ -538,12 +538,12 @@ def optimize_stock_hunter_strategy(bankroll, max_pos_usd, mode="shadow"):
         # For stocks: sentiment = confidence, price = stock price
         kelly_size, sizing_meta = size_position(
             market_id=f"stock_{ticker}",
-            market_price=sentiment,  # Use sentiment as probability estimate
+            market_price=0.5,  # neutral baseline: edge = sentiment - 0.5
             bankroll=bankroll,
             current_positions=current_positions,
-            estimated_prob=sentiment,  # Use sentiment as our probability estimate
-            odds=price,  # Stock price as odds proxy
-            fees_pct=0.0,  # No fees for stock trades
+            estimated_prob=sentiment,
+            odds=price,
+            fees_pct=0.0,
         )
 
         if sizing_meta.get("blocked"):
