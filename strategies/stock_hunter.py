@@ -36,6 +36,7 @@ from config import (
 
 from utils.sentiment import apply_earnings_multiplier
 from utils.position_sizer import size_position, get_circuit_breaker, update_bankroll
+from strategies.sentiment_scorer import get_ai_stock_sentiment
 
 from utils.logging_config import setup_logging
 
@@ -422,6 +423,17 @@ def analyze_ticker(ticker):
         if combined != raw_sentiment:
             result["earnings_boost"] = True
             logger.info(f"[STOCK_HUNTER] {ticker}: earnings boost applied. After meme={raw_sentiment:.2f} -> Final={combined:.2f}")
+
+    # AI ENHANCEMENT (Priority 1F) — Grok/GLM cascade blends with Finnhub/AV score
+    # Skipped if no Finnhub/AV data available (combined is None)
+    if combined is not None:
+        headlines = [n.get("headline", "") for n in news if n.get("headline")]
+        raw_before_ai = combined
+        combined = get_ai_stock_sentiment(ticker, combined, headlines, blend_weight=0.5)
+        if combined != raw_before_ai:
+            result["ai_enhanced"] = True
+            logger.info(f"[STOCK_HUNTER] {ticker}: AI enhanced. Finnhub/AV={raw_before_ai:.3f} -> "
+                       f"AI-blended={combined:.3f}")
 
     result["combined_sentiment"] = combined
     # Only pass threshold if we have valid sentiment data

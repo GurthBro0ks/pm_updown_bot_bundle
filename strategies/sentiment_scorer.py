@@ -258,6 +258,69 @@ def get_bayesian_prior(market: dict, providers: list = None) -> float:
     return result["probability"]
 
 
+def get_ai_stock_sentiment(ticker: str, finnhub_score: float, news_headlines: list = None,
+                           blend_weight: float = 0.5) -> float:
+    """
+    Enhance Finnhub/AlphaVantage sentiment with AI reasoning via Grok/GLM cascade.
+
+    Args:
+        ticker: Stock symbol (e.g., "AAPL")
+        finnhub_score: Base sentiment from Finnhub/AlphaVantage (0-1)
+        news_headlines: Optional list of headline strings for context
+        blend_weight: Weight for AI score in blend (0=pure finnhub, 1=pure AI)
+
+    Returns:
+        float: Blended sentiment score (0-1)
+    """
+    try:
+        from config import SENTIMENT_PROVIDERS
+    except ImportError:
+        SENTIMENT_PROVIDERS = ["grok_420", "grok_fast", "glm"]
+
+    # Build headline context
+    headline_context = ""
+    if news_headlines:
+        top = news_headlines[:5]
+        headline_context = "\n\nRecent headlines:\n" + "\n".join(f"- {h}" for h in top)
+
+    prompt = (
+        f"You are a quantitative analyst estimating 24-hour stock outperform probability.\n\n"
+        f"Ticker: {ticker}\n"
+        f"News sentiment score (0-1 scale, higher = more bullish): {finnhub_score:.3f}"
+        f"{headline_context}\n\n"
+        f"Based on the news sentiment and any known catalysts, estimate the probability "
+        f"that {ticker} will outperform the S&P 500 in the next 24 hours.\n\n"
+        f"Respond with ONLY a single decimal number between 0.0 and 1.0, nothing else."
+    )
+
+    ai_score = None
+    used_provider = None
+
+    for provider in SENTIMENT_PROVIDERS:
+        result = _call_provider(provider, prompt)
+        if result is not None:
+            try:
+                ai_score = float(result.get("probability", 0.5))
+                ai_score = max(0.0, min(1.0, ai_score))
+                used_provider = provider
+                logger.info(f"[scorer] AI stock prior: {ticker} provider={used_provider} "
+                           f"finnhub={finnhub_score:.3f} ai={ai_score:.3f}")
+                break
+            except (ValueError, TypeError):
+                ai_score = None
+                continue
+
+    if ai_score is not None:
+        blended = (1 - blend_weight) * finnhub_score + blend_weight * ai_score
+        logger.info(f"[scorer] AI stock blended: {ticker} finnhub={finnhub_score:.3f} "
+                    f"ai={ai_score:.3f} blended={blended:.3f} (weight={blend_weight})")
+        return blended
+    else:
+        logger.warning(f"[scorer] AI stock all-providers-failed for {ticker}, "
+                       f"using pure finnhub={finnhub_score:.3f}")
+        return finnhub_score
+
+
 if __name__ == "__main__":
     import sys
     logging.basicConfig(level=logging.INFO, format="%(message)s")
