@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Cross-venue arbitrage scanner
-Scans for price discrepancies across prediction markets
+DEPRECATED 2026-03-19 — stub with no real logic, cron removed.
+Cross-venue arbitrage scanner — stub implementation.
 """
 
 import argparse
