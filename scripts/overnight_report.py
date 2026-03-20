@@ -8,7 +8,7 @@ Run via cron or heartbeat for automated monitoring.
 import json
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Configuration
@@ -25,6 +25,51 @@ def log(msg: str):
     print(line)
     with open(LOG_FILE, 'a') as f:
         f.write(line + "\n")
+
+
+def check_gdelt_health() -> dict:
+    """Check GDELT geopolitical signal health."""
+    import subprocess
+
+    cache_file = Path("/tmp/gdelt_signal_cache.json")
+    signal = None
+
+    # Try to read latest cached signal
+    if cache_file.exists():
+        try:
+            signal = json.loads(cache_file.read_text())
+        except Exception:
+            pass
+
+    if signal is None:
+        return {
+            "status": "no_data",
+            "geo_risk_score": None,
+            "event_count": 0,
+            "cached": False,
+        }
+
+    # Check if signal is stale (>24h)
+    timestamp_str = signal.get("timestamp", "")
+    stale = True
+    try:
+        if timestamp_str:
+            sig_time = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
+            age_hours = (datetime.now(timezone.utc) - sig_time).total_seconds() / 3600
+            stale = age_hours > 24
+    except Exception:
+        stale = True
+
+    return {
+        "status": "stale" if stale else "fresh",
+        "geo_risk_score": signal.get("geo_risk_score"),
+        "event_count": signal.get("event_count", 0),
+        "avg_tone": signal.get("avg_tone"),
+        "regions": signal.get("regions", {}),
+        "cached": signal.get("cached", False),
+        "timestamp": timestamp_str,
+        "stale": stale,
+    }
 
 
 def check_proof_packs() -> dict:
@@ -154,6 +199,7 @@ def generate_report() -> dict:
         "timestamp": datetime.now().isoformat(),
         "bot_dir": str(BOT_DIR),
         "proofs": check_proof_packs(),
+        "gdelt": check_gdelt_health(),
         "system": check_system_health(),
         "gateway": check_gateway(),
         "git": check_git_status(),
@@ -162,6 +208,8 @@ def generate_report() -> dict:
     
     # Determine overall status
     if report["proofs"]["stale"] > 0:
+        report["status"] = "warning"
+    if report["gdelt"].get("stale", False):
         report["status"] = "warning"
     if report["system"]["disk_used_pct"] > 80:
         report["status"] = "warning"
@@ -193,7 +241,23 @@ def print_summary(report: dict):
     print(f"  Stale (>24h): {report['proofs']['stale']}")
     if report['proofs']['stale_list']:
         print(f"  Stale files: {', '.join(report['proofs']['stale_list'][:5])}")
-    
+
+    print()
+    print("🌍 GDELT Geopolitical Signal:")
+    g = report.get('gdelt', {})
+    status_icon = "✓" if g.get('status') == 'fresh' else "⚠"
+    print(f"  {status_icon} Status: {g.get('status', 'unknown')}")
+    if g.get('geo_risk_score') is not None:
+        print(f"  Risk Score: {g.get('geo_risk_score'):.4f}")
+        print(f"  Event Count: {g.get('event_count', 0)}")
+        print(f"  Avg Tone: {g.get('avg_tone', 0):.4f}")
+        if g.get('regions'):
+            print(f"  Regions: {g.get('regions')}")
+    else:
+        print(f"  Risk Score: no data")
+    if g.get('timestamp'):
+        print(f"  Timestamp: {g.get('timestamp')[:19]}")
+
     print()
     print("🖥️ System Health:")
     s = report['system']

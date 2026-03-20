@@ -255,7 +255,21 @@ def score_markets(markets: list, providers: list = None, max_markets: int = 50) 
 def get_bayesian_prior(market: dict, providers: list = None) -> float:
     """Drop-in replacement for flat 0.50 prior in BayesianEstimate."""
     result = score_market(market, providers)
-    return result["probability"]
+    base_prob = result["probability"]
+
+    # Apply GDELT geopolitical prior (weight: 0.15 relative to AI cascade)
+    # GDELT is fetched lazily here to avoid circular imports
+    try:
+        from strategies.gdelt_signal import apply_gdelt_prior
+        base_prob = apply_gdelt_prior(
+            base_prob,
+            market_title=market.get("title", ""),
+            market_category=market.get("category", ""),
+        )
+    except Exception:
+        pass  # GDELT unavailable — use pure AI prior
+
+    return base_prob
 
 
 def get_ai_stock_sentiment(ticker: str, finnhub_score: float, news_headlines: list = None,
