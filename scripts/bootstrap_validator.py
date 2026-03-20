@@ -139,13 +139,28 @@ def compute_pnl_metrics(trades: list[dict]) -> dict:
             "mean_pnl": 0.0,
             "total_pnl": 0.0,
             "sharpe_ratio": None,
+            "avg_win": 0.0,
+            "avg_loss": 0.0,
+            "payoff_ratio": None,
+            "breakeven_win_rate": None,
         }
 
     pnls = [t["pnl_usd"] for t in trades]
-    wins = sum(1 for p in pnls if p > 0)
-    win_rate = wins / len(pnls)
-    mean_pnl = sum(pnls) / len(pnls)
+    wins = [p for p in pnls if p > 0]
+    losses = [p for p in pnls if p < 0]
+    win_rate = len(wins) / len(pnls) if pnls else 0.0
+    mean_pnl = sum(pnls) / len(pnls) if pnls else 0.0
     total_pnl = sum(pnls)
+    avg_win = sum(wins) / len(wins) if wins else 0.0
+    avg_loss = abs(sum(losses) / len(losses)) if losses else 0.0
+
+    # Payoff ratio and breakeven win rate
+    if avg_loss > 0 and avg_win > 0:
+        payoff_ratio = avg_win / avg_loss
+        breakeven_win_rate = 1.0 / (1.0 + payoff_ratio)
+    else:
+        payoff_ratio = None
+        breakeven_win_rate = None
 
     # Sharpe ratio (annualized, assuming 1 trade/day, 252 trading days)
     if len(pnls) >= 2:
@@ -165,6 +180,10 @@ def compute_pnl_metrics(trades: list[dict]) -> dict:
         "mean_pnl": mean_pnl,
         "total_pnl": total_pnl,
         "sharpe_ratio": sharpe,
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "payoff_ratio": payoff_ratio,
+        "breakeven_win_rate": breakeven_win_rate,
     }
 
 
@@ -207,8 +226,10 @@ def run_bootstrap(trades: list[dict], n_iterations: int, rng: random.Random) -> 
         idx_high = int(0.975 * len(sorted_vals)) - 1
         return (sorted_vals[idx_low], sorted_vals[idx_high])
 
-    # P-value: proportion of samples with win_rate <= 0.50
-    p_value = sum(1 for wr in win_rates if wr <= 0.50) / n_iterations
+    # P-value: proportion of samples with mean_pnl <= 0 (not profitable)
+    p_value_not_profitable = sum(1 for mp in mean_pnls if mp <= 0) / n_iterations
+    # Legacy p-value for win rate (kept for backward compatibility)
+    p_value_no_edge = sum(1 for wr in win_rates if wr <= 0.50) / n_iterations
 
     ci_win_rate = ci_95(win_rates)
     ci_mean_pnl = ci_95(mean_pnls)
@@ -219,10 +240,15 @@ def run_bootstrap(trades: list[dict], n_iterations: int, rng: random.Random) -> 
         "observed_mean_pnl": observed["mean_pnl"],
         "observed_total_pnl": observed["total_pnl"],
         "observed_sharpe": observed["sharpe_ratio"],
+        "observed_avg_win": observed["avg_win"],
+        "observed_avg_loss": observed["avg_loss"],
+        "observed_payoff_ratio": observed["payoff_ratio"],
+        "observed_breakeven_win_rate": observed["breakeven_win_rate"],
         "ci_95_win_rate": [round(ci_win_rate[0], 4), round(ci_win_rate[1], 4)],
         "ci_95_mean_pnl": [round(ci_mean_pnl[0], 4), round(ci_mean_pnl[1], 4)],
         "ci_95_sharpe": [round(ci_sharpe[0], 4), round(ci_sharpe[1], 4)] if sharpe_ratios else [0.0, 0.0],
-        "p_value_no_edge": round(p_value, 6),
+        "p_value_no_edge": round(p_value_no_edge, 6),
+        "p_value_not_profitable": round(p_value_not_profitable, 6),
     }
 
 
@@ -230,22 +256,48 @@ def run_bootstrap(trades: list[dict], n_iterations: int, rng: random.Random) -> 
 # Verdict
 # ---------------------------------------------------------------------------
 
-def determine_verdict(total_trades: int, p_value: float, ci_win_rate: list[float], min_trades: int) -> tuple[str, str]:
-    """Determine validation verdict based on bootstrap results."""
+def determine_verdict(
+    total_trades: int,
+    p_value_not_profitable: float,
+    ci_mean_pnl: list[float],
+    observed_mean_pnl: float,
+    min_trades: int,
+) -> tuple[str, str]:
+    """Determine validation verdict based on EV-based bootstrap results."""
     if total_trades < min_trades:
         return "INSUFFICIENT_DATA", f"Only {total_trades} resolved trades found (minimum {min_trades} required)"
 
-    if p_value < 0.05 and ci_win_rate[0] > 0.50:
-        return "EDGE_CONFIRMED", "Win rate CI excludes 50% and p-value < 0.05 — edge is statistically significant"
-    elif p_value < 0.05:
-        return "NO_EDGE", "p-value < 0.05 but CI includes 50% — edge is not reliably positive"
+    # EDGE_CONFIRMED: p < 0.05 AND CI lower bound for mean_pnl > 0
+    if p_value_not_profitable < 0.05 and ci_mean_pnl[0] > 0:
+        reason = f"Mean PnL significantly > $0 (p={p_value_not_profitable:.4f}). "
+        reason += f"95% CI [${ci_mean_pnl[0]:.4f}, ${ci_mean_pnl[1]:.4f}] excludes zero."
+        return "EDGE_CONFIRMED", reason
+
+    # MARGINAL_EDGE: p < 0.10 AND observed mean_pnl > 0 (but CI includes zero)
+    if p_value_not_profitable < 0.10 and observed_mean_pnl > 0:
+        reason = f"Mean PnL positive (${observed_mean_pnl:.4f}) but CI includes zero "
+        reason += f"(p={p_value_not_profitable:.4f}). More data needed."
+        return "MARGINAL_EDGE", reason
+
+    # NO_EDGE
+    if observed_mean_pnl <= 0:
+        return "NO_EDGE", f"Mean PnL <= $0 (${observed_mean_pnl:.4f}). No profitable edge detected."
     else:
-        return "NO_EDGE", f"p-value {p_value:.4f} >= 0.05 — no statistically significant edge detected"
+        return "NO_EDGE", f"p-value={p_value_not_profitable:.4f} >= 0.10. Mean PnL not significantly > $0."
 
 
 # ---------------------------------------------------------------------------
 # Report generation
 # ---------------------------------------------------------------------------
+
+def classify_strategy(win_rate: float, payoff_ratio: float) -> str:
+    """Classify strategy type based on win rate and payoff ratio."""
+    if payoff_ratio is not None and payoff_ratio > 3 and win_rate < 0.35:
+        return "asymmetric_payoff"
+    if win_rate > 0.60 and payoff_ratio is not None and payoff_ratio < 1.5:
+        return "high_frequency"
+    return "balanced"
+
 
 def build_report(
     trades: list[dict],
@@ -256,54 +308,88 @@ def build_report(
     source: str,
 ) -> dict:
     """Build the validation report dictionary."""
-    return {
+    win_rate = bootstrap_result["observed_win_rate"]
+    payoff_ratio = bootstrap_result["observed_payoff_ratio"]
+    breakeven_wr = bootstrap_result["observed_breakeven_win_rate"]
+    excess_wr = (win_rate - breakeven_wr) if (breakeven_wr is not None and win_rate is not None) else None
+    strategy_type = classify_strategy(win_rate, payoff_ratio)
+
+    report = {
         "validator": "bootstrap_v1",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "source": source,
         "total_trades": len(trades),
-        "observed_win_rate": round(bootstrap_result["observed_win_rate"], 4),
+        "observed_win_rate": round(win_rate, 4),
         "observed_mean_pnl": round(bootstrap_result["observed_mean_pnl"], 4),
         "observed_total_pnl": round(bootstrap_result["observed_total_pnl"], 4),
         "observed_sharpe": round(bootstrap_result["observed_sharpe"], 4) if bootstrap_result["observed_sharpe"] is not None else None,
+        "observed_avg_win": round(bootstrap_result["observed_avg_win"], 4),
+        "observed_avg_loss": round(bootstrap_result["observed_avg_loss"], 4),
+        "observed_payoff_ratio": round(payoff_ratio, 4) if payoff_ratio is not None else None,
+        "observed_breakeven_win_rate": round(breakeven_wr, 4) if breakeven_wr is not None else None,
+        "excess_win_rate": round(excess_wr, 4) if excess_wr is not None else None,
+        "strategy_type": strategy_type,
         "bootstrap_iterations": n_iterations,
         "ci_95_win_rate": bootstrap_result["ci_95_win_rate"],
         "ci_95_mean_pnl": bootstrap_result["ci_95_mean_pnl"],
         "ci_95_sharpe": bootstrap_result["ci_95_sharpe"],
         "p_value_no_edge": bootstrap_result["p_value_no_edge"],
+        "p_value_not_profitable": bootstrap_result["p_value_not_profitable"],
         "verdict": verdict,
         "verdict_reason": verdict_reason,
     }
+    return report
 
 
 def print_human_report(report: dict):
     """Print a human-readable summary to stdout."""
     wr = report["observed_win_rate"]
+    mean_pnl = report["observed_mean_pnl"]
+    total_pnl = report["observed_total_pnl"]
+    avg_win = report["observed_avg_win"]
+    avg_loss = report["observed_avg_loss"]
+    payoff_ratio = report["observed_payoff_ratio"]
+    breakeven_wr = report["observed_breakeven_win_rate"]
+    excess_wr = report["excess_win_rate"]
     ci_wr = report["ci_95_win_rate"]
     ci_pnl = report["ci_95_mean_pnl"]
     ci_sh = report["ci_95_sharpe"]
+    pval_np = report["p_value_not_profitable"]
 
     wr_str = f"{wr * 100:.1f}%"
+    mean_pnl_str = f"${mean_pnl:.4f}/trade"
+    total_pnl_str = f"${total_pnl:.2f}"
+    avg_win_str = f"${avg_win:.2f}" if avg_win else "N/A"
+    avg_loss_str = f"${avg_loss:.2f}" if avg_loss else "N/A"
+    payoff_str = f"{payoff_ratio:.1f}:1" if payoff_ratio else "N/A"
+    be_wr_str = f"{breakeven_wr * 100:.1f}%" if breakeven_wr else "N/A"
+    excess_str = f"+{excess_wr * 100:.1f}%" if excess_wr else "N/A"
     ci_wr_str = f"[{ci_wr[0] * 100:.1f}%, {ci_wr[1] * 100:.1f}%]"
     ci_pnl_str = f"[${ci_pnl[0]:.4f}, ${ci_pnl[1]:.4f}]"
     ci_sh_str = f"[{ci_sh[0]:.2f}, {ci_sh[1]:.2f}]"
-    pval_str = f"{report['p_value_no_edge']:.4f}"
+    pval_np_str = f"{pval_np:.4f}"
 
     sep = "=" * 60
     print()
     print(sep)
     print("BOOTSTRAP VALIDATION REPORT".center(60))
     print(sep)
-    print(f"  Trades analyzed:     {report['total_trades']}")
-    print(f"  Observed win rate:   {wr_str}")
-    print(f"  95% CI win rate:     {ci_wr_str}")
-    print(f"  95% CI mean PnL:     {ci_pnl_str}")
-    print(f"  95% CI Sharpe:       {ci_sh_str}")
-    print(f"  P-value (no edge):   {pval_str}")
-    print(f"  Source:              {report['source']}")
-    print(f"  Bootstrap iter:     {report['bootstrap_iterations']:,}")
-    print()
-    print(f"  Verdict:             {report['verdict']}")
-    print(f"  Reason:              {report['verdict_reason']}")
+    print(f"  Trades analyzed:       {report['total_trades']}")
+    print(f"  Observed win rate:     {wr_str}")
+    print(f"  Observed mean PnL:     {mean_pnl_str}")
+    print(f"  Observed total PnL:    {total_pnl_str}")
+    print(f"  Payoff ratio:          {payoff_str} (avg win {avg_win_str} / avg loss {avg_loss_str})")
+    print(f"  Breakeven win rate:    {be_wr_str}")
+    print(f"  Actual vs breakeven:   {wr_str} vs {be_wr_str} → {excess_str} excess")
+    print(f"  ----------------------------------------")
+    print(f"  95% CI win rate:       {ci_wr_str}")
+    print(f"  95% CI mean PnL:       {ci_pnl_str}")
+    print(f"  95% CI Sharpe:         {ci_sh_str}")
+    print(f"  P-value (not profit):  {pval_np_str}")
+    print(f"  ----------------------------------------")
+    print(f"  Verdict:               {report['verdict']}")
+    print(f"  Reason:                {report['verdict_reason']}")
+    print(f"  Strategy type:          {report['strategy_type']}")
     print(sep)
 
 
@@ -395,8 +481,9 @@ def main():
     # -------------------------------------------------------------------------
     verdict, verdict_reason = determine_verdict(
         len(trades),
-        bootstrap_result["p_value_no_edge"],
-        bootstrap_result["ci_95_win_rate"],
+        bootstrap_result["p_value_not_profitable"],
+        bootstrap_result["ci_95_mean_pnl"],
+        bootstrap_result["observed_mean_pnl"],
         min_trades,
     )
 
