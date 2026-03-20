@@ -14,6 +14,10 @@ echo "=== AUTORESEARCH RUN ==="
 echo "Started: $(date)"
 echo ""
 
+# Purge stale .pyc bytecode before running (source may have changed since last run)
+find "$BOT_DIR" -name "*.pyc" -delete 2>/dev/null || true
+find "$BOT_DIR" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+
 # Run one shadow cycle
 cd "$BOT_DIR"
 echo "[1/2] Running shadow cycle..."

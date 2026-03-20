@@ -4,9 +4,10 @@
 Maximize `composite_score` from `scripts/autoresearch_run.sh`. Higher is better.
 
 ## BASELINE
-- **-2.9589** (composite, as of 2026-03-20)
+- **-2.9516** (composite, as of 2026-03-20)
 - Sharpe: -1.9273, Max Drawdown: 0.58%, Turnover: 0.029/hr
 - 14 trades, 33% win rate, 2 active features
+- Stock phase has 19 days of proofs. Kalshi has live auth (206 markets) but thin proof data.
 
 ## SCOPE
 Files that may be modified:
@@ -50,15 +51,28 @@ bash scripts/autoresearch_run.sh
 10. **Git commit** kept changes: `git add -A && git commit -m "experiment: {hypothesis}"`
 11. **Git revert** discarded changes immediately: `git checkout -- <file>`
 
-## HYPOTHESES TO TEST (ordered by expected impact)
-- Remove Stocktwits sentiment (already returning None/disabled)
-- Remove keyword-based news scoring in stock_hunter.py
-- Change RSI period from 14 to 8 (biggest win in reference experiment)
-- Remove Marketaux if Alpha Vantage covers same signal
-- Adjust Kelly fraction bounds
-- Tune GDELT weight in Bayesian cascade (0.10, 0.15, 0.20, 0.25)
-- Simplify kalshi_optimize edge calculation
-- Test whether combined_sentiment threshold matters
+## HYPOTHESES TO TEST
+
+### STOCK-PHASE EXPERIMENTS (experiments 1–30)
+Stock phase has 19 days of proof data and 14 trades. Run these first.
+
+1. Remove Stocktwits sentiment (already returning None/disabled)
+2. Remove keyword-based news scoring in stock_hunter.py
+3. Change RSI period from 14 to 8 (biggest win in reference experiment)
+4. Remove Marketaux if Alpha Vantage covers same signal
+5. Adjust Kelly fraction bounds
+6. Tune GDELT weight in Bayesian cascade (0.10, 0.15, 0.20, 0.25)
+7. Test market_price baseline (0.5 vs 0.45 vs 0.55) — neutral baseline that edge is calculated against; was a major bug source (was 1.0!)
+8. Test Finnhub/AlphaVantage blend ratio with Grok (currently 50/50, try 30/70, 40/60, 60/40 in favor of Grok)
+9. Test position size floor (currently min_position_usd=1.00, try 2.00, 3.00)
+10. Test whether combined_sentiment threshold matters
+
+### KALSHI EXPERIMENTS (experiments 31–50)
+> **Note:** Kalshi auth fixed 2026-03-20 (commit 7a6f20a, 206 markets returned). Proof data is thin — only run these after stock-phase experiments to let Kalshi proofs accumulate during market hours.
+
+11. Simplify kalshi_optimize edge calculation
+12. Tune Kalshi category filters
+13. Adjust Kalshi maker edge formula parameters
 
 ## LOGGING
 ```bash
