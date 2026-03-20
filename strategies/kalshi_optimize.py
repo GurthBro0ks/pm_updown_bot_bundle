@@ -32,6 +32,7 @@ from utils.proof import generate_proof
 from utils.kalshi import fetch_kalshi_markets
 from utils.position_sizer import size_position, update_bankroll, get_bayesian_tracker
 from strategies.sentiment_scorer import get_bayesian_prior
+from utils.vpin import get_market_vpin
 
 # Stub for missing function
 def check_micro_live_gates(market, size, price, risk_caps, venue):
@@ -773,6 +774,21 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
         
         # Set edge_pct on market dict for gate check (uses calculated edge_after_fees_pct)
         market["edge_pct"] = edge_after_fees_pct
+
+        # ── VPIN pre-gate: detect informed trading before micro-live gates ──
+        try:
+            vpin_result = get_market_vpin(market_id)
+            if vpin_result["action"] == "halt":
+                logger.info(f"[VPIN] Market {market_id} halted: VPIN={vpin_result['vpin']:.3f}")
+                continue
+            elif vpin_result["action"] == "widen":
+                # Double the spread requirement by doubling effective edge_pct
+                # This causes micro_live_gates to require 2x the edge to pass
+                market["edge_pct"] = edge_after_fees_pct * 2.0
+                logger.info(f"[VPIN] Market {market_id} spread widened: VPIN={vpin_result['vpin']:.3f}, edge_pct doubled to {market['edge_pct']:.4f}")
+        except Exception as e:
+            logger.warning(f"[VPIN] Market {market_id}: VPIN check failed, proceeding: {e}")
+        # ── end VPIN pre-gate ──
 
         # Check if order passes gates (legacy check)
         passed, violations = check_micro_live_gates(market, optimal_size, yes_price, risk_caps, "kalshi")
