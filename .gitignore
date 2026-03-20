@@ -28,6 +28,10 @@ logs/
 # Proofs (generated)
 proofs/
 
+# Autoresearch working files (never commit)
+data/holdout/
+experiments.tsv
+
 # Backups
 backup*/
 *.backup
