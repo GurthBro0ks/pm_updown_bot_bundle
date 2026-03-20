@@ -168,8 +168,9 @@ class KalshiOrderClient:
             dict with KALSHI-ACCESS-KEY, KALSHI-ACCESS-TIMESTAMP, KALSHI-ACCESS-SIGNATURE
         """
         ts = str(int(time.time() * 1000))  # milliseconds!
-        # Signing string: timestamp + method + path (no /trade-api/v2 prefix, no query params)
-        to_sign = f"{ts}{method}{path}"
+        # Signing string: timestamp + method + full_path (includes /trade-api/v2 prefix, no query params)
+        path_without_query = path.split('?')[0]
+        to_sign = f"{ts}{method}/trade-api/v2{path_without_query}"
         sig = self._sign_pss(to_sign)
         return {
             "KALSHI-ACCESS-KEY": self.api_key,

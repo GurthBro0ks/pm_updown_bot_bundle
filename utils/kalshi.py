@@ -35,20 +35,24 @@ KALSHI_BLOCKED_PREFIXES = ()
 
 def get_kalshi_headers(method, path, api_key, private_key):
     """Generate Kalshi API headers"""
-    timestamp = str(int(time.time()))
-    msg = f"{timestamp}{method}/trade-api/v2{path}"
-    
+    timestamp = str(int(time.time() * 1000))  # milliseconds!
+    path_without_query = path.split('?')[0]
+    msg = f"{timestamp}{method}/trade-api/v2{path_without_query}"
+
     signature = private_key.sign(
-        msg.encode(),
-        padding.PKCS1v15(),
-        hashes.SHA256()
+        msg.encode("utf-8"),
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.DIGEST_LENGTH,
+        ),
+        hashes.SHA256(),
     )
     sig_b64 = base64.b64encode(signature).decode()
-    
+
     return {
         "KALSHI-ACCESS-KEY": api_key,
         "KALSHI-ACCESS-SIGNATURE": sig_b64,
-        "KALSHI-ACCESS-TIMESTAMP": timestamp
+        "KALSHI-ACCESS-TIMESTAMP": timestamp,
     }
 
 
