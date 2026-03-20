@@ -546,17 +546,24 @@ def optimize_stock_hunter_strategy(bankroll, max_pos_usd, mode="shadow"):
             logger.warning(f"Skipping {ticker}: no price data")
             continue
 
-        # Use position_sizer for Kelly criterion with EV filter
-        # For stocks: sentiment = confidence, price = stock price
-        kelly_size, sizing_meta = size_position(
-            market_id=f"stock_{ticker}",
-            market_price=0.5,  # neutral baseline: edge = sentiment - 0.5
-            bankroll=bankroll,
-            current_positions=current_positions,
-            estimated_prob=sentiment,
-            odds=price,
-            fees_pct=0.0,
-        )
+        # Wrap position sizing in try/except to prevent one crash from stopping all orders
+        kelly_size = 0.0
+        sizing_meta = {}
+        try:
+            # Use position_sizer for Kelly criterion with EV filter
+            # For stocks: sentiment = confidence, price = stock price
+            kelly_size, sizing_meta = size_position(
+                market_id=f"stock_{ticker}",
+                market_price=0.5,  # neutral baseline: edge = sentiment - 0.5
+                bankroll=bankroll,
+                current_positions=current_positions,
+                estimated_prob=sentiment,
+                odds=price,
+                fees_pct=0.0,
+            )
+        except Exception as e:
+            logger.error(f"Order processing failed for {ticker}: {e}")
+            continue
 
         if sizing_meta.get("blocked"):
             logger.info(f"Skipping {ticker}: {sizing_meta.get('block_reason', 'blocked')}")
@@ -564,7 +571,7 @@ def optimize_stock_hunter_strategy(bankroll, max_pos_usd, mode="shadow"):
 
         # Track positions for next iteration
         current_positions += 1
-        
+
         # Calculate multiplier based on max position
         kelly_mult = sizing_meta.get("kelly", {}).get("kelly_fraction", 0) if kelly_size > 0 else 0
 
@@ -581,27 +588,25 @@ def optimize_stock_hunter_strategy(bankroll, max_pos_usd, mode="shadow"):
         }
         orders.append(order)
         logger.info(f"Order: {ticker} ${kelly_size:.2f} @ ${price:.2f} (sentiment: {order['sentiment']:.2f}, kelly: {order['kelly_multiplier']:.0%})")
-        
+
         # Execute paper money trade (virtual $100 account)
-        # BUG FIX: Check max positions AND duplicate tickers before buying
         if mode == "shadow" and PAPER_MONEY_ENABLED:
             try:
                 # Get current positions to check limits
-                current_positions = paper_money.positions
+                paper_positions = paper_money.positions
                 max_positions = RISK_CAPS.get("stock_max_open_pos", 3)
-                
+
                 # Check if already holding this ticker (duplicate check)
-                existing_tickers = [p["ticker"] for p in current_positions]
+                existing_tickers = [p["ticker"] for p in paper_positions]
                 if ticker in existing_tickers:
                     logger.warning(f"[STOCK_HUNTER] Skipping {ticker} - already in portfolio")
-                elif len(current_positions) >= max_positions:
+                elif len(paper_positions) >= max_positions:
                     logger.warning(f"[STOCK_HUNTER] Skipping {ticker} - max positions ({max_positions}) reached")
                 else:
-                    # Pass sentiment to execute_buy
                     paper_money.execute_buy("stock", ticker, kelly_size, price, sentiment=sentiment)
             except Exception as e:
                 logger.warning(f"Paper money trade failed: {e}")
-        
+
         # Log to paper trading PnL tracker (for shadow mode)
         if mode == "shadow" and PAPER_TRADING_ENABLED:
             try:
