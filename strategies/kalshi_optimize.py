@@ -9,8 +9,10 @@ Configuration centralized in config.py
 import argparse
 import json
 import logging
+import os
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,6 +35,7 @@ from utils.kalshi import fetch_kalshi_markets
 from utils.position_sizer import size_position, update_bankroll, get_bayesian_tracker
 from strategies.sentiment_scorer import get_bayesian_prior
 from utils.vpin import get_market_vpin
+from utils.kalshi_orders import KalshiOrderClient, SafetyLimitError
 
 # Stub for missing function
 def check_micro_live_gates(market, size, price, risk_caps, venue):
@@ -86,6 +89,27 @@ def check_micro_live_gates(market, size, price, risk_caps, venue):
     
     passed = len(violations) == 0
     return passed, violations
+
+
+def get_order_client():
+    """
+    Initialize Kalshi order client lazily.
+    Returns None if keys are missing or init fails.
+    """
+    try:
+        key_id = os.getenv('KALSHI_TRADING_KEY_ID')
+        key_file = os.getenv('KALSHI_TRADING_KEY_FILE')
+        if not key_id or not key_file:
+            logger.warning("KALSHI_TRADING_KEY_ID or KALSHI_TRADING_KEY_FILE not set")
+            return None
+        return KalshiOrderClient(
+            api_key=key_id,
+            private_key_path=key_file,
+            base_url='https://api.elections.kalshi.com/trade-api/v2'
+        )
+    except Exception as e:
+        logger.error(f"Failed to init order client: {e}")
+        return None
 
 # Load environment
 from dotenv import load_dotenv
@@ -820,17 +844,74 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
         current_positions += 1
         optimal_size = order_size
 
-        # Execute trade (in real-live mode only)
-        if mode == "real-live" and not dry_run:
-            # This is where actual order placement would happen
-            # For now, just log what would happen
-            logger.info(f"Would place order on {market_id}: {order_side} ${optimal_size:.2f} @ {order_price:.4f}")
+        # Execute trade
+        if mode == "micro-live":
+            # Real penny trade with safety limits enforced inside client
+            client = get_order_client()
+            if client is None:
+                logger.error("Cannot execute micro-live: order client init failed")
+                continue
+
+            # Pre-flight: check balance
+            try:
+                balance = client.get_balance()
+                available = balance.get('available_balance', 0)
+                if available < 10:  # less than 10 cents
+                    logger.warning(f"Balance too low for micro-live: ${available}")
+                    continue
+            except Exception as e:
+                logger.error(f"Balance check failed: {e}")
+                continue
+
+            # Build order — price in cents (1-99), always 1 contract
+            price_cents = max(1, min(99, int(round(order_price * 100))))
+            if price_cents < 1:
+                logger.warning(f"Price {order_price:.4f} too low to convert to cents")
+                continue
+
+            try:
+                result = client.place_order(
+                    ticker=market_id,
+                    side="yes",
+                    quantity=1,
+                    price_cents=price_cents,
+                )
+                order_id = result.get('order_id', 'unknown')
+                status = result.get('status', 'unknown')
+                logger.info(f"MICRO-LIVE ORDER: {market_id} YES 1x @{price_cents}¢ → {status} (id: {order_id})")
+
+                # Record to pnl.db for bootstrap validator
+                try:
+                    from utils.pnl_database import record_trade
+                    record_trade(
+                        phase='phase1_kalshi',
+                        ticker=market_id,
+                        action='BUY',
+                        price=order_price,
+                        size_usd=optimal_size,
+                        pnl_usd=0,
+                        pnl_pct=0
+                    )
+                except Exception as db_err:
+                    logger.warning(f"Failed to record trade to pnl.db: {db_err}")
+
+            except SafetyLimitError as e:
+                logger.warning(f"MICRO-LIVE SAFETY LIMIT: {market_id} — {e}")
+                continue
+            except Exception as e:
+                logger.error(f"MICRO-LIVE ORDER FAILED: {market_id} — {e}")
+                continue
+
+        elif mode == "real-live":
+            # Stub — real-live uses separate execution path
+            logger.info(f"REAL-LIVE STUB: Would place order on {market_id}: {order_side} ${optimal_size:.2f} @ {order_price:.4f}")
+
         elif dry_run:
             # Log simulated order
             logger.info(f"SHADOW MODE: Would place order on {market_id}: {order_side} ${optimal_size:.2f} @ {order_price:.4f}")
+
         else:
-            # Default: don't trade
-            logger.debug(f"Market {market_id}: No mode specified, skipping")
+            logger.debug(f"Market {market_id}: mode={mode}, dry_run={dry_run}, skipping")
             continue
         
         # Update metrics

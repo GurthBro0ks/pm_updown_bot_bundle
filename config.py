@@ -63,7 +63,7 @@ RISK_CAPS = {
     "max_daily_positions": 10,
     "liquidity_min_usd": 0,
     "edge_after_fees_pct": 1.5,
-    
+
     # Exit controls (mirrors rotation_config.json)
     "max_hold_hours": 168,  # Max 7 days per position
 
@@ -74,6 +74,12 @@ RISK_CAPS = {
     "maker_fee_usd": 0.00,
     "kalshi_fee_pct": 0.07,
     "kalshi_true_probability": 0.5,
+
+    # Micro-live specific caps (penny trades, $0.50 daily loss limit)
+    "micro_live_max_pos_usd": 0.01,
+    "micro_live_max_daily_loss_usd": 0.50,
+    "micro_live_max_open_positions": 5,
+    "micro_live_max_daily_trades": 20,
 
     # Phase 2: SEF Spot Trading
     "sef_max_pos_usd": 20.0,
