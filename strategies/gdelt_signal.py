@@ -35,7 +35,7 @@ logger = logging.getLogger("gdelt_signal")
 GDELT_EVENTS_URL = (
     "https://api.gdeltproject.org/api/v2/doc/doc"
     "?query=conflict%20OR%20sanctions%20OR%20military%20OR%20war%20OR%20missile"
-    "%20OR%20nuclear%20OR%20invasion%20OR%20attack&mode=artlist&maxrecords=100&format=json"
+    "%20OR%20nuclear%20OR%20invasion%20OR%20attack&mode=artlist&maxrecords=50&format=json"
 )
 
 GDELT_TONE_URL = (
@@ -249,23 +249,52 @@ def fetch_gdelt_signal() -> dict:
 
     logger.info("[GDELT] Fetching fresh signal from GDELT API...")
 
-    # Fetch events list
+    # Fetch events list (with retry on 429)
     events_data = {}
-    try:
-        resp = requests.get(GDELT_EVENTS_URL, timeout=10)
-        resp.raise_for_status()
-        events_data = resp.json()
-    except Exception as e:
-        logger.warning(f"[GDELT] Events API failed: {e}")
+    events_ok = False
+    for attempt in range(3):
+        try:
+            resp = requests.get(GDELT_EVENTS_URL, timeout=10)
+            if resp.status_code == 429:
+                wait = (attempt + 1) * 10
+                logger.warning(f"[GDELT] Events API rate-limited, retrying in {wait}s...")
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            events_data = resp.json()
+            events_ok = True
+            break
+        except Exception as e:
+            logger.warning(f"[GDELT] Events API failed (attempt {attempt+1}): {e}")
+            if attempt < 2:
+                time.sleep(5)
+    if not events_ok:
+        logger.warning("[GDELT] Events API failed after 3 attempts, using fallback")
 
-    # Fetch tone chart
+    # GDELT requires ≥5 seconds between requests — sleep 15s before tone API
+    time.sleep(15)
+
+    # Fetch tone chart (with retry on 429)
     tone_data = {}
-    try:
-        resp = requests.get(GDELT_TONE_URL, timeout=10)
-        resp.raise_for_status()
-        tone_data = resp.json()
-    except Exception as e:
-        logger.warning(f"[GDELT] Tone API failed: {e}")
+    tone_ok = False
+    for attempt in range(3):
+        try:
+            resp = requests.get(GDELT_TONE_URL, timeout=10)
+            if resp.status_code == 429:
+                wait = (attempt + 1) * 10
+                logger.warning(f"[GDELT] Tone API rate-limited, retrying in {wait}s...")
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            tone_data = resp.json()
+            tone_ok = True
+            break
+        except Exception as e:
+            logger.warning(f"[GDELT] Tone API failed (attempt {attempt+1}): {e}")
+            if attempt < 2:
+                time.sleep(5)
+    if not tone_ok:
+        logger.warning("[GDELT] Tone API failed after 3 attempts, using fallback")
 
     # Parse events
     top_events, tone_risk, event_count = _parse_events(events_data)
