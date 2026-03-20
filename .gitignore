@@ -21,6 +21,10 @@ build/
 secrets.json
 config/*.env
 
+# API Keys and Private Keys
+keys/
+kalshi_private_key.pem
+
 # Logs
 logs/
 *.log
