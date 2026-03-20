@@ -158,6 +158,52 @@ def health():
     return jsonify({"status": "ok", "timestamp": datetime.utcnow().isoformat()})
 
 
+# =============================================================================
+# SIGNAL AGGREGATOR ENDPOINTS
+# =============================================================================
+
+@app.route("/api/signals/current")
+def signals_current():
+    """
+    Current state of all signal sources in the Bayesian cascade.
+    Cached for 60 seconds server-side.
+    """
+    try:
+        from strategies.signal_aggregator import get_all_signals
+        signals = get_all_signals()
+        return jsonify(signals)
+    except Exception as e:
+        logger.error(f"[API] /api/signals/current failed: {e}")
+        return jsonify({"error": str(e), "sources": {}}), 500
+
+
+@app.route("/api/signals/history")
+def signals_history():
+    """
+    Time-series of signal values over the last N hours.
+    Query params:
+      hours: int (default 24, max 168)
+      interval: int (minutes, default 30, min 5, max 120)
+    """
+    try:
+        hours = request.args.get("hours", 24, type=int)
+        interval = request.args.get("interval", 30, type=int)
+        hours = max(1, min(168, hours))
+        interval = max(5, min(120, interval))
+
+        from strategies.signal_aggregator import get_signal_history
+        history = get_signal_history(hours=hours, interval_minutes=interval)
+        return jsonify({
+            "history": history,
+            "hours": hours,
+            "interval_minutes": interval,
+            "timestamp": datetime.utcnow().isoformat(),
+        })
+    except Exception as e:
+        logger.error(f"[API] /api/signals/history failed: {e}")
+        return jsonify({"error": str(e), "history": []}), 500
+
+
 @app.route("/api/trading/equity")
 def equity_curve():
     """Get equity curve and Sharpe ratio."""
