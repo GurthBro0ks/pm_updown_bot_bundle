@@ -677,18 +677,24 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     
     logger.info(f"Fetched {len(markets)} markets")
     
-    # FIX 2026-03-19: Re-enable category filtering — block esports/sports, target financial
+    # FIX 2026-03-21: Expanded category coverage — include weather for kalshi_weather strategy
+    # Also expand to all non-blocked series (not just top 20) for broader shadow data collection
     # Note: filter_markets_by_category uses keyword matching on ticker/question text
     # The series-level blocklist (KALSHI_BLOCKED_CATEGORIES) is the primary filter
     # This keyword filter provides additional belt-and-suspenders safety
-    markets = filter_markets_by_category(markets, include_categories=None)
-    
+    expanded_categories = ['financial', 'economic', 'political', 'weather']
+    markets = filter_markets_by_category(markets, include_categories=expanded_categories)
+
     if not markets:
-        logger.warning("No markets fetched or all markets filtered by liquidity")
+        logger.warning("No markets fetched or all markets filtered by category")
         return 0
-    
-    # Filter for liquidity
-    markets = filter_low_liquidity_markets(markets, min_liquidity_usd=0.0, max_trades=20)
+
+    logger.info(f"[KALSHI] Expanded coverage: {len(markets)} markets after category filter (categories: {expanded_categories})")
+
+    # Filter for liquidity (min $50 to avoid thin markets)
+    pre_filter_count = len(markets)
+    markets = filter_low_liquidity_markets(markets, min_liquidity_usd=50.0, max_trades=20)
+    logger.info(f"[KALSHI] Liquidity filter: {len(markets)} markets from {pre_filter_count} (min_liquidity=$50)")
 
     # Fallback optimal size (will be overridden by position_sizer)
     optimal_size = max_pos_usd

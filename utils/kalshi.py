@@ -183,7 +183,7 @@ def fetch_kalshi_markets():
             -s.get('volume', 0) or 0         # Higher volume first
         ))
         
-        for series in target_series[:20]:  # Limit to top 20 series to avoid rate limits
+        for series in target_series[:50]:  # Expanded to top 50 series for broader shadow data collection
             series_ticker = series.get('ticker')
             markets = fetch_markets_for_series(series_ticker, api_key, private_key)
             
