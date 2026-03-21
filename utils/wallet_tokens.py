@@ -9,6 +9,16 @@ logger = logging.getLogger(__name__)
 
 WALLET_ADDRESS = os.getenv("WALLET_ADDRESS", "0xEA845110a8e8FAE57c5E7Fbe3459DBB7675878a8")
 
+# Lazy import to avoid circular dependency
+_wallet_tracker = None
+
+def _get_wallet_tracker():
+    global _wallet_tracker
+    if _wallet_tracker is None:
+        from utils import wallet_tracker
+        _wallet_tracker = wallet_tracker
+    return _wallet_tracker
+
 # Known tokens from airdrop farming
 KNOWN_TOKENS = {
     "AERO": {"chain": "base", "contract": "0x940181a94A35A4569E4529A3CDfB74e38FD98631"},
@@ -43,30 +53,48 @@ def get_wallet_tokens(wallet: str = None) -> dict:
 def get_holdings_summary() -> dict:
     """
     Get summary of wallet holdings with USD values.
-    
+
     Returns:
         Dict with total_usd and chains breakdown.
     """
-    tokens = get_wallet_tokens()
-    total_usd = 0.0
-    chains = {}
-    
-    # TODO: Integrate with price APIs for real USD values
-    # For now, return structure with zeros
-    for symbol, info in tokens.items():
-        chain = info["chain"]
-        if chain not in chains:
-            chains[chain] = {"tokens": [], "total_usd": 0.0}
-        chains[chain]["tokens"].append({
-            "symbol": symbol,
-            "usd_value": 0.0
-        })
-    
-    return {
-        "total_usd": total_usd,
-        "chains": chains,
-        "token_count": len(tokens)
-    }
+    try:
+        tracker = _get_wallet_tracker()
+        balance_data = tracker.get_full_balance(WALLET_ADDRESS)
+
+        # Transform wallet_tracker format to expected format
+        chains = {}
+        for chain, data in balance_data.get("chains", {}).items():
+            chains[chain] = {
+                "total_usd": data.get("total_usd", 0.0),
+                "eth": data.get("eth", 0.0),
+                "usdc": data.get("usdc", 0.0),
+                "tokens": []
+            }
+
+        return {
+            "total_usd": balance_data.get("total_usd", 0.0),
+            "chains": chains,
+            "token_count": sum(len(c.get("tokens", [])) for c in chains.values()),
+            "eth_price": balance_data.get("eth_price"),
+            "wallet": balance_data.get("wallet"),
+        }
+    except Exception as e:
+        logger.warning(f"[WALLET] Could not fetch real balances, using zero: {e}")
+        tokens = get_wallet_tokens()
+        chains = {}
+        for symbol, info in tokens.items():
+            chain = info["chain"]
+            if chain not in chains:
+                chains[chain] = {"tokens": [], "total_usd": 0.0}
+            chains[chain]["tokens"].append({
+                "symbol": symbol,
+                "usd_value": 0.0
+            })
+        return {
+            "total_usd": 0.0,
+            "chains": chains,
+            "token_count": len(tokens)
+        }
 
 
 def enrich_with_prices(tokens: dict) -> dict:
