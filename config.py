@@ -101,6 +101,12 @@ RISK_CAPS = {
     "stock_max_market_cap_usd": 300_000_000,
     "stock_min_price_usd": 1.0,
     "stock_max_price_usd": 5.0,
+
+    # Weather Strategy (NOAA Arbitrage)
+    "weather_max_daily_trades": 10,
+    "weather_max_exposure_per_city": 1.0,
+    "weather_min_edge_pct": 3.0,
+    "weather_min_liquidity_usd": 50.0,
 }
 
 # ============================================================================

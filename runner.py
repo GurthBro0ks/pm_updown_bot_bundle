@@ -42,6 +42,7 @@ from strategies import airdrop_farmer as airdrop_farmer_module
 from strategies import base_farmer as base_farmer_module
 from strategies import weather_signals
 from strategies import ibkr_forecast
+from strategies import kalshi_weather
 
 # PnL Database
 from utils.pnl_database import record_trade, snapshot_equity
@@ -871,10 +872,33 @@ def run_phase6_wallet_arbitrage(mode, min_spread: float = 2.0):
     return 1
 
 
+def run_weather_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: float = 1.0):
+    """Weather Strategy: NOAA Temperature Arbitrage"""
+    logger.info("=" * 60)
+    logger.info("WEATHER STRATEGY - NOAA Arbitrage")
+    logger.info(f"Mode: {mode}")
+    logger.info(f"Bankroll: ${bankroll:.2f}")
+    logger.info(f"Max pos/city: ${max_pos_usd:.2f}")
+    logger.info("=" * 60)
+
+    try:
+        result = kalshi_weather.run_weather_strategy(
+            mode=mode,
+            bankroll=bankroll,
+            max_pos_usd=max_pos_usd
+        )
+        logger.info(f"Weather strategy complete - opportunities: {result}")
+        return 1 if result > 0 else 0
+    except Exception as e:
+        logger.error(f"Weather strategy error: {e}")
+        return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description="Multi-Venue Runner - Shipping Mode")
     parser.add_argument("--mode", choices=["shadow", "micro-live", "real-live"], default="shadow", help="Execution mode (micro-live = real trades with risk gates)")
     parser.add_argument("--phase", choices=["phase1", "phase2", "phase3", "phase4", "phase5", "phase6", "all"], default="all", help="Phase to execute")
+    parser.add_argument("--strategy", choices=["weather", "all"], default="all", help="Strategy to execute")
     parser.add_argument("--bankroll", type=float, default=100.0, help="Bankroll in USD")
     parser.add_argument("--max-pos", type=float, default=10.0, help="Max position size in USD")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
@@ -1113,6 +1137,19 @@ def main():
     else:
         results["phase6"] = 0
 
+    # Weather Strategy (NOAA Arbitrage)
+    weather_result = 0
+    if args.strategy == "weather":
+        logger.info("Starting Weather Strategy: NOAA Arbitrage (timeout=30s)")
+        weather_result = run_phase_with_timeout(
+            run_weather_strategy,
+            "WEATHER_STRATEGY",
+            timeout_secs=30,
+            mode=args.mode,
+            bankroll=args.bankroll,
+            max_pos_usd=args.max_pos
+        )
+
     # Cancel the global timeout alarm - we finished in time
     signal.alarm(0)
     logger.info("[RUNNER] All phases completed within deadline")
@@ -1126,15 +1163,19 @@ def main():
     logger.info(f"Phase 4 (Airdrop Farming): {'Success' if results['phase4'] else 'Failed'}")
     logger.info(f"Phase 5 (IBKR ForecastTrader): {'Success' if results['phase5'] else 'Failed'}")
     logger.info(f"Phase 6 (Wallet+Arbitrage): {'Success' if results.get('phase6', 0) else 'Failed'}")
+    if args.strategy == "weather":
+        logger.info(f"Weather Strategy: {'Success' if weather_result else 'Failed'}")
     logger.info("=" * 60)
-    
+
     proof_id = f"shipping_mode_{args.phase}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
     proof_data = {
         "mode": args.mode,
         "phase": args.phase,
+        "strategy": args.strategy,
         "bankroll": args.bankroll,
         "max_pos_usd": args.max_pos,
         "results": results,
+        "weather_result": weather_result if args.strategy == "weather" else None,
         "risk_caps": RISK_CAPS
     }
     
