@@ -121,11 +121,11 @@ class KalshiOrderClient:
             base_url: Kalshi API base URL.
             log_path: Path to order log file.
         """
-        self.api_key = api_key or os.getenv("KALSHI_KEY") or os.getenv("KALSHI_TRADING_KEY")
+        self.api_key = api_key or os.getenv("KALSHI_TRADING_KEY") or os.getenv("KALSHI_KEY")
         if not self.api_key:
             raise ValueError("No API key provided and KALSHI_KEY / KALSHI_TRADING_KEY not set in env")
 
-        key_path = private_key_path or os.getenv("KALSHI_SECRET_FILE") or os.getenv("KALSHI_TRADING_SECRET_FILE") or "/opt/slimy/pm_updown_bot_bundle/keys/kalshi-prod.key"
+        key_path = private_key_path or os.getenv("KALSHI_TRADING_SECRET_FILE") or os.getenv("KALSHI_SECRET_FILE") or "/opt/slimy/pm_updown_bot_bundle/keys/kalshi-prod.key"
         self.base_url = base_url.rstrip("/")
         self.log_path = log_path
 
