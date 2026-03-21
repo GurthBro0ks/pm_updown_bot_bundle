@@ -56,3 +56,4 @@ Thumbs.db
 # Test artifacts
 test_*.json
 test_output/
+ml/training_data.db
