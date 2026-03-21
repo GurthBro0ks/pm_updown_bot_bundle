@@ -1084,7 +1084,10 @@ def main():
                 logger.debug(f"Wallet snapshot not available: {e}")
 
             # Base Farming - runs after airdrop farming (Phase 4.5)
-            logger.info("Starting Phase 4.5: Base Chain Farming (dry-run simulation)")
+            # dry_run is False only in real-live mode (not shadow or micro-live)
+            farming_dry_run = (args.mode != "real-live")
+            mode_label = "SIMULATION" if farming_dry_run else "LIVE"
+            logger.info(f"Starting Phase 4.5: Base Chain Farming ({mode_label})")
             try:
                 # Check circuit breaker before farming
                 from utils.position_sizer import get_circuit_breaker
@@ -1096,7 +1099,7 @@ def main():
                 else:
                     cb_ok = True
 
-                base_farmer_module.run(circuit_breaker_ok=cb_ok, dry_run=True)
+                base_farmer_module.run(circuit_breaker_ok=cb_ok, dry_run=farming_dry_run)
                 results["phase4"] = results.get("phase4", 0) + 1  # Count farming as part of phase 4
             except Exception as e:
                 logger.warning(f"Base farming failed: {e}")
