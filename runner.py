@@ -551,12 +551,11 @@ def fetch_kalshi_markets():
         markets = []
         for m in data.get('markets', []):
             ticker = m.get('ticker', '')
-            yes_bid_cents = m.get('yes_bid', 0)
-            yes_ask_cents = m.get('yes_ask', 0)
+            # API returns yes_bid_dollars / yes_ask_dollars (e.g. 0.21 = 21 cents)
+            yes_bid_cents = float(m.get('yes_bid_dollars', 0) or 0) * 100
+            yes_ask_cents = float(m.get('yes_ask_dollars', 0) or 0) * 100
             if yes_ask_cents <= 0:
                 continue
-            yes_bid_cents = m.get('yes_bid', 0)
-            yes_ask_cents = m.get('yes_ask', 0)
             yes_price_cents = (yes_bid_cents + yes_ask_cents) / 2
             yes_price = yes_price_cents / 100.0
             no_price = 1.0 - yes_price

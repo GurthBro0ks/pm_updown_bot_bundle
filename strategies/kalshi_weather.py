@@ -321,59 +321,92 @@ class TemperatureProbabilityCalculator:
 
 def fetch_kalshi_temperature_markets() -> list:
     """
-    Fetch active Kalshi temperature bucket markets.
+    Fetch active Kalshi temperature bucket markets by directly querying
+    temperature series tickers (not filtered by top-100 volume).
+    Uses concurrent requests for speed.
 
     Returns:
         List of market dicts with ticker, question, yes_price, bucket_info
     """
-    try:
-        import os as _os
-        key_id = _os.getenv("KALSHI_KEY")
-        if not key_id:
-            logging.warning("[KALSHI] No KALSHI_KEY set")
-            return []
+    import os as _os
+    import time as _time
+    import requests as _requests
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        from runner import get_headers, fetch_kalshi_markets
-
-        markets = fetch_kalshi_markets()
-        if not markets:
-            return []
-
-        # Filter to temperature-related markets
-        temp_markets = []
-        for m in markets:
-            ticker = m.get("id", "").upper()
-            question = m.get("question", "").upper()
-            text = f"{ticker} {question}"
-
-            # Skip non-weather
-            if not any(kw in text for kw in KALSHI_TEMP_SERIES_KEYWORDS):
-                continue
-
-            # Skip markets with no price
-            yes_price = m.get("odds", {}).get("yes", 0)
-            if yes_price <= 0:
-                continue
-
-            # Extract bucket info from question
-            # Typical format: "Will NYC be above 90°F on date?"
-            bucket_info = _parse_bucket_from_question(question)
-
-            temp_markets.append({
-                "ticker": m.get("id"),
-                "question": m.get("question"),
-                "yes_price": yes_price,
-                "no_price": 1.0 - yes_price,
-                "liquidity_usd": m.get("liquidity_usd", 0),
-                "bucket_info": bucket_info,
-                "hours_to_end": m.get("hours_to_end", 48),
-            })
-
-        return temp_markets
-
-    except Exception as e:
-        logging.warning(f"[KALSHI] Failed to fetch temperature markets: {e}")
+    key_id = _os.getenv("KALSHI_KEY")
+    if not key_id:
+        logging.warning("[KALSHI] No KALSHI_KEY set")
         return []
+
+    try:
+        from runner import get_headers
+    except ImportError:
+        logging.warning("[KALSHI] Could not import runner.get_headers")
+        return []
+
+    # Known temperature series tickers on Kalshi (verified 2026-03-21)
+    TEMP_SERIES_TICKERS = [
+        "KXHIGHNY", "KXHIGHCHI", "KXHIGHLAX", "KXHIGHTHOU", "KXHIGHAUS",
+        "KXHIGHTSATX", "KXHIGHTSEA", "KXHIGHTDEN", "KXHIGHTDC", "KXHIGHTMIN",
+        "KXMIA", "KXLOWNYC", "KXLOWCHI", "KXLOWTLAX", "KXLOWTAUS",
+        "KXLOWTPHIL", "KXLOWTDEN", "KXLOWMIA", "KXMINNYC",
+        "KXTEMP", "KXAVGTEMP", "KXHMONTHRANGE",
+    ]
+
+    headers = get_headers('GET', '/v1/markets')
+    base_url = "https://api.elections.kalshi.com/trade-api/v2"
+    temp_markets = []
+
+    def _fetch_series(series_ticker):
+        """Fetch markets for a single series ticker."""
+        try:
+            resp = _requests.get(
+                f"{base_url}/markets",
+                headers=headers,
+                params={"status": "open", "series_ticker": series_ticker, "limit": 10},
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return []
+            markets_data = resp.json().get("markets", [])
+            result = []
+            for m in markets_data:
+                yes_ask_dollars = float(m.get("yes_ask_dollars") or 0)
+                if yes_ask_dollars <= 0:
+                    continue
+                yes_bid_dollars = float(m.get("yes_bid_dollars") or 0)
+                yes_price = (yes_ask_dollars + yes_bid_dollars) / 2.0
+                open_int = float(m.get("open_interest_fp", 0) or 0)
+                liquidity_usd = open_int * yes_price
+                ticker = m.get("ticker", "")
+                question = m.get("question", "")
+                bucket_info = _parse_bucket_from_question(question)
+                result.append({
+                    "ticker": ticker,
+                    "question": question,
+                    "yes_price": yes_price,
+                    "no_price": 1.0 - yes_price,
+                    "liquidity_usd": liquidity_usd,
+                    "bucket_info": bucket_info,
+                    "hours_to_end": 24,
+                })
+            return result
+        except Exception as e:
+            logging.debug(f"[KALSHI] Series {series_ticker} query failed: {e}")
+            return []
+
+    # Run up to 5 concurrent requests (Kalshi rate limit: ~50 req/min)
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(_fetch_series, ticker): ticker for ticker in TEMP_SERIES_TICKERS}
+        for future in as_completed(futures):
+            try:
+                result = future.result(timeout=12)
+                temp_markets.extend(result)
+            except Exception:
+                pass
+
+    logging.info(f"  Fetched {len(temp_markets)} temperature markets across {len(TEMP_SERIES_TICKERS)} series")
+    return temp_markets
 
 
 def _parse_bucket_from_question(question: str) -> dict:
