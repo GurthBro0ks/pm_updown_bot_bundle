@@ -551,13 +551,12 @@ def fetch_kalshi_markets():
         markets = []
         for m in data.get('markets', []):
             ticker = m.get('ticker', '')
-            # API returns yes_bid_dollars / yes_ask_dollars (e.g. 0.21 = 21 cents)
-            yes_bid_cents = float(m.get('yes_bid_dollars', 0) or 0) * 100
-            yes_ask_cents = float(m.get('yes_ask_dollars', 0) or 0) * 100
-            if yes_ask_cents <= 0:
+            # API returns dollar-probability prices in [0,1].
+            yes_bid_price = float(m.get('yes_bid_dollars', 0) or 0)
+            yes_ask_price = float(m.get('yes_ask_dollars', 0) or 0)
+            if yes_ask_price <= 0:
                 continue
-            yes_price_cents = (yes_bid_cents + yes_ask_cents) / 2
-            yes_price = yes_price_cents / 100.0
+            yes_price = (yes_bid_price + yes_ask_price) / 2 if yes_bid_price > 0 else yes_ask_price
             no_price = 1.0 - yes_price
             liquidity_usd = m.get('open_interest', 0) * yes_price
             markets.append({

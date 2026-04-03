@@ -33,6 +33,16 @@ KALSHI_BLOCKED_CATEGORIES = {
 KALSHI_BLOCKED_PREFIXES = ()
 
 
+def _safe_float(value, default=0.0):
+    """Convert API values to float safely."""
+    try:
+        if value is None:
+            return float(default)
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def get_kalshi_headers(method, path, api_key, private_key):
     """Generate Kalshi API headers"""
     timestamp = str(int(time.time() * 1000))  # milliseconds!
@@ -132,7 +142,7 @@ def fetch_markets_for_series(series_ticker, api_key, private_key):
         resp = requests.get(
             'https://api.elections.kalshi.com/trade-api/v2/markets',
             headers=headers,
-            params={'series_ticker': series_ticker, 'status': 'open', 'limit': 50},
+            params={'series_ticker': series_ticker, 'status': 'open', 'limit': 100},
             timeout=15
         )
         
@@ -163,6 +173,22 @@ def fetch_kalshi_markets():
         return []
     
     try:
+        series_limit = int(os.getenv("KALSHI_SERIES_LIMIT", "50") or "50")
+    except ValueError:
+        series_limit = 50
+    try:
+        min_liquidity_usd = float(os.getenv("KALSHI_FETCH_MIN_LIQUIDITY_USD", "0") or "0")
+    except ValueError:
+        min_liquidity_usd = 0.0
+
+    include_categories_raw = os.getenv("KALSHI_FETCH_INCLUDE_CATEGORIES", "").strip()
+    include_categories = {
+        c.strip().lower()
+        for c in include_categories_raw.split(",")
+        if c.strip()
+    } if include_categories_raw else None
+
+    try:
         with open(secret_file, 'rb') as f:
             private_key = serialization.load_pem_private_key(f.read(), password=None)
         
@@ -173,17 +199,23 @@ def fetch_kalshi_markets():
             logger.warning("[KALSHI] No target series found - FAILING CLOSED (no fallback to sports)")
             return []
         
-        # Step 2: Fetch markets from each target series
+        # Step 2: Apply series limit and fetch markets from each selected series
         all_markets = []
         series_with_markets = 0
-        
-        # Sort by fee_multiplier (lower is better) and volume
+
+        # Sort by series volume (higher first), then lower fee multiplier.
         target_series.sort(key=lambda s: (
-            s.get('fee_multiplier', 0.07),  # Lower fees first
-            -s.get('volume', 0) or 0         # Higher volume first
+            -_safe_float(s.get('volume', 0), 0.0),
+            _safe_float(s.get('fee_multiplier', 1), 1.0),
         ))
-        
-        for series in target_series[:50]:  # Expanded to top 50 series for broader shadow data collection
+
+        selected_series = target_series if series_limit <= 0 else target_series[:series_limit]
+        logger.info(
+            f"[KALSHI FILTER] Series limit: {len(target_series)} -> {len(selected_series)} "
+            f"(series_limit={series_limit})"
+        )
+
+        for series in selected_series:
             series_ticker = series.get('ticker')
             markets = fetch_markets_for_series(series_ticker, api_key, private_key)
             
@@ -199,55 +231,144 @@ def fetch_kalshi_markets():
                 
                 all_markets.extend(markets)
         
-        logger.info(f"[KALSHI] Open markets found: {len(all_markets)} across {series_with_markets} series")
-        
-        # Step 3: Final safety filter - reject blocked prefixes
-        filtered_markets = []
+        raw_count = len(all_markets)
+        logger.info(f"[KALSHI FILTER] Raw API response count: {raw_count}")
+
+        # Step 3: Status filter (API currently uses 'active', keep compatibility with 'open')
+        status_filtered = []
         for m in all_markets:
+            status = str(m.get('status', 'active') or 'active').lower()
+            if status in {'active', 'open'}:
+                status_filtered.append(m)
+        logger.info(
+            f"[KALSHI FILTER] After status filter: {len(status_filtered)} "
+            f"(kept statuses: active/open)"
+        )
+
+        # Step 4: yes_ask > 0 filter and normalized price selection
+        priced_markets = []
+        ask_only_count = 0
+        for m in status_filtered:
+            yes_bid_price = _safe_float(m.get('yes_bid_dollars', 0), 0.0)
+            yes_ask_price = _safe_float(m.get('yes_ask_dollars', 0), 0.0)
+            if yes_ask_price <= 0:
+                continue
+
+            # Ask-only books are common; midpoint with bid=0 underprices by 50%.
+            if yes_bid_price > 0:
+                yes_price = (yes_bid_price + yes_ask_price) / 2.0
+            else:
+                yes_price = yes_ask_price
+                ask_only_count += 1
+
+            m['_yes_bid_price'] = yes_bid_price
+            m['_yes_ask_price'] = yes_ask_price
+            m['_yes_price'] = yes_price
+            priced_markets.append(m)
+        logger.info(
+            f"[KALSHI FILTER] After yes_ask > 0 filter: {len(priced_markets)} "
+            f"(ask-only books: {ask_only_count})"
+        )
+
+        # Step 5: Liquidity filter (default disabled; keep data flow open for strategy-level logic)
+        liquidity_filtered = []
+        for m in priced_markets:
+            reported_liquidity_usd = _safe_float(m.get('liquidity_dollars', 0), 0.0)
+            open_interest_units = _safe_float(
+                m.get('open_interest_fp', m.get('open_interest', 0)),
+                0.0,
+            )
+            implied_liquidity_usd = open_interest_units * m['_yes_price']
+            liquidity_usd = reported_liquidity_usd if reported_liquidity_usd > 0 else implied_liquidity_usd
+            m['_liquidity_usd'] = liquidity_usd
+
+            volume_24h = _safe_float(m.get('volume_24h_fp', m.get('volume_24h', 0)), 0.0)
+            if volume_24h <= 0:
+                volume_24h = _safe_float(m.get('volume_fp', m.get('volume', 0)), 0.0)
+            m['_volume_24h'] = volume_24h
+
+            if min_liquidity_usd > 0 and liquidity_usd < min_liquidity_usd:
+                continue
+            liquidity_filtered.append(m)
+        logger.info(
+            f"[KALSHI FILTER] After liquidity filter: {len(liquidity_filtered)} "
+            f"(min_liquidity_usd={min_liquidity_usd})"
+        )
+
+        # Step 6: Category filter (default disabled to include sports/crypto/high-liquidity markets)
+        if include_categories is None:
+            category_filtered = liquidity_filtered
+            logger.info(
+                f"[KALSHI FILTER] After category filter: {len(category_filtered)} "
+                "(filter disabled; all categories included)"
+            )
+        else:
+            category_filtered = []
+            for m in liquidity_filtered:
+                category = str(m.get('series_category', '')).strip().lower()
+                if category in include_categories:
+                    category_filtered.append(m)
+            logger.info(
+                f"[KALSHI FILTER] After category filter: {len(category_filtered)} "
+                f"(include_categories={sorted(include_categories)})"
+            )
+
+        # Step 7: Final safety filter - reject blocked prefixes
+        filtered_markets = []
+        for m in category_filtered:
             ticker = m.get('ticker', '')
             if not any(ticker.upper().startswith(prefix) for prefix in KALSHI_BLOCKED_PREFIXES):
                 filtered_markets.append(m)
-        
-        # Step 4: Sort by volume_24h (most liquid first)
-        filtered_markets.sort(key=lambda m: -(m.get('volume_24h', 0) or 0))
-        
+
+        # Step 8: Sort by available liquidity/volume proxies (most active first)
+        filtered_markets.sort(key=lambda m: -_safe_float(m.get('_volume_24h', 0), 0.0))
+
         # Log top 10
-        top_10 = [(m.get('ticker'), m.get('volume_24h', 0) or 0) for m in filtered_markets[:10]]
+        top_10 = [
+            (
+                m.get('ticker'),
+                _safe_float(m.get('_volume_24h', 0), 0.0),
+                _safe_float(m.get('_yes_ask_price', 0), 0.0),
+                _safe_float(m.get('_yes_bid_price', 0), 0.0),
+            )
+            for m in filtered_markets[:10]
+        ]
         logger.info(f"[KALSHI] Top 10 by volume: {top_10}")
-        
-        # Step 5: Format markets for strategy use
+
+        # Step 9: Format markets for strategy use
         markets = []
         for m in filtered_markets:
             ticker = m.get('ticker', '')
-            yes_bid_cents = m.get('yes_bid', 0)
-            yes_ask_cents = m.get('yes_ask', 0)
-            
-            if yes_ask_cents <= 0:
-                continue
-            
-            yes_price = ((yes_bid_cents + yes_ask_cents) / 2) / 100.0
+            yes_bid_price = _safe_float(m.get('_yes_bid_price', m.get('yes_bid_dollars', 0)), 0.0)
+            yes_ask_price = _safe_float(m.get('_yes_ask_price', m.get('yes_ask_dollars', 0)), 0.0)
+            yes_price = _safe_float(m.get('_yes_price', yes_ask_price), 0.0)
             no_price = 1.0 - yes_price
-            liquidity_usd = (m.get('open_interest', 0) or 0) * yes_price
-            
+            liquidity_usd = _safe_float(m.get('_liquidity_usd', 0), 0.0)
+            volume_24h = _safe_float(m.get('_volume_24h', 0), 0.0)
+
             markets.append({
                 "id": ticker,
                 "question": m.get('short_name', m.get('title', ticker)),
                 "odds": {"yes": yes_price, "no": no_price},
                 "liquidity_usd": liquidity_usd,
-                "volume_24h": m.get('volume_24h', 0) or 0,
+                "volume_24h": volume_24h,
+                "yes_bid_price": yes_bid_price,
+                "yes_ask_price": yes_ask_price,
                 "hours_to_end": 48,  # Placeholder
+                "close_time": m.get('close_time'),
+                "expiration_time": m.get('expiration_time'),
                 "series_ticker": m.get('series_ticker'),
                 "series_category": m.get('series_category'),
-                "fee_multiplier": m.get('fee_multiplier', 0.07),
-                "fee_type": "quadratic" if m.get('fee_multiplier', 0.07) < 0.05 else "standard"
+                "fee_multiplier": _safe_float(m.get('fee_multiplier', 1), 1.0),
+                "fee_type": "quadratic" if _safe_float(m.get('fee_multiplier', 1), 1.0) < 1 else "standard",
             })
 
         if len(markets) == 0:
             logger.warning("[KALSHI] No markets with active trading prices. "
                           "This is normal outside market hours or if markets have closed. "
-                          f"Found {len(all_markets)} markets from API but none have yes_ask_cents > 0.")
+                          f"Found {len(all_markets)} markets from API but none have yes_ask_dollars > 0.")
         else:
-            logger.info(f"[KALSHI] Returning {len(markets)} filtered markets")
+            logger.info(f"[KALSHI FILTER] Final returned count: {len(markets)}")
 
         return markets
         
@@ -285,11 +406,11 @@ def fetch_kalshi_markets_legacy():
             markets = []
             for m in data.get('markets', []):
                 ticker = m.get('ticker', '')
-                yes_bid_cents = m.get('yes_bid', 0)
-                yes_ask_cents = m.get('yes_ask', 0)
+                yes_bid_cents = float(m.get('yes_bid_dollars', 0) or 0)
+                yes_ask_cents = float(m.get('yes_ask_dollars', 0) or 0)
                 if yes_ask_cents <= 0:
                     continue
-                yes_price = ((yes_bid_cents + yes_ask_cents) / 2) / 100.0
+                yes_price = ((yes_bid_cents + yes_ask_cents) / 2)
                 no_price = 1.0 - yes_price
                 liquidity_usd = m.get('open_interest', 0) * yes_price
                 markets.append({

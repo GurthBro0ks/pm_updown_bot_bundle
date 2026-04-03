@@ -27,6 +27,7 @@ from config import RISK_CAPS, KALSHI_KEY
 # For series with fee_multiplier > 0.035 (normal fees, effective 7%): 1.25%
 EDGE_THRESHOLD_LOW_FEE = 0.75   # 0.75% for halved-fee markets (S&P/Nasdaq)
 EDGE_THRESHOLD_HIGH_FEE = 1.25  # 1.25% for normal-fee markets
+KALSHI_BASE_FEE_RATE = 0.07     # 7%
 
 # Import runner module
 # Local imports (avoid circular import)
@@ -51,7 +52,11 @@ def check_micro_live_gates(market, size, price, risk_caps, venue):
         violations.append(f"Size ${size:.2f} > max ${risk_caps['max_pos_usd']}")
     
     # Gate 2: Minimum liquidity
-    liquidity = market.get("volume_usd", 0) or market.get("liquidity", 0)
+    liquidity = (
+        market.get("volume_usd", 0)
+        or market.get("liquidity_usd", 0)
+        or market.get("liquidity", 0)
+    )
     min_liq = risk_caps.get("liquidity_min_usd", 1000)
     if liquidity < min_liq:
         violations.append(f"Liquidity ${liquidity:.0f} < min ${min_liq}")
@@ -59,7 +64,7 @@ def check_micro_live_gates(market, size, price, risk_caps, venue):
     # Gate 3: Edge after fees (tiered based on fee_multiplier)
     edge = market.get("edge_pct", 0) or market.get("expected_edge_pct", 0)
     fee_multiplier = market.get("fee_multiplier", 1.0)
-    effective_fee = 0.07 * fee_multiplier
+    effective_fee = KALSHI_BASE_FEE_RATE * fee_multiplier
     if effective_fee <= 0.035:
         min_edge = EDGE_THRESHOLD_LOW_FEE  # 0.75% for halved-fee markets
     else:
@@ -127,6 +132,32 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_logged_no_ai_keys = False
+
+
+def estimate_true_price(market_question: str, market_id: str) -> float:
+    """
+    Estimate true probability for a market.
+    Falls back to 0.5 immediately when no AI provider keys are configured
+    to avoid repeated slow network timeouts in micro-live runs.
+    """
+    global _logged_no_ai_keys
+
+    has_grok = bool(os.getenv("GROK_API_KEY"))
+    has_glm = bool(os.getenv("GLM_API_KEY"))
+    if not has_grok and not has_glm:
+        if not _logged_no_ai_keys:
+            logger.warning("[kalshi] GROK_API_KEY/GLM_API_KEY missing; using neutral prior=0.5")
+            _logged_no_ai_keys = True
+        return 0.5
+
+    try:
+        ai_prob = get_bayesian_prior({"title": market_question})
+        return ai_prob if ai_prob and 0.01 < ai_prob < 0.99 else 0.5
+    except Exception as e:
+        logger.warning(f"[kalshi] AI prior failed for {market_id}: {e}; using 0.5")
+        return 0.5
+
 def calculate_probability_weighted_fee(price: float, quantity: float) -> float:
     """
     Calculate Kalshi's probability-weighted fee
@@ -164,7 +195,7 @@ def get_maker_fee(price: float) -> float:
     if price == 0.50:
         return 0.0
     
-    return 0.7 * price  # Taker fee (maker orders charge taker fee on fill)
+    return KALSHI_BASE_FEE_RATE * price  # 7% taker-equivalent fee on fill
 
 
 def get_taker_fee(price: float, fee_multiplier: float = 1.0) -> float:
@@ -178,7 +209,7 @@ def get_taker_fee(price: float, fee_multiplier: float = 1.0) -> float:
     Returns:
         Taker fee in dollars
     """
-    base_fee = 0.7 * price  # Base taker fee is 7% of price
+    base_fee = KALSHI_BASE_FEE_RATE * price  # Base taker fee is 7% of price
     return base_fee * fee_multiplier
 
 
@@ -244,18 +275,14 @@ def find_best_taker_market(markets: list, min_edge_pct: float = 1.0) -> dict:
 
         # FIX 2026-03-19: Wire AI prior — Grok/GLM cascade for true probability
         market_question = market.get("title", market.get("question", ""))
-        try:
-            ai_prob = get_bayesian_prior({"title": market_question})
-            true_price = ai_prob if ai_prob and 0.01 < ai_prob < 0.99 else 0.5
-            logger.info(f"[kalshi] AI prior: {market.get('ticker', market.get('id', '?'))} "
-                        f"q='{market_question[:60]}' prob={true_price:.3f}")
-        except Exception:
-            true_price = 0.5  # Safe fallback
+        market_id = market.get("ticker", market.get("id", "?"))
+        true_price = estimate_true_price(market_question, market_id)
+        logger.info(f"[kalshi] AI prior: {market_id} q='{market_question[:60]}' prob={true_price:.3f}")
         
         # Apply tiered threshold based on fee_multiplier
         # fee_multiplier=0.5 → effective fee 3.5% → use EDGE_THRESHOLD_LOW_FEE (0.75%)
         # fee_multiplier=1.0 → effective fee 7% → use EDGE_THRESHOLD_HIGH_FEE (1.25%)
-        effective_fee = 0.07 * fee_multiplier
+        effective_fee = KALSHI_BASE_FEE_RATE * fee_multiplier
         if effective_fee <= 0.035:
             threshold = EDGE_THRESHOLD_LOW_FEE
         else:
@@ -300,29 +327,14 @@ def is_maker_profitable(price: float, true_price: float, win_prob: float, min_ed
         True if expected value > cost after fees
     """
     
-    # Calculate expected value
-    if win_prob > 0.5:
-        # If you win, expected value = price (1.0)
-        expected_value = price
-    else:
-        # If you lose, expected value = 0
-        expected_value = 0
-    
-    # Calculate fee (use maker fee if available, otherwise taker)
-    fee = get_maker_fee(price) if win_prob > 0.5 else 0.7 * price
-    
-    # Calculate cost after fees
-    cost = price + fee
-    
-    # Calculate expected profit
-    expected_profit = expected_value - cost
-    
-    # Calculate edge percentage
-    if price > 0:
-        edge_pct = ((expected_profit / price) * 100) if price > 0 else 0
-    else:
-        edge_pct = 0
-    
+    if price <= 0:
+        return False
+
+    # Expected value in probability dollars.
+    expected_value = true_price
+    fee = get_maker_fee(price)
+    expected_profit = expected_value - (price + fee)
+    edge_pct = (expected_profit / price) * 100
     return edge_pct >= min_edge_pct
 
 def find_best_maker_market(markets: list, min_edge_pct: float = 0.5) -> dict:
@@ -347,16 +359,12 @@ def find_best_maker_market(markets: list, min_edge_pct: float = 0.5) -> dict:
 
         # FIX 2026-03-19: Wire AI prior — Grok/GLM cascade for true probability
         market_question = market.get("title", market.get("question", ""))
-        try:
-            ai_prob = get_bayesian_prior({"title": market_question})
-            true_price = ai_prob if ai_prob and 0.01 < ai_prob < 0.99 else 0.5
-            logger.info(f"[kalshi] AI prior maker: {market.get('ticker', market.get('id', '?'))} "
-                        f"q='{market_question[:60]}' prob={true_price:.3f}")
-        except Exception:
-            true_price = 0.5  # Safe fallback
+        market_id = market.get("ticker", market.get("id", "?"))
+        true_price = estimate_true_price(market_question, market_id)
+        logger.info(f"[kalshi] AI prior maker: {market_id} q='{market_question[:60]}' prob={true_price:.3f}")
         
         # Apply tiered threshold based on fee_multiplier
-        effective_fee = 0.07 * fee_multiplier
+        effective_fee = KALSHI_BASE_FEE_RATE * fee_multiplier
         if effective_fee <= 0.035:
             threshold = EDGE_THRESHOLD_LOW_FEE
         else:
@@ -596,11 +604,8 @@ def get_edge_after_fees(market: dict, true_price_override: float = None) -> floa
         true_price = true_price_override
     else:
         market_question = market.get("title", market.get("question", ""))
-        try:
-            ai_prob = get_bayesian_prior({"title": market_question})
-            true_price = ai_prob if ai_prob and 0.01 < ai_prob < 0.99 else 0.5
-        except Exception:
-            true_price = 0.5
+        market_id = market.get("ticker", market.get("id", "?"))
+        true_price = estimate_true_price(market_question, market_id)
     
     # Calculate probability-weighted fee
     fee_pct = 0.07  # Probability-scaled fee
@@ -618,7 +623,7 @@ def get_edge_after_fees(market: dict, true_price_override: float = None) -> floa
         edge_after_fees_pct = edge_before_fees_pct
     else:
         # Maker order charges taker fee on fill
-        maker_fee = 0.7 * yes_price
+        maker_fee = KALSHI_BASE_FEE_RATE * yes_price
         edge_after_fees_pct = ((true_price - (yes_price + maker_fee)) / true_price) * 100
     
     logger.debug(f"Market {market.get('id')}: price={yes_price:.4f}, fee={fee:.4f}¢, edge_before={edge_before_fees_pct:.2f}%, edge_after={edge_after_fees_pct:.2f}%")
@@ -677,24 +682,38 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     
     logger.info(f"Fetched {len(markets)} markets")
     
-    # FIX 2026-03-21: Expanded category coverage — include weather for kalshi_weather strategy
-    # Also expand to all non-blocked series (not just top 20) for broader shadow data collection
-    # Note: filter_markets_by_category uses keyword matching on ticker/question text
-    # The series-level blocklist (KALSHI_BLOCKED_CATEGORIES) is the primary filter
-    # This keyword filter provides additional belt-and-suspenders safety
-    expanded_categories = ['financial', 'economic', 'political', 'weather']
+    # Category filter (default: disabled to include all categories)
+    category_env = os.getenv("KALSHI_OPTIMIZER_INCLUDE_CATEGORIES", "").strip()
+    expanded_categories = [c.strip().lower() for c in category_env.split(",") if c.strip()] if category_env else None
+    pre_category_count = len(markets)
     markets = filter_markets_by_category(markets, include_categories=expanded_categories)
+    if expanded_categories is None:
+        logger.info(
+            f"[KALSHI FILTER] Category filter disabled in optimizer: "
+            f"{len(markets)} markets from {pre_category_count}"
+        )
+    else:
+        logger.info(
+            f"[KALSHI FILTER] Category filter in optimizer: "
+            f"{len(markets)} markets from {pre_category_count} "
+            f"(categories={expanded_categories})"
+        )
 
     if not markets:
         logger.warning("No markets fetched or all markets filtered by category")
         return 0
 
-    logger.info(f"[KALSHI] Expanded coverage: {len(markets)} markets after category filter (categories: {expanded_categories})")
-
-    # Filter for liquidity (min $50 to avoid thin markets)
-    pre_filter_count = len(markets)
-    markets = filter_low_liquidity_markets(markets, min_liquidity_usd=50.0, max_trades=20)
-    logger.info(f"[KALSHI] Liquidity filter: {len(markets)} markets from {pre_filter_count} (min_liquidity=$50)")
+    # Liquidity filter (default: 0 so strategy sees available books)
+    try:
+        optimizer_min_liquidity = float(os.getenv("KALSHI_OPTIMIZER_MIN_LIQUIDITY_USD", "0") or "0")
+    except ValueError:
+        optimizer_min_liquidity = 0.0
+    pre_liquidity_count = len(markets)
+    markets = filter_low_liquidity_markets(markets, min_liquidity_usd=optimizer_min_liquidity, max_trades=20)
+    logger.info(
+        f"[KALSHI FILTER] Liquidity filter in optimizer: {len(markets)} "
+        f"from {pre_liquidity_count} (min_liquidity=${optimizer_min_liquidity:.2f})"
+    )
 
     # Fallback optimal size (will be overridden by position_sizer)
     optimal_size = max_pos_usd
@@ -719,32 +738,38 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     total_filled = 0
     total_volume = 0.0
     orders = []
+    rejection_counts = {}
+
+    try:
+        min_volume_24h = float(os.getenv("KALSHI_OPTIMIZER_MIN_VOLUME_24H", "0") or "0")
+    except ValueError:
+        min_volume_24h = 0.0
     
     for market in markets:
         market_id = market.get("id")
         yes_price = market.get("odds", {}).get("yes", 0.0)
         fee_multiplier = market.get("fee_multiplier", 1.0)
 
-        # FIX 2026-03-19: Skip zero-volume markets (esports/inactive)
+        # Volume gate (default disabled to avoid dropping all markets on sparse API fields)
         vol_24h = market.get("volume_24h", 0) or 0
-        if vol_24h < 1:
-            logger.debug(f"[kalshi] Skipping {market_id}: zero volume (vol_24h={vol_24h})")
+        if vol_24h < min_volume_24h:
+            logger.info(
+                f"[KALSHI SKIP] {market_id}: volume_24h={vol_24h} "
+                f"< min_volume_24h={min_volume_24h}"
+            )
+            rejection_counts["volume_below_min"] = rejection_counts.get("volume_below_min", 0) + 1
             continue
 
         # FIX 2026-03-19: Wire AI prior — Grok/GLM cascade for true probability
         market_question = market.get("title", market.get("question", ""))
-        try:
-            ai_prob = get_bayesian_prior({"title": market_question})
-            true_price = ai_prob if ai_prob and 0.01 < ai_prob < 0.99 else 0.5
-            logger.info(f"[kalshi] AI edge: {market_id} q='{market_question[:60]}' prob={true_price:.3f}")
-        except Exception:
-            true_price = 0.5  # Safe fallback
+        true_price = estimate_true_price(market_question, market_id)
+        logger.info(f"[kalshi] AI edge: {market_id} q='{market_question[:60]}' prob={true_price:.3f}")
 
         # Calculate edge after fees (pass true_price to avoid double AI call)
         edge_after_fees_pct = get_edge_after_fees(market, true_price_override=true_price)
         
         # Determine threshold based on fee_multiplier for logging
-        effective_fee = 0.07 * fee_multiplier
+        effective_fee = KALSHI_BASE_FEE_RATE * fee_multiplier
         if effective_fee <= 0.035:
             threshold = EDGE_THRESHOLD_LOW_FEE
         else:
@@ -759,6 +784,12 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
         
         # Skip if not a best market
         if not is_best_maker and not is_best_taker:
+            logger.info(
+                f"[KALSHI SKIP] {market_id}: not selected as best market "
+                f"(best_maker={best_maker_market.get('id') if best_maker_market else None}, "
+                f"best_taker={best_taker_market.get('id') if best_taker_market else None})"
+            )
+            rejection_counts["not_best_market"] = rejection_counts.get("not_best_market", 0) + 1
             continue
         
         # Determine order type
@@ -777,7 +808,7 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
                 # S&P/Nasdaq taker order (3.5% fee)
                 order_side = "yes"
                 order_price = yes_price
-                estimated_fee_pct = 0.035  # 3.5% taker fee
+                estimated_fee_rate = 0.035  # 3.5%
                 logger.info(f"Market {market_id}: YES order (taker) at {order_price:.4f} (S&P/Nasdaq 3.5% fee)")
             else:
                 # Maker order charges taker fee on fill
@@ -785,10 +816,10 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
                 order_price = yes_price * 0.99  # Slightly below current price
                 logger.info(f"Market {market_id}: YES order (limit) at {order_price:.4f} (will pay taker fee on fill)")
                 # For simplicity, assume we pay 0.7% taker fee 50% of the time
-                estimated_fee_pct = 0.35
+                estimated_fee_rate = KALSHI_BASE_FEE_RATE / 2.0
             
-            fee_cost = order_price * estimated_fee_pct / 100
-            logger.debug(f"Market {market_id}: Estimated fee: {estimated_fee_pct:.2f}% (${fee_cost:.4f})")
+            fee_cost = order_price * estimated_fee_rate
+            logger.debug(f"Market {market_id}: Estimated fee: {estimated_fee_rate * 100:.2f}% (${fee_cost:.4f})")
         
         # Calculate expected edge after fees
         if use_maker and yes_price == 0.50:
@@ -825,12 +856,13 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
 
         if not passed:
             logger.info(f"[KALSHI GATE] {market_id}: Failed gates: {violations}")
+            rejection_counts["micro_live_gates"] = rejection_counts.get("micro_live_gates", 0) + 1
             continue
 
         # Use position_sizer for Kelly-based sizing with EV filter
         # Estimate true probability from edge (true_price = market_price + edge)
         estimated_prob = min(1.0, yes_price + (edge_after_fees_pct / 100))
-        estimated_fee_pct = 0.035 if fee_multiplier == 0.5 else 0.7  # 3.5% or 7%
+        estimated_fee_rate = 0.035 if fee_multiplier == 0.5 else KALSHI_BASE_FEE_RATE  # 3.5% or 7%
 
         order_size, sizing_meta = size_position(
             market_id=market_id,
@@ -839,11 +871,12 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
             current_positions=current_positions,
             estimated_prob=estimated_prob,
             odds=1.0/yes_price if yes_price > 0 else 1.0,
-            fees_pct=estimated_fee_pct / 100,
+            fees_pct=estimated_fee_rate,
         )
 
         if sizing_meta.get("blocked"):
             logger.info(f"[KALSHI] {market_id}: Blocked by position_sizer - {sizing_meta.get('block_reason', 'unknown')}")
+            rejection_counts["position_sizer_blocked"] = rejection_counts.get("position_sizer_blocked", 0) + 1
             continue
 
         # Update position count
@@ -856,6 +889,7 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
             client = get_order_client()
             if client is None:
                 logger.error("Cannot execute micro-live: order client init failed")
+                rejection_counts["order_client_init_failed"] = rejection_counts.get("order_client_init_failed", 0) + 1
                 continue
 
             # Pre-flight: check balance
@@ -864,15 +898,18 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
                 available = balance.get('available_balance', 0)
                 if available < 10:  # less than 10 cents
                     logger.warning(f"Balance too low for micro-live: ${available}")
+                    rejection_counts["balance_too_low"] = rejection_counts.get("balance_too_low", 0) + 1
                     continue
             except Exception as e:
                 logger.error(f"Balance check failed: {e}")
+                rejection_counts["balance_check_failed"] = rejection_counts.get("balance_check_failed", 0) + 1
                 continue
 
             # Build order — price in cents (1-99), always 1 contract
             price_cents = max(1, min(99, int(round(order_price * 100))))
             if price_cents < 1:
                 logger.warning(f"Price {order_price:.4f} too low to convert to cents")
+                rejection_counts["price_to_cents_failed"] = rejection_counts.get("price_to_cents_failed", 0) + 1
                 continue
 
             try:
@@ -903,9 +940,11 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
 
             except SafetyLimitError as e:
                 logger.warning(f"MICRO-LIVE SAFETY LIMIT: {market_id} — {e}")
+                rejection_counts["micro_live_safety_limit"] = rejection_counts.get("micro_live_safety_limit", 0) + 1
                 continue
             except Exception as e:
                 logger.error(f"MICRO-LIVE ORDER FAILED: {market_id} — {e}")
+                rejection_counts["micro_live_order_failed"] = rejection_counts.get("micro_live_order_failed", 0) + 1
                 continue
 
         elif mode == "real-live":
@@ -945,7 +984,7 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
             "side": order_side,
             "size": optimal_size,
             "price": order_price,
-            "fee": fee_cost if "fee_cost" in locals() else 0.7 * yes_price / 100,
+            "fee": fee_cost if "fee_cost" in locals() else KALSHI_BASE_FEE_RATE * yes_price,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "sizing_meta": sizing_meta,
             "edge_pct": edge_after_fees_pct,
@@ -960,6 +999,8 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     logger.info(f"Total orders placed: {total_trades}")
     logger.info(f"Total filled: {total_filled}")
     logger.info(f"Total volume: ${total_volume:.2f}")
+    if total_trades == 0:
+        logger.info(f"[KALSHI SUMMARY] No trades placed. Rejection counts: {rejection_counts}")
     logger.info("=" * 60)
     
     # Generate proof
