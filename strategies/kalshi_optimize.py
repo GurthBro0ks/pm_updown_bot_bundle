@@ -25,6 +25,21 @@ try:
 except Exception:
     get_ai_prior = None
 
+try:
+    from strategies.contract_signals import (
+        compute_momentum,
+        compute_zscore,
+        volume_confidence,
+        expiry_confidence,
+        validate_prior,
+    )
+except Exception:
+    compute_momentum = None
+    compute_zscore = None
+    volume_confidence = None
+    expiry_confidence = None
+    validate_prior = None
+
 # Stub for missing function
 def check_micro_live_gates(market, size, price, risk_caps, venue):
     """
@@ -439,6 +454,72 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
         market_id = market.get("id")
         yes_price = market.get("odds", {}).get("yes", 0.0)
         true_price = market.get("_ai_true_price", 0.5)
+
+        # AI prior self-validation gate
+        if validate_prior is not None:
+            hours_to_end = market.get("hours_to_end", 48)
+            vol_conf = volume_confidence(
+                int(market.get("liquidity_usd", 0) / max(yes_price, 0.01)),
+                median_volume=500,
+            ) if volume_confidence else None
+            exp_conf = expiry_confidence(hours_to_end) if expiry_confidence else None
+
+            price_history = market.get("price_history", [])
+            if price_history:
+                mom = compute_momentum(price_history, window=5) if compute_momentum else None
+                zsc = compute_zscore(price_history, window=10) if compute_zscore else None
+            else:
+                mom = None
+                zsc = None
+
+            val_result = validate_prior(
+                prior=true_price,
+                momentum=mom,
+                zscore=zsc,
+                contract_price=yes_price,
+            )
+            market["_validation"] = val_result
+            market["_adjusted_prior"] = val_result["adjusted_prior"]
+
+            if not val_result["passed"]:
+                logger.info(
+                    "[kelly] prior validation FAILED market=%s prior=%.3f reason=%s flags=%s",
+                    market_id,
+                    true_price,
+                    val_result["reason"],
+                    val_result["flags"],
+                )
+                # Scratchpad log
+                try:
+                    scratchpad_path = Path("/opt/slimy/pm_updown_bot_bundle/data/scratchpad.jsonl")
+                    with open(scratchpad_path, "a") as f:
+                        f.write(json.dumps({
+                            "ts": datetime.now(timezone.utc).isoformat(),
+                            "event": "prior_validation_failed",
+                            "market": market_id,
+                            "prior": true_price,
+                            "reason": val_result["reason"],
+                            "flags": val_result["flags"],
+                        }) + "\n")
+                except Exception:
+                    pass
+                continue
+
+            # Use adjusted prior for sizing if validation passed
+            effective_prior = val_result["adjusted_prior"]
+            logger.debug(
+                "[kelly] prior validated market=%s prior=%.3f→%.3f conf=%.2f flags=%s",
+                market_id,
+                true_price,
+                effective_prior,
+                val_result["confidence"],
+                val_result["flags"],
+            )
+        else:
+            effective_prior = true_price
+
+        # Use validated/adjusted prior for all downstream Kelly sizing
+        true_price = effective_prior
 
         # Calculate edge after fees
         edge_after_fees_pct = get_edge_after_fees(market, true_price=true_price)
