@@ -382,7 +382,7 @@ def get_edge_after_fees(market: dict, true_price: float = None) -> float:
     
     return edge_after_fees_pct
 
-def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: float = 10.0, dry_run: bool = True):
+def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: float = 10.0, dry_run: bool = True, min_edge_override: float = None):
     """
     Main function for Phase 1 Kalshi optimization
     
@@ -401,6 +401,8 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     logger.info(f"Mode: {mode}")
     logger.info(f"Bankroll: ${bankroll:.2f}")
     logger.info(f"Max position: ${max_pos_usd:.2f}")
+    if min_edge_override is not None:
+        logger.info(f"Regime min_edge override: {min_edge_override:.2f}%")
     logger.info("=" * 60)
     
     # Get risk caps
@@ -438,8 +440,9 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     logger.info(f"Optimal order size: ${optimal_size:.2f} per market")
     
     # Find best maker markets
+    effective_min_edge = min_edge_override if min_edge_override is not None else risk_caps["edge_after_fees_pct"]
     logger.info("Finding best maker markets...")
-    best_maker_market = find_best_maker_market(markets, risk_caps["edge_after_fees_pct"])
+    best_maker_market = find_best_maker_market(markets, effective_min_edge)
     
     if best_maker_market:
         logger.info(f"Best maker market: {best_maker_market.get('id')} at {best_maker_market.get('odds', {}).get('yes', 0.0):.4f} (maker fee: {get_maker_fee(best_maker_market.get('odds', {}).get('yes', 0.0)):.2f}¢)")
