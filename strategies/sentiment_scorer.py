@@ -1,358 +1,187 @@
-"""
-Sentiment Scorer — AI-powered probability estimation for prediction markets.
+"""AI prior scoring for Kelly sizing in Kalshi strategy.
 
-Provider cascade (TESTING — MiniMax primary):
-  1. MiniMax M2.5 — reasoning model, already paid for, $0.30/$1.20 per M tokens
-  2. GLM-4-Flash — FREE emergency fallback
-
-Production cascade (swap SENTIMENT_PROVIDERS in config.py when Grok key added):
-  1. Grok 4.20 Beta (reasoning) — flagship, lowest hallucination, real-time X search
-  2. Grok 4.1 Fast (reasoning) — cheap fallback, same API key
-  3. MiniMax M2.5 — reasoning model backup
-  4. GLM-4-Flash — FREE last resort
-
-All providers use OpenAI-compatible API format.
-To switch: change SENTIMENT_PROVIDERS in config.py
+Cascade order (required):
+1) grok_420
+2) grok_fast
+3) glm
 """
 
-import os
+from __future__ import annotations
+
 import json
-import time
-import hashlib
 import logging
-from pathlib import Path
-from typing import Optional
-from openai import OpenAI
+import os
+import re
+from typing import Optional, Tuple
 
-logger = logging.getLogger("sentiment_scorer")
+import requests
 
-# ─── Provider configs ─────────────────────────────────────────
-PROVIDERS = {
-    "minimax": {
-        "base_url": "https://api.minimax.io/v1/text",
-        "api_key_env": "MINIMAX_API_KEY",
-        "model": "MiniMax-M2.5",
-        "timeout": 45,
-        "supports_search": False,
-        "endpoint": "/chatcompletion_v2",
-    },
-    "glm": {
-        "base_url": "https://open.bigmodel.cn/api/paas/v4",
-        "api_key_env": "GLM_API_KEY",
-        "model": "glm-4.6",
-        "timeout": 30,
-        "supports_search": False,
-    },
-    "grok_420": {
-        "base_url": "https://api.x.ai/v1",
-        "api_key_env": "GROK_API_KEY",
+logger = logging.getLogger(__name__)
+
+CALL_TIMEOUT_SECONDS = 10
+
+PROVIDERS = (
+    {
+        "name": "grok_420",
+        "url": "https://api.x.ai/v1/chat/completions",
         "model": "grok-4.20-beta-0309-reasoning",
-        "timeout": 45,
-        "supports_search": True,
+        "key_envs": ("XAI_API_KEY", "GROK_API_KEY", "X_AI_API"),
     },
-    "grok_fast": {
-        "base_url": "https://api.x.ai/v1",
-        "api_key_env": "GROK_API_KEY",
+    {
+        "name": "grok_fast",
+        "url": "https://api.x.ai/v1/chat/completions",
         "model": "grok-4-1-fast-reasoning",
-        "timeout": 30,
-        "supports_search": True,
+        "key_envs": ("XAI_API_KEY", "GROK_API_KEY", "X_AI_API"),
     },
-}
+    {
+        "name": "glm",
+        "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        "model": "glm-4.6",
+        "key_envs": ("GLM_API_KEY", "ZHIPU_API"),
+    },
+)
 
-# ─── Cache (file-based, survives restarts) ─────────────────────
-CACHE_DIR = Path(__file__).parent.parent / "data" / "sentiment_cache"
-CACHE_TTL = 600  # 10 minutes — matches cron cycle
+PROMPT_SYSTEM = (
+    "You estimate prediction market YES probabilities. "
+    "Respond with ONLY JSON: {\"probability\": <0.0-1.0>}"
+)
 
 
-def _cache_key(market_id: str, market_desc: str) -> str:
-    h = hashlib.md5(f"{market_id}:{market_desc}".encode()).hexdigest()[:12]
-    return f"{market_id}_{h}"
+def _first_key(env_names: Tuple[str, ...]) -> Tuple[Optional[str], Optional[str]]:
+    for env_name in env_names:
+        value = (os.getenv(env_name) or "").strip()
+        if value and value.lower() != "your_key_here":
+            return value, env_name
+    return None, None
 
 
-def _get_cached(key: str) -> Optional[dict]:
-    path = CACHE_DIR / f"{key}.json"
-    if path.exists():
-        data = json.loads(path.read_text())
-        if time.time() - data.get("ts", 0) < CACHE_TTL:
-            return data
+def _clamp_probability(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _extract_probability(raw_text: str) -> Optional[float]:
+    if not raw_text:
+        return None
+
+    text = raw_text.strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        text = text.replace("json", "", 1).strip()
+
+    parsed: Optional[dict] = None
+    try:
+        maybe = json.loads(text)
+        if isinstance(maybe, dict):
+            parsed = maybe
+    except Exception:
+        parsed = None
+
+    if parsed is not None:
+        for key in ("probability", "prob", "p_yes", "yes_probability"):
+            if key in parsed:
+                try:
+                    return _clamp_probability(float(parsed[key]))
+                except Exception:
+                    pass
+
+    match = re.search(r"(?<!\d)(0(?:\.\d+)?|1(?:\.0+)?)(?!\d)", text)
+    if match:
+        try:
+            return _clamp_probability(float(match.group(1)))
+        except Exception:
+            return None
+
     return None
 
 
-def _set_cache(key: str, data: dict):
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    data["ts"] = time.time()
-    (CACHE_DIR / f"{key}.json").write_text(json.dumps(data))
-
-
-# ─── Prompt engineering ────────────────────────────────────────
-SYSTEM_PROMPT = """You are a calibrated probability estimator for prediction markets.
-
-Your job: Given a market question, estimate the probability (0.00 to 1.00) that it resolves YES.
-
-Rules:
-1. Use all available information including current events, historical patterns, and base rates.
-2. Be CALIBRATED — when you say 70%, events like that should happen ~70% of the time.
-3. Account for the time remaining before resolution.
-4. Consider market manipulation, selection bias, and information asymmetry.
-5. If you truly cannot estimate, return 0.50 (maximum uncertainty).
-
-Respond ONLY with valid JSON. No markdown, no explanation outside the JSON.
-
-Format:
-{
-  "probability": 0.XX,
-  "confidence": "low|medium|high",
-  "reasoning": "1-2 sentence summary of key factors",
-  "sentiment": "bullish|bearish|neutral",
-  "key_factors": ["factor1", "factor2"]
-}"""
-
-
-def _build_market_prompt(market: dict) -> str:
-    parts = [f"Market: {market.get('title', market.get('question', 'Unknown'))}"]
-    if market.get("description"):
-        parts.append(f"Description: {market['description'][:500]}")
-    if market.get("category"):
-        parts.append(f"Category: {market['category']}")
-    if market.get("end_date"):
-        parts.append(f"Resolves: {market['end_date']}")
-    if market.get("current_price"):
-        parts.append(f"Current market price: {market['current_price']}")
-    parts.append("\nEstimate the probability this resolves YES.")
-    return "\n".join(parts)
-
-
-# ─── API call with fallback ────────────────────────────────────
-def _call_provider(provider_name: str, prompt: str) -> Optional[dict]:
-    cfg = PROVIDERS.get(provider_name)
-    if not cfg:
-        return None
-
-    api_key = os.environ.get(cfg["api_key_env"], "")
+def _call_provider(provider: dict, market_text: str) -> Optional[float]:
+    api_key, key_name = _first_key(provider["key_envs"])
     if not api_key:
-        logger.warning(f"[scorer] {provider_name}: no API key ({cfg['api_key_env']})")
         return None
 
-    try:
-        # Handle MiniMax custom endpoint separately
-        if provider_name == "minimax":
-            import httpx
-            url = f"{cfg['base_url']}/chatcompletion_v2"
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": cfg["model"],
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt}
-                ],
-                "max_tokens": 300,
-                "temperature": 0.3
-            }
-            response = httpx.post(url, json=payload, headers=headers, timeout=cfg["timeout"])
-            response.raise_for_status()
-            data = response.json()
-            raw = data["choices"][0]["message"]["content"].strip()
-        else:
-            # Standard OpenAI-compatible API
-            client = OpenAI(
-                base_url=cfg["base_url"],
-                api_key=api_key,
-                timeout=cfg["timeout"],
-            )
-
-            messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ]
-
-            response = client.chat.completions.create(
-                model=cfg["model"],
-                messages=messages,
-                max_tokens=300,
-                temperature=0.3,
-            )
-
-            raw = response.choices[0].message.content.strip()
-
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
-        result = json.loads(raw)
-        prob = float(result.get("probability", 0.5))
-        prob = max(0.01, min(0.99, prob))
-        result["probability"] = prob
-        result["provider"] = provider_name
-
-        logger.info(f"[scorer] {provider_name}: prob={prob:.2f} conf={result.get('confidence', '?')}")
-        return result
-
-    except json.JSONDecodeError as e:
-        logger.warning(f"[scorer] {provider_name}: JSON parse error: {e}")
-        return None
-    except Exception as e:
-        logger.warning(f"[scorer] {provider_name}: API error: {e}")
-        return None
-
-
-def score_market(market: dict, providers: list = None) -> dict:
-    """Score a single market. Tries providers in order until one succeeds."""
-    if providers is None:
-        try:
-            from config import SENTIMENT_PROVIDERS
-            providers = SENTIMENT_PROVIDERS
-        except ImportError:
-            providers = ["minimax", "glm"]
-
-    market_id = market.get("id", market.get("ticker", "unknown"))
-    market_desc = market.get("title", market.get("question", ""))
-
-    ck = _cache_key(market_id, market_desc)
-    cached = _get_cached(ck)
-    if cached:
-        cached["cached"] = True
-        return cached
-
-    prompt = _build_market_prompt(market)
-
-    for provider in providers:
-        result = _call_provider(provider, prompt)
-        if result:
-            result["market_id"] = market_id
-            result["cached"] = False
-            _set_cache(ck, result)
-            return result
-
-    logger.warning(f"[scorer] All providers failed for {market_id}, returning 0.50")
-    return {
-        "market_id": market_id,
-        "probability": 0.50,
-        "confidence": "none",
-        "reasoning": "All API providers failed. Using flat prior.",
-        "sentiment": "neutral",
-        "key_factors": [],
-        "provider": "fallback",
-        "cached": False,
+    payload = {
+        "model": provider["model"],
+        "messages": [
+            {"role": "system", "content": PROMPT_SYSTEM},
+            {
+                "role": "user",
+                "content": (
+                    "Market text:\n"
+                    f"{market_text}\n\n"
+                    "Return a calibrated YES probability only as JSON."
+                ),
+            },
+        ],
+        "temperature": 0.0,
+        "max_tokens": 80,
     }
 
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
 
-def score_markets(markets: list, providers: list = None, max_markets: int = 50) -> list:
-    """Score multiple markets with rate limit delays."""
-    results = []
-    scored = 0
-    for market in markets[:max_markets]:
-        result = score_market(market, providers)
-        results.append(result)
-        scored += 1
-        if not result.get("cached") and scored < len(markets):
-            time.sleep(0.5)
-    logger.info(f"[scorer] Scored {scored} markets ({sum(1 for r in results if r.get('cached'))} cached)")
-    return results
+    try:
+        response = requests.post(
+            provider["url"],
+            headers=headers,
+            json=payload,
+            timeout=CALL_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+
+        data = response.json()
+        content = (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+        )
+        prob = _extract_probability(content)
+        if prob is None:
+            logger.warning(
+                "[kelly] AI prior parse failure: source=%s key_env=%s",
+                provider["name"],
+                key_name,
+            )
+            return None
+        return prob
+    except Exception as exc:
+        logger.warning(
+            "[kelly] AI prior request failed: source=%s key_env=%s err=%s",
+            provider["name"],
+            key_name,
+            exc,
+        )
+        return None
+
+
+def get_ai_prior(market_text: str) -> float:
+    """Return calibrated YES probability in [0,1]."""
+    normalized = (market_text or "").strip()
+    if not normalized:
+        logger.warning("[kelly] AI prior: source=fallback_empty prob=0.500")
+        return 0.5
+
+    has_any_key = False
+    for provider in PROVIDERS:
+        key, _ = _first_key(provider["key_envs"])
+        if key:
+            has_any_key = True
+        prob = _call_provider(provider, normalized)
+        if prob is not None:
+            logger.info("[kelly] AI prior: source=%s prob=%.3f", provider["name"], prob)
+            return prob
+
+    if not has_any_key:
+        logger.warning("[kelly] AI prior: source=fallback_no_keys prob=0.500")
+    else:
+        logger.warning("[kelly] AI prior: source=fallback_all_failed prob=0.500")
+    return 0.5
 
 
 def get_bayesian_prior(market: dict, providers: list = None) -> float:
-    """Drop-in replacement for flat 0.50 prior in BayesianEstimate."""
-    result = score_market(market, providers)
-    base_prob = result["probability"]
+    """Compatibility wrapper for legacy callsites."""
+    _ = providers  # Unused; kept for callsite compatibility.
+    text = market.get("title") or market.get("question") or market.get("description") or ""
+    return get_ai_prior(text)
 
-    # Apply GDELT geopolitical prior (weight: 0.15 relative to AI cascade)
-    # GDELT is fetched lazily here to avoid circular imports
-    try:
-        from strategies.gdelt_signal import apply_gdelt_prior
-        base_prob = apply_gdelt_prior(
-            base_prob,
-            market_title=market.get("title", ""),
-            market_category=market.get("category", ""),
-        )
-    except Exception:
-        pass  # GDELT unavailable — use pure AI prior
-
-    return base_prob
-
-
-def get_ai_stock_sentiment(ticker: str, finnhub_score: float, news_headlines: list = None,
-                           blend_weight: float = 0.5) -> float:
-    """
-    Enhance Finnhub/AlphaVantage sentiment with AI reasoning via Grok/GLM cascade.
-
-    Args:
-        ticker: Stock symbol (e.g., "AAPL")
-        finnhub_score: Base sentiment from Finnhub/AlphaVantage (0-1)
-        news_headlines: Optional list of headline strings for context
-        blend_weight: Weight for AI score in blend (0=pure finnhub, 1=pure AI)
-
-    Returns:
-        float: Blended sentiment score (0-1)
-    """
-    try:
-        from config import SENTIMENT_PROVIDERS
-    except ImportError:
-        SENTIMENT_PROVIDERS = ["grok_420", "grok_fast", "glm"]
-
-    # Build headline context
-    headline_context = ""
-    if news_headlines:
-        top = news_headlines[:5]
-        headline_context = "\n\nRecent headlines:\n" + "\n".join(f"- {h}" for h in top)
-
-    prompt = (
-        f"You are a quantitative analyst estimating 24-hour stock outperform probability.\n\n"
-        f"Ticker: {ticker}\n"
-        f"News sentiment score (0-1 scale, higher = more bullish): {finnhub_score:.3f}"
-        f"{headline_context}\n\n"
-        f"Based on the news sentiment and any known catalysts, estimate the probability "
-        f"that {ticker} will outperform the S&P 500 in the next 24 hours.\n\n"
-        f"Respond with ONLY a single decimal number between 0.0 and 1.0, nothing else."
-    )
-
-    ai_score = None
-    used_provider = None
-
-    for provider in SENTIMENT_PROVIDERS:
-        result = _call_provider(provider, prompt)
-        if result is not None:
-            try:
-                ai_score = float(result.get("probability", 0.5))
-                ai_score = max(0.0, min(1.0, ai_score))
-                used_provider = provider
-                logger.info(f"[scorer] AI stock prior: {ticker} provider={used_provider} "
-                           f"finnhub={finnhub_score:.3f} ai={ai_score:.3f}")
-                break
-            except (ValueError, TypeError):
-                ai_score = None
-                continue
-
-    if ai_score is not None:
-        blended = (1 - blend_weight) * finnhub_score + blend_weight * ai_score
-        logger.info(f"[scorer] AI stock blended: {ticker} finnhub={finnhub_score:.3f} "
-                    f"ai={ai_score:.3f} blended={blended:.3f} (weight={blend_weight})")
-        return blended
-    else:
-        logger.warning(f"[scorer] AI stock all-providers-failed for {ticker}, "
-                       f"using pure finnhub={finnhub_score:.3f}")
-        return finnhub_score
-
-
-if __name__ == "__main__":
-    import sys
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-
-    test_market = {
-        "id": "test-fed-rate-cut",
-        "title": "Will the Fed cut interest rates at their June 2026 meeting?",
-        "category": "Economics",
-        "end_date": "2026-06-18",
-        "current_price": 0.42,
-    }
-
-    print("=== Sentiment Scorer Test ===")
-    result = score_market(test_market)
-    print(json.dumps(result, indent=2))
-
-    if result["provider"] != "fallback":
-        print(f"\n✓ PASS — provider={result['provider']} prob={result['probability']:.2f}")
-    else:
-        print(f"\n✗ FAIL — all providers failed")
-        sys.exit(1)
