@@ -31,6 +31,7 @@ KALSHI_BLOCKED_CATEGORIES = {
 # REMOVED 2026-03-14: All prefixes removed to allow esports/sports markets
 # Previously blocked: KXMV, KXMVESPORTS, KXNFL, KXNBA, KXMLB, KXNHL, KXEPL, KXUCL
 KALSHI_BLOCKED_PREFIXES = ()
+KALSHI_CANONICAL_BASE_URL = "https://api.elections.kalshi.com"
 
 
 def _safe_float(value, default=0.0):
@@ -41,6 +42,40 @@ def _safe_float(value, default=0.0):
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _candidate_kalshi_base_urls():
+    """Resolve configured Kalshi API URL with canonical fallback."""
+    configured = (
+        os.getenv("KALSHI_BASE_URL", KALSHI_CANONICAL_BASE_URL)
+        .strip()
+        .rstrip("/")
+    )
+    if not configured:
+        configured = KALSHI_CANONICAL_BASE_URL
+
+    if configured == KALSHI_CANONICAL_BASE_URL:
+        return [configured]
+    return [configured, KALSHI_CANONICAL_BASE_URL]
+
+
+def _market_price_value(market, dollars_key, legacy_key):
+    """
+    Read current Kalshi *_dollars fields first, then legacy cent fields.
+    Legacy fields may be cents (e.g. 37) or dollars (e.g. 0.37).
+    """
+    dollars_val = _safe_float(market.get(dollars_key, 0), 0.0)
+    if dollars_val > 0:
+        return dollars_val
+
+    legacy_raw = market.get(legacy_key)
+    if legacy_raw in (None, ""):
+        return 0.0
+
+    legacy_val = _safe_float(legacy_raw, 0.0)
+    if legacy_val > 1.0:
+        return legacy_val / 100.0
+    return legacy_val
 
 
 def get_kalshi_headers(method, path, api_key, private_key):
@@ -75,21 +110,37 @@ def fetch_kalshi_series(api_key, private_key):
     """
     try:
         headers = get_kalshi_headers('GET', '/series', api_key, private_key)
-        resp = requests.get(
-            'https://api.elections.kalshi.com/trade-api/v2/series',
-            headers=headers,
-            params={'include_volume': 'true'},
-            timeout=15
-        )
-        
-        if resp.status_code != 200:
-            logger.error(f"Kalshi Series API error: {resp.status_code}")
+        resp = None
+        selected_base = None
+        for base_url in _candidate_kalshi_base_urls():
+            candidate = requests.get(
+                f"{base_url}/trade-api/v2/series",
+                headers=headers,
+                params={'include_volume': 'true'},
+                timeout=15
+            )
+            if candidate.status_code == 200:
+                resp = candidate
+                selected_base = base_url
+                break
+
+            body_preview = candidate.text[:160].replace("\n", " ")
+            logger.warning(
+                "[KALSHI] Series API failed: status=%s base=%s body=%s",
+                candidate.status_code,
+                base_url,
+                body_preview,
+            )
+            resp = candidate
+
+        if resp is None or resp.status_code != 200:
+            logger.error("Kalshi Series API error: no successful base URL")
             return []
         
         data = resp.json()
         all_series = data.get('series', [])
         
-        logger.info(f"[KALSHI] Series discovery: {len(all_series)} total series")
+        logger.info(f"[KALSHI] Series discovery: {len(all_series)} total series (base={selected_base})")
         
         # Filter series by category
         target_series = []
@@ -139,15 +190,22 @@ def fetch_markets_for_series(series_ticker, api_key, private_key):
     """
     try:
         headers = get_kalshi_headers('GET', '/markets', api_key, private_key)
-        resp = requests.get(
-            'https://api.elections.kalshi.com/trade-api/v2/markets',
-            headers=headers,
-            params={'series_ticker': series_ticker, 'status': 'open', 'limit': 100},
-            timeout=15
-        )
+        resp = None
+        for base_url in _candidate_kalshi_base_urls():
+            candidate = requests.get(
+                f"{base_url}/trade-api/v2/markets",
+                headers=headers,
+                params={'series_ticker': series_ticker, 'status': 'open', 'limit': 100},
+                timeout=15
+            )
+            if candidate.status_code == 200:
+                resp = candidate
+                break
+            resp = candidate
         
-        if resp.status_code != 200:
-            logger.debug(f"No markets for series {series_ticker}: {resp.status_code}")
+        if resp is None or resp.status_code != 200:
+            status = resp.status_code if resp is not None else "n/a"
+            logger.debug(f"No markets for series {series_ticker}: {status}")
             return []
         
         data = resp.json()
@@ -248,11 +306,16 @@ def fetch_kalshi_markets():
         # Step 4: yes_ask > 0 filter and normalized price selection
         priced_markets = []
         ask_only_count = 0
+        ask_from_last_trade_count = 0
         for m in status_filtered:
-            yes_bid_price = _safe_float(m.get('yes_bid_dollars', 0), 0.0)
-            yes_ask_price = _safe_float(m.get('yes_ask_dollars', 0), 0.0)
+            yes_bid_price = _market_price_value(m, 'yes_bid_dollars', 'yes_bid')
+            yes_ask_price = _market_price_value(m, 'yes_ask_dollars', 'yes_ask')
             if yes_ask_price <= 0:
-                continue
+                last_price = _market_price_value(m, 'last_price_dollars', 'last_price')
+                if last_price <= 0:
+                    continue
+                yes_ask_price = last_price
+                ask_from_last_trade_count += 1
 
             # Ask-only books are common; midpoint with bid=0 underprices by 50%.
             if yes_bid_price > 0:
@@ -267,7 +330,7 @@ def fetch_kalshi_markets():
             priced_markets.append(m)
         logger.info(
             f"[KALSHI FILTER] After yes_ask > 0 filter: {len(priced_markets)} "
-            f"(ask-only books: {ask_only_count})"
+            f"(ask-only books: {ask_only_count}, ask-from-last-trade: {ask_from_last_trade_count})"
         )
 
         # Step 5: Liquidity filter (default disabled; keep data flow open for strategy-level logic)
@@ -339,8 +402,14 @@ def fetch_kalshi_markets():
         markets = []
         for m in filtered_markets:
             ticker = m.get('ticker', '')
-            yes_bid_price = _safe_float(m.get('_yes_bid_price', m.get('yes_bid_dollars', 0)), 0.0)
-            yes_ask_price = _safe_float(m.get('_yes_ask_price', m.get('yes_ask_dollars', 0)), 0.0)
+            yes_bid_price = _safe_float(
+                m.get('_yes_bid_price', _market_price_value(m, 'yes_bid_dollars', 'yes_bid')),
+                0.0
+            )
+            yes_ask_price = _safe_float(
+                m.get('_yes_ask_price', _market_price_value(m, 'yes_ask_dollars', 'yes_ask')),
+                0.0
+            )
             yes_price = _safe_float(m.get('_yes_price', yes_ask_price), 0.0)
             no_price = 1.0 - yes_price
             liquidity_usd = _safe_float(m.get('_liquidity_usd', 0), 0.0)
