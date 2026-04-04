@@ -557,5 +557,73 @@ def kalshi_debug_discovery():
     return categories
 
 
+def get_kalshi_balance():
+    """
+    Fetch account balance from Kalshi API.
+
+    Returns:
+        float: Balance in USD. Returns 0.0 on error (with WARNING logged).
+    """
+    api_key = os.getenv("KALSHI_KEY")
+    secret_file = os.getenv("KALSHI_SECRET_FILE", "./kalshi_private_key.pem")
+
+    if not api_key:
+        logger.warning("[WALLET] KALSHI_KEY not set, cannot fetch balance")
+        return 0.0
+
+    try:
+        with open(secret_file, "rb") as f:
+            private_key = serialization.load_pem_private_key(f.read(), password=None)
+    except Exception as e:
+        logger.warning(f"[WALLET] Failed to load Kalshi private key: {e}")
+        return 0.0
+
+    path = "/trade-api/v2/portfolio/balance"
+    timestamp = str(int(time.time() * 1000))
+    msg = f"{timestamp}GET{path}"
+    signature = private_key.sign(
+        msg.encode("utf-8"),
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()),
+            salt_length=padding.PSS.DIGEST_LENGTH,
+        ),
+        hashes.SHA256(),
+    )
+    sig_b64 = base64.b64encode(signature).decode()
+    headers = {
+        "KALSHI-ACCESS-KEY": api_key,
+        "KALSHI-ACCESS-SIGNATURE": sig_b64,
+        "KALSHI-ACCESS-TIMESTAMP": timestamp,
+    }
+
+    try:
+        resp = requests.get(
+            f"https://api.elections.kalshi.com{path}",
+            headers=headers,
+            timeout=10,
+        )
+    except Exception as e:
+        logger.warning(f"[WALLET] Balance fetch request failed: {e}")
+        return 0.0
+
+    if resp.status_code != 200:
+        body_preview = resp.text[:200].replace("\n", " ")
+        logger.warning(
+            f"[WALLET] Balance fetch failed: status={resp.status_code} body={body_preview}"
+        )
+        return 0.0
+
+    try:
+        data = resp.json()
+        # Balance is returned in cents
+        balance_cents = data.get("balance", 0)
+        balance_usd = float(balance_cents) / 100.0
+        logger.info(f"[WALLET] Fetched balance: ${balance_usd:.2f}")
+        return balance_usd
+    except Exception as e:
+        logger.warning(f"[WALLET] Balance parse failed: {e} body={resp.text[:200]}")
+        return 0.0
+
+
 # Alias for backwards compatibility
 get_kalshi_markets = fetch_kalshi_markets

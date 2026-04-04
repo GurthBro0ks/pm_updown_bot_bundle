@@ -27,6 +27,7 @@ from strategies import kalshi_optimize as kalshi_opt_module
 from strategies import sef_spot_trading as sef_opt_module
 from strategies import stock_hunter as stock_hunter_module
 from strategies import fear_regime
+from utils.kalshi import get_kalshi_balance
 
 load_dotenv()
 
@@ -265,6 +266,14 @@ def main():
     logger.info("[regime] Fear=%s VIX=%s -> %s (min_edge=%.2f)",
                 fg_val, vix_val, regime_name, min_edge_override)
 
+    # Fetch wallet balance from Kalshi API
+    wallet_balance = get_kalshi_balance()
+    effective_bankroll = wallet_balance if wallet_balance > 0 else args.bankroll
+    if wallet_balance > 0:
+        logger.info(f"Wallet: ${wallet_balance:.2f}")
+    else:
+        logger.warning(f"[WALLET] Could not fetch balance, using CLI bankroll: ${args.bankroll:.2f}")
+
     # Log regime to scratchpad
     try:
         scratchpad_path = Path("/opt/slimy/pm_updown_bot_bundle/data/scratchpad.jsonl")
@@ -283,7 +292,7 @@ def main():
     logger.info("=" * 60)
     logger.info(f"MODE: {args.mode.upper()}")
     logger.info(f"PHASE: {args.phase.upper()}")
-    logger.info(f"BANKROLL: ${args.bankroll:.2f}")
+    logger.info(f"BANKROLL: ${effective_bankroll:.2f}")
     logger.info(f"MAX POS: ${args.max_pos:.2f}")
     logger.info("=" * 60)
 
@@ -293,30 +302,30 @@ def main():
         logger.info("Starting Phase 1: Kalshi Optimization")
         result_phase1 = run_phase1_kalshi_optimization(
             mode=args.mode,
-            bankroll=args.bankroll,
+            bankroll=effective_bankroll,
             max_pos_usd=args.max_pos,
             min_edge_override=(min_edge_override if regime_name != "neutral" else None),
         )
         results["phase1"] = result_phase1
     else:
         results["phase1"] = 0
-    
+
     if args.phase == "phase2" or args.phase == "all":
         logger.info("Starting Phase 2: SEF Spot Trading")
         result_phase2 = run_phase2_sef_spot_trading(
             mode=args.mode,
-            bankroll=args.bankroll,
+            bankroll=effective_bankroll,
             max_pos_usd=args.max_pos
         )
         results["phase2"] = result_phase2
     else:
         results["phase2"] = 0
-    
+
     if args.phase == "phase3" or args.phase == "all":
         logger.info("Starting Phase 3: Stock Hunter")
         result_phase3 = run_phase3_stock_hunter(
             mode=args.mode,
-            bankroll=args.bankroll,
+            bankroll=effective_bankroll,
             max_pos_usd=args.max_pos
         )
         results["phase3"] = result_phase3
@@ -335,7 +344,8 @@ def main():
     proof_data = {
         "mode": args.mode,
         "phase": args.phase,
-        "bankroll": args.bankroll,
+        "bankroll": effective_bankroll,
+        "wallet_balance": wallet_balance,
         "max_pos_usd": args.max_pos,
         "results": results,
         "risk_caps": RISK_CAPS
