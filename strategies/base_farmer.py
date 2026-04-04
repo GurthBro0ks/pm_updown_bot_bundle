@@ -104,7 +104,7 @@ VERIFIED_AERODROME_POOLS = {
 
 PROTOCOL_STATUS = {
     "uniswap_v3": {"status": "LIVE", "last_error": None},
-    "aerodrome": {"status": "FIXING", "last_error": None},
+    "aerodrome": {"status": "LIVE", "last_error": None},
     "aave_v3": {"status": "FIXING", "last_error": None},
     "zora": {"status": "LIVE", "last_error": None},
 }

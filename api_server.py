@@ -231,7 +231,7 @@ def trigger_farming():
     try:
         from strategies.base_farmer import run, get_farming_report
         data = request.get_json() or {}
-        dry_run = data.get("dry_run", True)
+        dry_run = data.get("dry_run", False)
         run(circuit_breaker_ok=True, dry_run=dry_run)
         report = get_farming_report()
         return jsonify({
