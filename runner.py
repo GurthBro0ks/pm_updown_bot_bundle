@@ -28,6 +28,7 @@ from strategies import sef_spot_trading as sef_opt_module
 from strategies import stock_hunter as stock_hunter_module
 from strategies import fear_regime
 from utils.kalshi import get_kalshi_balance
+from utils.scratchpad import Scratchpad
 
 load_dotenv()
 
@@ -170,7 +171,7 @@ def fetch_kalshi_markets():
     logger.error("API fail - using mock")
     return []
 
-def run_phase1_kalshi_optimization(mode, bankroll, max_pos_usd, min_edge_override=None):
+def run_phase1_kalshi_optimization(mode, bankroll, max_pos_usd, scratchpad=None, min_edge_override=None):
     """Phase 1: Kalshi Optimization (Complete)"""
     logger.info("=" * 60)
     logger.info("PHASE 1: KALSHI OPTIMIZATION (COMPLETE)")
@@ -190,6 +191,7 @@ def run_phase1_kalshi_optimization(mode, bankroll, max_pos_usd, min_edge_overrid
             max_pos_usd=max_pos_usd,
             dry_run=(mode == "shadow"),
             min_edge_override=min_edge_override,
+            scratchpad=scratchpad,
         )
         
         logger.info(f"Phase 1 optimization complete - result: {result}")
@@ -254,6 +256,9 @@ def main():
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
+    # Initialize scratchpad
+    scratchpad = Scratchpad()
+
     # Fetch regime info before any trading phase
     regime_info = fear_regime.get_regime()
     fg_val = regime_info["fear_greed_value"]
@@ -304,6 +309,7 @@ def main():
             mode=args.mode,
             bankroll=effective_bankroll,
             max_pos_usd=args.max_pos,
+            scratchpad=scratchpad,
             min_edge_override=(min_edge_override if regime_name != "neutral" else None),
         )
         results["phase1"] = result_phase1

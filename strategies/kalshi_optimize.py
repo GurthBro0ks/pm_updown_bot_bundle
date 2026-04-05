@@ -382,16 +382,17 @@ def get_edge_after_fees(market: dict, true_price: float = None) -> float:
     
     return edge_after_fees_pct
 
-def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: float = 10.0, dry_run: bool = True, min_edge_override: float = None):
+def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: float = 10.0, dry_run: bool = True, min_edge_override: float = None, scratchpad=None):
     """
     Main function for Phase 1 Kalshi optimization
-    
+
     Args:
         mode: 'shadow' or 'real-live'
         bankroll: Available capital in USD
         max_pos_usd: Maximum position size
         dry_run: If True, only simulate without executing
-    
+        scratchpad: Scratchpad instance for event logging (optional)
+
     Returns:
         Number of orders placed
     """
@@ -484,7 +485,16 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
             market["_validation"] = val_result
             market["_adjusted_prior"] = val_result["adjusted_prior"]
 
-            if not val_result["passed"]:
+            # Always log validation result
+            if val_result["passed"]:
+                logger.info(
+                    "[kelly] prior validation PASSED market=%s prior=%.3f conf=%.2f flags=%s",
+                    market_id,
+                    true_price,
+                    val_result["confidence"],
+                    val_result["flags"],
+                )
+            else:
                 logger.info(
                     "[kelly] prior validation FAILED market=%s prior=%.3f reason=%s flags=%s",
                     market_id,
@@ -492,32 +502,21 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
                     val_result["reason"],
                     val_result["flags"],
                 )
-                # Scratchpad log
-                try:
-                    scratchpad_path = Path("/opt/slimy/pm_updown_bot_bundle/data/scratchpad.jsonl")
-                    with open(scratchpad_path, "a") as f:
-                        f.write(json.dumps({
-                            "ts": datetime.now(timezone.utc).isoformat(),
-                            "event": "prior_validation_failed",
-                            "market": market_id,
-                            "prior": true_price,
-                            "reason": val_result["reason"],
-                            "flags": val_result["flags"],
-                        }) + "\n")
-                except Exception:
-                    pass
+
+            # Write to scratchpad
+            if scratchpad is not None:
+                scratchpad.log_prior_validation(
+                    market=market_id,
+                    prior=true_price,
+                    val_result=val_result,
+                    passed=val_result["passed"],
+                )
+
+            if not val_result["passed"]:
                 continue
 
             # Use adjusted prior for sizing if validation passed
             effective_prior = val_result["adjusted_prior"]
-            logger.debug(
-                "[kelly] prior validated market=%s prior=%.3f→%.3f conf=%.2f flags=%s",
-                market_id,
-                true_price,
-                effective_prior,
-                val_result["confidence"],
-                val_result["flags"],
-            )
         else:
             effective_prior = true_price
 
