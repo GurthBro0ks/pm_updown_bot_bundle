@@ -36,7 +36,11 @@ from config import (
 
 from utils.sentiment import apply_earnings_multiplier
 from utils.position_sizer import size_position, get_circuit_breaker, update_bankroll
-from strategies.sentiment_scorer import get_ai_stock_sentiment
+try:
+    from strategies.sentiment_scorer import get_ai_stock_sentiment
+except ImportError:
+    def get_ai_stock_sentiment(headline_text, ticker=None):
+        return 0.5
 
 from utils.logging_config import setup_logging
 

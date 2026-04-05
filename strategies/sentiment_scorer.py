@@ -179,6 +179,11 @@ def get_ai_prior(market_text: str) -> float:
     return 0.5
 
 
+def get_ai_stock_sentiment(headline_text, ticker=None):
+    """Stub for stock sentiment scoring. Returns neutral 0.5."""
+    return 0.5
+
+
 def get_bayesian_prior(market: dict, providers: list = None) -> float:
     """Compatibility wrapper for legacy callsites."""
     _ = providers  # Unused; kept for callsite compatibility.
