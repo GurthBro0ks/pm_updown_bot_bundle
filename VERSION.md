@@ -1,11 +1,11 @@
 # Version Snapshot — pm_updown_bot_bundle
 
-> Generated: 2026-04-05T13:12:34Z | Host: slimy-nuc2
+> Generated: 2026-04-05T15:04:16Z | Host: slimy-nuc2
 
 ## Git State
 - **Branch:** `main`
-- **HEAD:** `a49674b`
-- **Last commit:** `2026-03-21` — `chore: update AGENTS.md`
+- **HEAD:** `c379752`
+- **Last commit:** `2026-04-05` — `docs: scaffold project docs via kb-project-doc-sync.sh 2026-04-05`
 - **Remote:** `git@github.com:GurthBro0ks/pm_updown_bot_bundle.git`
 - **Dirty:** NO
 

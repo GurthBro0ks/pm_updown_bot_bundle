@@ -1,0 +1,81 @@
+{
+  "_meta": {
+    "project": "pm_updown_bot_bundle",
+    "last_updated": "2026-03-17",
+    "rules": "NEVER remove or edit existing features. Only update 'passes' after running the truth gate. Add new features at the end."
+  },
+  "features": [
+    {
+      "id": "bot-001",
+      "category": "core",
+      "description": "runner.py starts without errors in shadow mode",
+      "steps": [
+        "Run python runner.py --shadow (or equivalent shadow flag)",
+        "Verify no import errors or crashes",
+        "Verify it enters the main loop"
+      ],
+      "passes": false,
+      "priority": "critical"
+    },
+    {
+      "id": "bot-002",
+      "category": "core",
+      "description": "All strategy modules import cleanly without errors",
+      "steps": [
+        "python -c 'import strategies' or equivalent",
+        "Verify each strategy in strategies/ can be imported",
+        "No missing dependencies"
+      ],
+      "passes": false,
+      "priority": "critical"
+    },
+    {
+      "id": "bot-003",
+      "category": "testing",
+      "description": "./scripts/run_tests.sh passes (truth gate green)",
+      "steps": [
+        "Run ./scripts/run_tests.sh",
+        "Verify exit code 0",
+        "All assertions pass"
+      ],
+      "passes": false,
+      "priority": "critical"
+    },
+    {
+      "id": "bot-004",
+      "category": "venue",
+      "description": "Polymarket venue connector handles API responses correctly",
+      "steps": [
+        "Review venues/ connector code",
+        "Verify error handling for bad responses",
+        "Verify mock/shadow mode doesn't hit real endpoints"
+      ],
+      "passes": false,
+      "priority": "high"
+    },
+    {
+      "id": "bot-005",
+      "category": "automation",
+      "description": "run-micro-live.sh executes a micro trading loop successfully",
+      "steps": [
+        "Run ./run-micro-live.sh in shadow mode",
+        "Verify it completes 1+ loops",
+        "Verify logs are written correctly"
+      ],
+      "passes": false,
+      "priority": "high"
+    },
+    {
+      "id": "bot-006",
+      "category": "automation",
+      "description": "Ralph automation configs are valid and parseable",
+      "steps": [
+        "Inspect .ralph/ directory",
+        "Verify config files parse without errors",
+        "Verify automation rules match expected behavior"
+      ],
+      "passes": false,
+      "priority": "medium"
+    }
+  ]
+}
