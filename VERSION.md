@@ -1,11 +1,11 @@
 # Version Snapshot — pm_updown_bot_bundle
 
-> Generated: 2026-04-05T15:53:10Z | Host: slimy-nuc1
+> Generated: 2026-04-05T16:07:13Z | Host: slimy-nuc1
 
 ## Git State
 - **Branch:** `feat/ibkr-forecast-integration`
-- **HEAD:** `0a92d84`
-- **Last commit:** `2026-04-05` — `fix: add get_ai_stock_sentiment stub and defensive import`
+- **HEAD:** `cbea8db`
+- **Last commit:** `2026-04-05` — `docs: auto-sync project docs from slimy-nuc1 2026-04-05`
 - **Remote:** `git@github.com:GurthBro0ks/pm_updown_bot_bundle.git`
 - **Dirty:** NO
 
