@@ -21,12 +21,20 @@ build/
 secrets.json
 config/*.env
 
+# API Keys and Private Keys
+keys/
+kalshi_private_key.pem
+
 # Logs
 logs/
 *.log
 
 # Proofs (generated)
 proofs/
+
+# Autoresearch working files (never commit)
+data/holdout/
+experiments.tsv
 
 # Backups
 backup*/
@@ -48,3 +56,4 @@ Thumbs.db
 # Test artifacts
 test_*.json
 test_output/
+ml/training_data.db

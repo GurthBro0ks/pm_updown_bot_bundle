@@ -1,0 +1,10 @@
+{
+  "entries": [],
+  "checks": [],
+  "exits": [],
+  "metadata": {
+    "created": "2026-02-27T00:00:00Z",
+    "description": "Trade signal logging - entries, checks, and exits",
+    "schema_version": "1.0"
+  }
+}

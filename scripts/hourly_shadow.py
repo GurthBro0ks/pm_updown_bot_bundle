@@ -59,13 +59,12 @@ def run_shadow() -> dict:
     if os.environ.get("KALSHI_SECRET"):
         env["KALSHI_SECRET"] = os.environ["KALSHI_SECRET"]
     
+    cmd = f"cd {BOT_DIR} && /usr/bin/timeout 600 {sys.executable} runner.py --mode shadow --venue kalshi"
     result = subprocess.run(
-        [sys.executable, str(BOT_DIR / "runner.py"), 
-         "--mode", "shadow", 
-         "--venue", "kalshi"],
+        cmd,
         capture_output=True,
         text=True,
-        timeout=60,
+        shell=True,
         env=env
     )
     

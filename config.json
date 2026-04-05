@@ -1,0 +1,68 @@
+{
+  "phases": {
+    "phase1_kalshi": true,
+    "phase2_sef": true,
+    "phase3_stock_hunter": true,
+    "phase4_airdrop": true
+  },
+  "risk_caps": {
+    "max_pos_usd": 10.0,
+    "max_daily_loss_usd": 30.0,
+    "max_open_pos": 3,
+    "max_daily_positions": 10,
+    "liquidity_min_usd": 0,
+    "edge_after_fees_pct": 1.5,
+    "kalshi_maker_only": true,
+    "kalshi_min_profit_usd": 0.1,
+    "kalshi_max_daily_trades": 10,
+    "maker_fee_usd": 0.0,
+    "kalshi_fee_pct": 0.07,
+    "kalshi_true_probability": 0.5,
+    "sef_max_pos_usd": 20.0,
+    "sef_max_daily_loss_usd": 20.0,
+    "sef_max_open_pos": 3,
+    "sef_max_daily_trades": 15,
+    "sef_slippage_max_pct": 1.0,
+    "sef_min_spread_pct": 0.5,
+    "sef_gas_budget_usd": 10.0,
+    "stock_max_pos_usd": 100.0,
+    "stock_max_daily_loss_usd": 30.0,
+    "stock_max_open_pos": 3,
+    "stock_max_daily_positions": 10,
+    "stock_min_liquidity_usd": 10000,
+    "stock_sentiment_threshold": 0.55,
+    "stock_min_market_cap_usd": 100000000,
+    "stock_max_market_cap_usd": 300000000,
+    "stock_min_price_usd": 1.0,
+    "stock_max_price_usd": 5.0
+  },
+  "venue_configs": {
+    "kalshi": {
+      "name": "Kalshi",
+      "min_trade_usd": 0.01,
+      "max_trade_usd": 10.0,
+      "base_url": "https://api.elections.kalshi.com",
+      "settlement": "USDC"
+    },
+    "polymarket": {
+      "name": "Polymarket",
+      "min_trade_usd": 0.01,
+      "max_trade_usd": 100.0,
+      "fee_pct": 0.005,
+      "base_url": "https://api.thegraph.com/subgraphs/name/polymarket/markets",
+      "settlement": "USDC",
+      "wallet_address": null,
+      "shadow_mode": true
+    },
+    "ibkr": {
+      "name": "Interactive Brokers",
+      "min_trade_usd": 1.0,
+      "max_trade_usd": 1000.0,
+      "fee_pct": 0.01,
+      "base_url": "mock://ibkr",
+      "settlement": "USD"
+    }
+  },
+  "execution_mode": "shadow",
+  "exported_at": "2026-02-27T18:15:19.614602+00:00"
+}

@@ -7,6 +7,7 @@ Maker order logic, probability-weighted edge detection, trade frequency optimiza
 import argparse
 import json
 import logging
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -19,6 +20,25 @@ sys.path.insert(0, '/opt/slimy/pm_updown_bot_bundle')
 # Local imports (avoid circular import)
 from utils.proof import generate_proof
 from utils.kalshi import fetch_kalshi_markets
+try:
+    from strategies.sentiment_scorer import get_ai_prior
+except Exception:
+    get_ai_prior = None
+
+try:
+    from strategies.contract_signals import (
+        compute_momentum,
+        compute_zscore,
+        volume_confidence,
+        expiry_confidence,
+        validate_prior,
+    )
+except Exception:
+    compute_momentum = None
+    compute_zscore = None
+    volume_confidence = None
+    expiry_confidence = None
+    validate_prior = None
 
 # Stub for missing function
 def check_micro_live_gates(market, size, price, risk_caps, venue):
@@ -83,6 +103,25 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+
+def estimate_true_price(market_question: str, market_id: str) -> float:
+    """Estimate YES probability via AI cascade; fallback to 0.5."""
+    if get_ai_prior is None:
+        logger.warning(
+            "[kelly] AI prior: source=fallback_import_missing prob=0.500 market=%s",
+            market_id,
+        )
+        return 0.5
+
+    try:
+        prob = float(get_ai_prior(market_question))
+        if 0.0 <= prob <= 1.0:
+            return prob
+    except Exception as exc:
+        logger.warning("[kelly] AI prior failed: market=%s err=%s", market_id, exc)
+
+    return 0.5
 
 def calculate_probability_weighted_fee(price: float, quantity: float) -> float:
     """
@@ -179,13 +218,19 @@ def find_best_maker_market(markets: list, min_edge_pct: float = 0.5) -> dict:
     for market in markets:
         # Get market data
         yes_price = market.get("odds", {}).get("yes")
-        true_price = 0.5  # Assume fair 50/50 markets unless otherwise known
+        if yes_price is None or yes_price <= 0:
+            continue
+        market_question = market.get("title", market.get("question", ""))
+        market_id = market.get("ticker", market.get("id", "?"))
+        true_price = market.get("_ai_true_price")
+        if true_price is None:
+            true_price = estimate_true_price(market_question, market_id)
         maker_fee = get_maker_fee(yes_price)
         
         # Calculate if maker is profitable
         edge_pct = 0.0  # Initialize
         if is_maker_profitable(yes_price, true_price, 0.6):  # 60% win prob
-            current_edge_pct = ((0.5 - yes_price) / yes_price) * 100
+            current_edge_pct = ((true_price - yes_price) / yes_price) * 100
             edge_pct = current_edge_pct
             
             # Check if this market has better edge than current best
@@ -193,7 +238,10 @@ def find_best_maker_market(markets: list, min_edge_pct: float = 0.5) -> dict:
                 best_edge_pct = edge_pct
                 best_market = market
         
-        logger.debug(f"Market {market.get('id')}: price={yes_price:.4f}, true=50%, edge={edge_pct:.2f}%, maker_fee={maker_fee:.2f}¢")
+        logger.debug(
+            f"Market {market.get('id')}: price={yes_price:.4f}, "
+            f"true={true_price:.3f}, edge={edge_pct:.2f}%, maker_fee={maker_fee:.2f}¢"
+        )
     
     if best_market is None:
         logger.warning("No profitable maker markets found")
@@ -287,7 +335,7 @@ def filter_low_liquidity_markets(markets: list, min_liquidity_usd: float = 0.0, 
     
     return filtered
 
-def get_edge_after_fees(market: dict) -> float:
+def get_edge_after_fees(market: dict, true_price: float = None) -> float:
     """
     Calculate edge percentage after fees
     
@@ -299,7 +347,14 @@ def get_edge_after_fees(market: dict) -> float:
     """
     
     yes_price = market.get("odds", {}).get("yes", 0.0)
-    true_price = 0.5  # Assume fair 50/50 markets
+    if yes_price <= 0:
+        return 0.0
+    if true_price is None:
+        true_price = market.get("_ai_true_price")
+    if true_price is None:
+        market_question = market.get("title", market.get("question", ""))
+        market_id = market.get("ticker", market.get("id", "?"))
+        true_price = estimate_true_price(market_question, market_id)
     
     # Calculate probability-weighted fee
     fee_pct = 0.07  # Probability-scaled fee
@@ -318,22 +373,26 @@ def get_edge_after_fees(market: dict) -> float:
     else:
         # Maker order charges taker fee on fill
         maker_fee = 0.7 * yes_price
-        edge_after_fees_pct = ((true_price - (yes_price + maker_fee)) / true_price) * 100
+        if true_price <= 0:
+            edge_after_fees_pct = 0
+        else:
+            edge_after_fees_pct = ((true_price - (yes_price + maker_fee)) / true_price) * 100
     
     logger.debug(f"Market {market.get('id')}: price={yes_price:.4f}, fee={fee:.4f}¢, edge_before={edge_before_fees_pct:.2f}%, edge_after={edge_after_fees_pct:.2f}%")
     
     return edge_after_fees_pct
 
-def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: float = 10.0, dry_run: bool = True):
+def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: float = 10.0, dry_run: bool = True, min_edge_override: float = None, scratchpad=None):
     """
     Main function for Phase 1 Kalshi optimization
-    
+
     Args:
         mode: 'shadow' or 'real-live'
         bankroll: Available capital in USD
         max_pos_usd: Maximum position size
         dry_run: If True, only simulate without executing
-    
+        scratchpad: Scratchpad instance for event logging (optional)
+
     Returns:
         Number of orders placed
     """
@@ -343,6 +402,8 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     logger.info(f"Mode: {mode}")
     logger.info(f"Bankroll: ${bankroll:.2f}")
     logger.info(f"Max position: ${max_pos_usd:.2f}")
+    if min_edge_override is not None:
+        logger.info(f"Regime min_edge override: {min_edge_override:.2f}%")
     logger.info("=" * 60)
     
     # Get risk caps
@@ -368,14 +429,21 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     
     # Filter for liquidity
     markets = filter_low_liquidity_markets(markets, min_liquidity_usd=0.0, max_trades=20)
+
+    # Precompute AI priors once per market so all downstream checks reuse them.
+    for market in markets:
+        market_question = market.get("title", market.get("question", ""))
+        market_id = market.get("ticker", market.get("id", "?"))
+        market["_ai_true_price"] = estimate_true_price(market_question, market_id)
     
     # Calculate optimal order size
     optimal_size = calculate_optimal_order_size(bankroll, len(markets), risk_caps["max_pos_usd"])
     logger.info(f"Optimal order size: ${optimal_size:.2f} per market")
     
     # Find best maker markets
+    effective_min_edge = min_edge_override if min_edge_override is not None else risk_caps["edge_after_fees_pct"]
     logger.info("Finding best maker markets...")
-    best_maker_market = find_best_maker_market(markets, risk_caps["edge_after_fees_pct"])
+    best_maker_market = find_best_maker_market(markets, effective_min_edge)
     
     if best_maker_market:
         logger.info(f"Best maker market: {best_maker_market.get('id')} at {best_maker_market.get('odds', {}).get('yes', 0.0):.4f} (maker fee: {get_maker_fee(best_maker_market.get('odds', {}).get('yes', 0.0)):.2f}¢)")
@@ -389,10 +457,74 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     for market in markets:
         market_id = market.get("id")
         yes_price = market.get("odds", {}).get("yes", 0.0)
-        true_price = 0.5  # Assume fair 50/50 markets
-        
+        true_price = market.get("_ai_true_price", 0.5)
+
+        # AI prior self-validation gate
+        if validate_prior is not None:
+            hours_to_end = market.get("hours_to_end", 48)
+            vol_conf = volume_confidence(
+                int(market.get("liquidity_usd", 0) / max(yes_price, 0.01)),
+                median_volume=500,
+            ) if volume_confidence else None
+            exp_conf = expiry_confidence(hours_to_end) if expiry_confidence else None
+
+            price_history = market.get("price_history", [])
+            if price_history:
+                mom = compute_momentum(price_history, window=5) if compute_momentum else None
+                zsc = compute_zscore(price_history, window=10) if compute_zscore else None
+            else:
+                mom = None
+                zsc = None
+
+            val_result = validate_prior(
+                prior=true_price,
+                momentum=mom,
+                zscore=zsc,
+                contract_price=yes_price,
+            )
+            market["_validation"] = val_result
+            market["_adjusted_prior"] = val_result["adjusted_prior"]
+
+            # Always log validation result
+            if val_result["passed"]:
+                logger.info(
+                    "[kelly] prior validation PASSED market=%s prior=%.3f conf=%.2f flags=%s",
+                    market_id,
+                    true_price,
+                    val_result["confidence"],
+                    val_result["flags"],
+                )
+            else:
+                logger.info(
+                    "[kelly] prior validation FAILED market=%s prior=%.3f reason=%s flags=%s",
+                    market_id,
+                    true_price,
+                    val_result["reason"],
+                    val_result["flags"],
+                )
+
+            # Write to scratchpad
+            if scratchpad is not None:
+                scratchpad.log_prior_validation(
+                    market=market_id,
+                    prior=true_price,
+                    val_result=val_result,
+                    passed=val_result["passed"],
+                )
+
+            if not val_result["passed"]:
+                continue
+
+            # Use adjusted prior for sizing if validation passed
+            effective_prior = val_result["adjusted_prior"]
+        else:
+            effective_prior = true_price
+
+        # Use validated/adjusted prior for all downstream Kelly sizing
+        true_price = effective_prior
+
         # Calculate edge after fees
-        edge_after_fees_pct = get_edge_after_fees(market)
+        edge_after_fees_pct = get_edge_after_fees(market, true_price=true_price)
         
         # Check if this market is a best maker market
         is_best_maker = (best_maker_market and market_id == best_maker_market.get("id"))

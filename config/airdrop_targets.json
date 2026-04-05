@@ -1,0 +1,96 @@
+{
+  "_meta": {
+    "updated": "2026-04-04",
+    "note": "April 2026 airdrop target list. Active = farm now. Inactive = stop."
+  },
+  "targets": [
+    {
+      "protocol": "Backpack Exchange",
+      "chain": "Solana",
+      "action": "trade spot+perps, points running",
+      "status": "active",
+      "note": null,
+      "tier": "1"
+    },
+    {
+      "protocol": "MetaMask",
+      "chain": "Ethereum/L2s",
+      "action": "use swaps/bridge/staking features consistently",
+      "status": "active",
+      "note": null,
+      "tier": "1"
+    },
+    {
+      "protocol": "Variational",
+      "chain": "HyperEVM",
+      "action": "trade perps, refer friends",
+      "status": "active",
+      "note": "30% supply airdrop confirmed",
+      "tier": "2"
+    },
+    {
+      "protocol": "Extended/Tydro",
+      "chain": "HyperEVM",
+      "action": "trade perps, deposit XVS",
+      "status": "active",
+      "note": "INK airdrop confirmed",
+      "tier": "2"
+    },
+    {
+      "protocol": "Dexari/Felix",
+      "chain": "HyperEVM",
+      "action": "borrow USDH, trade HIP-3 perps",
+      "status": "active",
+      "note": "Season 2 points since Jan 2026",
+      "tier": "2"
+    },
+    {
+      "protocol": "Inco Network",
+      "chain": "testnet",
+      "action": "testnet interaction, Discord roles",
+      "status": "active",
+      "note": "9.5M funded, FHE privacy",
+      "tier": "3"
+    },
+    {
+      "protocol": "Base",
+      "chain": "Ethereum L2",
+      "action": "bridge, swap, LP on Aerodrome",
+      "status": "active",
+      "note": "rumored token 2026",
+      "tier": "3"
+    },
+    {
+      "protocol": "Monad",
+      "chain": "Monad",
+      "action": null,
+      "status": "dead",
+      "note": null,
+      "tier": "dead"
+    },
+    {
+      "protocol": "Linea",
+      "chain": "Ethereum L2",
+      "action": null,
+      "status": "completed",
+      "note": null,
+      "tier": "dead"
+    },
+    {
+      "protocol": "Talaverse",
+      "chain": "Telegram",
+      "action": null,
+      "status": "skip",
+      "note": "low value Telegram bot airdrop",
+      "tier": "dead"
+    },
+    {
+      "protocol": "Polymarket",
+      "chain": "Ethereum/Polygon",
+      "action": null,
+      "status": "skip",
+      "note": "ILLEGAL IN USA - do not use",
+      "tier": "dead"
+    }
+  ]
+}

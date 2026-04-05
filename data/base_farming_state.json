@@ -1,0 +1,28 @@
+{
+  "last_farm_date": "2026-03-17",
+  "weekly_spend_usd": 6.4259,
+  "week_start": "2026-03-14T03:09:34.809764+00:00",
+  "actions_this_week": [
+    "aave_deposit",
+    "nft_mint",
+    "swap_uniswap",
+    "swap_aerodrome"
+  ],
+  "total_actions": 4,
+  "protocols_used": [
+    "aave_deposit",
+    "nft_mint",
+    "swap_uniswap",
+    "swap_aerodrome"
+  ],
+  "pairs_used_this_week": [
+    [
+      "WETH",
+      "USDC"
+    ],
+    [
+      "WETH",
+      "cbETH"
+    ]
+  ]
+}

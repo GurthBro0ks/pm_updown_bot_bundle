@@ -42,7 +42,11 @@ for i in $(seq 1 $CYCLES); do
     # Run Phase 3
     echo "Running Phase 3 (Stock Hunter)..."
     python3 strategies/stock_hunter.py --mode shadow --bankroll $BANKROLL --max-pos $MAX_POS 2>&1 | tee -a "$LOG_FILE"
-    
+
+    # Run GDELT Geopolitical Signal (Phase 3b)
+    echo "Running GDELT Geopolitical Signal..."
+    python3 strategies/gdelt_signal.py --test 2>&1 | tee -a "$LOG_FILE"
+
     # Capture proof files generated
     LATEST_PROOF=$(ls -t $PROOFS_DIR/*.json 2>/dev/null | head -1)
     
