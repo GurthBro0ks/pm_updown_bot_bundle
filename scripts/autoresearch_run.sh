@@ -21,7 +21,7 @@ find "$BOT_DIR" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || tru
 # Run one shadow cycle
 cd "$BOT_DIR"
 echo "[1/2] Running shadow cycle..."
-python3 runner.py --mode shadow --phase all --bankroll 100 --max-pos 10 2>&1 | tail -20
+/usr/bin/timeout 600 python3 runner.py --mode shadow --phase all --bankroll 100 --max-pos 10 2>&1 | tail -20
 
 echo ""
 echo "[2/2] Computing composite score..."
