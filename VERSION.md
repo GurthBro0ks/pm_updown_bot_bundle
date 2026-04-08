@@ -1,13 +1,13 @@
 # Version Snapshot — pm_updown_bot_bundle
 
-> Generated: 2026-04-08T21:22:38Z | Host: slimy-nuc1
+> Generated: 2026-04-08T23:46:48Z | Host: slimy-nuc1
 
 ## Git State
 - **Branch:** `feat/ibkr-forecast-integration`
-- **HEAD:** `61d3f97`
-- **Last commit:** `2026-04-08` — `docs: auto-sync project docs from slimy-nuc1 2026-04-08`
+- **HEAD:** `481890c`
+- **Last commit:** `2026-04-08` — `fix: wire micro-live mode in kalshi_optimize + diagnose Grok network`
 - **Remote:** `git@github.com:GurthBro0ks/pm_updown_bot_bundle.git`
-- **Dirty:** YES (1 uncommitted)
+- **Dirty:** YES (3 uncommitted)
 
 ## Runtime
 - **Runtime info:** N/A

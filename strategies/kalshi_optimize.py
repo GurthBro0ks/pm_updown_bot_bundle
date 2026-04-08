@@ -497,6 +497,13 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     total_filled = 0
     total_volume = 0.0
     orders = []
+    proof_data = {
+        "mode": mode,
+        "bankroll": bankroll,
+        "max_pos_usd": max_pos_usd,
+        "orders_placed": [],
+        "orders_failed": [],
+    }
     
     for market in markets:
         market_id = market.get("id")
@@ -625,9 +632,56 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
             continue
         
         # Execute trade (in live modes: real-live or micro-live)
+        # Track first-order safety countdown across the session
+        if not hasattr(optimize_kalshi_strategy, "_first_order_placed"):
+            optimize_kalshi_strategy._first_order_placed = False
+
         if is_live and not dry_run:
             prefix = MICRO_LIVE_LOG if mode == "micro-live" else ""
-            logger.info(f"{prefix} LIVE: Would place order on {market_id}: {order_side} ${optimal_size:.2f} @ {order_price:.4f}")
+
+            # Safety countdown on first order of session
+            if not optimize_kalshi_strategy._first_order_placed:
+                logger.warning(
+                    "%s PLACING REAL ORDER in 3 seconds... Ctrl+C to abort", prefix
+                )
+                time.sleep(3)
+                optimize_kalshi_strategy._first_order_placed = True
+
+            # Convert price to cents (Kalshi native unit)
+            price_cents = int(order_price * 100)
+            quantity = 1  # KalshiOrderClient enforces MAX_QUANTITY=1
+
+            try:
+                from utils.kalshi_orders import KalshiOrderClient
+                order_client = KalshiOrderClient()
+                result = order_client.place_order(
+                    ticker=market_id,
+                    side=order_side,
+                    quantity=quantity,
+                    price_cents=price_cents,
+                )
+                logger.info(
+                    "%s ORDER PLACED: %s %s @ %dc -> order_id=%s",
+                    prefix, order_side, market_id, price_cents,
+                    result.get("order_id", "unknown"),
+                )
+                # Write to proof pack
+                proof_data.setdefault("orders_placed", []).append({
+                    "market_id": market_id,
+                    "side": order_side,
+                    "price_cents": price_cents,
+                    "quantity": quantity,
+                    "result": result,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "mode": mode,
+                })
+            except Exception as e:
+                logger.error("%s ORDER FAILED: %s", prefix, e)
+                proof_data.setdefault("orders_failed", []).append({
+                    "market_id": market_id,
+                    "error": str(e),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
         elif dry_run:
             prefix = MICRO_LIVE_LOG if mode == "micro-live" else "SHADOW MODE"
             logger.info(f"{prefix}: Would place order on {market_id}: {order_side} ${optimal_size:.2f} @ {order_price:.4f}")
@@ -674,10 +728,7 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     
     # Generate proof
     proof_id = f"kalshi_optimized_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-    proof_data = {
-        "mode": mode,
-        "bankroll": bankroll,
-        "max_pos_usd": max_pos_usd,
+    proof_data.update({
         "data": {
             "orders": orders,
             "summary": {
@@ -688,8 +739,8 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
             }
         },
         "risk_caps": risk_caps
-    }
-    
+    })
+
     from utils.proof import generate_proof
     generate_proof(proof_id, proof_data)
     
