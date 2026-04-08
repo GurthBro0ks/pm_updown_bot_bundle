@@ -1,13 +1,13 @@
 # Version Snapshot — pm_updown_bot_bundle
 
-> Generated: 2026-04-08T09:25:13Z | Host: slimy-nuc1
+> Generated: 2026-04-08T11:02:53Z | Host: slimy-nuc1
 
 ## Git State
 - **Branch:** `feat/ibkr-forecast-integration`
-- **HEAD:** `df5cdbb`
-- **Last commit:** `2026-04-05` — `docs: auto-sync project docs from slimy-nuc1 2026-04-05`
+- **HEAD:** `155bba7`
+- **Last commit:** `2026-04-08` — `fix: default AI_PREMIUM_PROVIDER from grok_420 to grok_fast`
 - **Remote:** `git@github.com:GurthBro0ks/pm_updown_bot_bundle.git`
-- **Dirty:** YES (2 uncommitted)
+- **Dirty:** YES (1 uncommitted)
 
 ## Runtime
 - **Runtime info:** N/A
