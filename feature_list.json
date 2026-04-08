@@ -9,5 +9,13 @@
       "proofs/backtest_equity_curve_YYYYMMDD.png"
     ],
     "cli": "python3 backtest_kalshi.py --days 30 --mc-sims 500"
+  },
+  "multi_model_debate": {
+    "status": "built",
+    "file": "strategies/sentiment_scorer.py",
+    "roles": ["forecaster", "critic", "synthesizer"],
+    "gate_type": "soft",
+    "env_flag": "DEBATE_MODE",
+    "description": "3-role adversarial debate: Forecaster (Grok), Critic (GLM), Synthesizer (local). Weighted average with consensus/disagreement flag. Opt-in via DEBATE_MODE=true"
   }
 }

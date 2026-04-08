@@ -46,3 +46,14 @@
 - FIX B: Synthetic mode adds no-trade days (~30%), regime flips (~20%), spread noise (~15%)
 - FIX D: daily_pnl_series now [{date, pnl, cumulative, trades}] per day
 - MC CI: filter NaN sharpes before computing 95% CI (was showing 'nan')
+
+## Multi-model debate pattern in sentiment_scorer.py
+- Added multi_model_debate() with 3 roles: Forecaster, Critic, Synthesizer
+- Forecaster uses Grok primary; Critic uses GLM or Grok-adversarial
+- Synthesizer is local weighted average (no extra API call)
+- Consensus flag: agree/disagree based on |prob_diff| > 0.25
+- Critique strength > 0.7 shifts weight toward critic
+- DEBATE_MODE=true/false in .env (opt-in, default OFF)
+- Fallback: if either role fails, degrades to single-model mode
+- JSON parsing with regex fallback for unreliable AI JSON producers
+- 15-second timeout per role call
