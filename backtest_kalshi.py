@@ -321,11 +321,20 @@ def monte_carlo_trades(
 # Metrics calculation
 # ---------------------------------------------------------------------------
 
-def calc_metrics(trades: list[dict], trading_days: Optional[int] = None) -> dict:
+def calc_metrics(
+    trades: list[dict],
+    trading_days: Optional[int] = None,
+    suppress_warnings: bool = False,
+) -> dict:
     """
     Calculate standardised backtest metrics from a list of resolved trades.
 
     Each trade must have: pnl (float), won (bool), timestamp (str)
+
+    Sharpe and max drawdown are calculated on DAILY-AGGREGATED PnL series
+    to avoid over-counting from intra-day compounding.
+
+    Pass suppress_warnings=True when calling inside MC loops to avoid log spam.
     """
     if not trades:
         return {
@@ -344,8 +353,10 @@ def calc_metrics(trades: list[dict], trading_days: Optional[int] = None) -> dict
             "avg_loss": 0.0,
             "ci_95_sharpe": [0.0, 0.0],
             "ci_95_max_dd": [0.0, 0.0],
+            "daily_pnl_series": {},
         }
 
+    # ── Per-trade stats ──────────────────────────────────────────────────────
     pnls = [t["pnl"] for t in trades]
     wins = [t["pnl"] for t in trades if t.get("won", False)]
     losses = [t["pnl"] for t in trades if not t.get("won", False)]
@@ -364,63 +375,74 @@ def calc_metrics(trades: list[dict], trading_days: Optional[int] = None) -> dict
     avg_loss = sum(losses) / n_losses if n_losses else 0.0
 
     # Average edge: mean difference between entry_price and 1.0 (full payout)
-    # For winning trades, edge = 1.0 - entry_price; for losing, edge = 0 - entry_price
     avg_edge = sum(
         (1.0 - t["entry_price"]) if t.get("won") else (-t["entry_price"])
         for t in trades
     ) / n_trades if n_trades else 0.0
 
-    # Sharpe ratio (annualised)
-    mean_pnl = sum(pnls) / n_trades if n_trades else 0.0
-    # Population std
-    if n_trades > 1:
-        variance = sum((p - mean_pnl) ** 2 for p in pnls) / n_trades
-        std_pnl = math.sqrt(variance)
-    else:
-        std_pnl = 1.0  # avoid division by zero
-
-    if trading_days is None:
-        # Estimate from timestamps
-        timestamps = [t.get("timestamp", "") for t in trades if t.get("timestamp")]
-        if len(timestamps) >= 2:
+    # ── Daily PnL aggregation ───────────────────────────────────────────────
+    # Build a dict: date -> sum of PnL for that day
+    daily_pnl_map: dict[str, float] = {}
+    for t in trades:
+        ts_str = t.get("timestamp", "")
+        if ts_str:
             try:
-                ts0 = datetime.fromisoformat(timestamps[0].replace("Z", "+00:00"))
-                ts1 = datetime.fromisoformat(timestamps[-1].replace("Z", "+00:00"))
-                delta_days = max((ts1 - ts0).days, 1)
+                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                day = ts.date().isoformat()
+                daily_pnl_map[day] = daily_pnl_map.get(day, 0.0) + t["pnl"]
             except Exception:
-                delta_days = 1
-        else:
-            delta_days = 1
+                pass
+
+    sorted_days = sorted(daily_pnl_map.keys())
+    daily_pnl_list = [daily_pnl_map[d] for d in sorted_days]
+    n_days = len(daily_pnl_list)
+
+    # ── Sharpe ratio (on daily PnL series, annualised by sqrt(252)) ──────────
+    if n_days >= 2:
+        daily_mean = sum(daily_pnl_list) / n_days
+        # Population std of daily PnL
+        variance = sum((p - daily_mean) ** 2 for p in daily_pnl_list) / n_days
+        daily_std = math.sqrt(variance)
     else:
-        delta_days = max(trading_days, 1)
+        daily_mean = sum(daily_pnl_list) if daily_pnl_list else 0.0
+        daily_std = 1.0  # avoid div-by-zero
 
-    trades_per_day = n_trades / delta_days if delta_days > 0 else 1
-    # Annualise by sqrt(trades_per_day * 252)
-    annualisation = math.sqrt(trades_per_day * 252)
-    sharpe = (mean_pnl / std_pnl) * annualisation if std_pnl > 0 else 0.0
+    sharpe = (daily_mean / daily_std) * math.sqrt(252) if daily_std > 0 else 0.0
 
-    # Max drawdown on cumulative PnL curve
+    if sharpe > 3.0 and not suppress_warnings:
+        logger.warning(
+            "WARNING: Sharpe %.2f > 3.0 — verify data quality or accept "
+            "that synthetic/MC simulation may produce extreme values",
+            sharpe,
+        )
+
+    # ── Max drawdown (on daily cumulative PnL curve) ──────────────────────────
     cumulative = 0.0
     peak = 0.0
     max_dd = 0.0
-    for pnl in pnls:
-        cumulative += pnl
+    for daily_pnl in daily_pnl_list:
+        cumulative += daily_pnl
         if cumulative > peak:
             peak = cumulative
         drawdown = peak - cumulative
         if drawdown > max_dd:
             max_dd = drawdown
 
-    # Days in market: count calendar days that have at least one trade
-    trade_days = set()
-    for t in trades:
-        ts_str = t.get("timestamp", "")
-        if ts_str:
-            try:
-                ts = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
-                trade_days.add(ts.date().isoformat())
-            except Exception:
-                pass
+    # ── Days in market ───────────────────────────────────────────────────────
+    trade_days = set(daily_pnl_map.keys())
+
+    if trading_days is None:
+        delta_days = max(n_days, 1)
+    else:
+        delta_days = max(trading_days, 1)
+
+    # ── Daily PnL series for downstream plotting ───────────────────────────────
+    # Compact: date string -> cumulative PnL
+    daily_cumulative = 0.0
+    daily_pnl_series: dict[str, float] = {}
+    for day, pnl in zip(sorted_days, daily_pnl_list):
+        daily_cumulative += pnl
+        daily_pnl_series[day] = round(daily_cumulative, 4)
 
     return {
         "total_pnl": round(total_pnl, 4),
@@ -438,6 +460,7 @@ def calc_metrics(trades: list[dict], trading_days: Optional[int] = None) -> dict
         "avg_loss": round(avg_loss, 4),
         "ci_95_sharpe": [0.0, 0.0],  # filled by mc_analysis
         "ci_95_max_dd": [0.0, 0.0],  # filled by mc_analysis
+        "daily_pnl_series": daily_pnl_series,
     }
 
 
@@ -456,7 +479,7 @@ def mc_analysis(
         trades = reconstruct_synthetic_trades(
             proof_packs, prior_records, seed=seed + i, silent=True
         )
-        m = calc_metrics(trades)
+        m = calc_metrics(trades, suppress_warnings=True)
         sharpes.append(m["sharpe"])
         max_dds.append(m["max_drawdown"])
 

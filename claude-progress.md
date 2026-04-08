@@ -31,3 +31,11 @@
 ### Next
 - Add actual resolved trade tracking to pnl.db (Kalshi phase currently shadow mode only)
 - Integrate with autoresearch experiment configs from notes/
+
+## backtest_kalshi.py — Sharpe annualization fix
+- BUG: per-trade Sharpe was annualized with sqrt(trades_per_day * 252), inflating 10-60x
+- FIX: aggregate to daily PnL first, then Sharpe = (daily_mean / daily_std) * sqrt(252)
+- Max drawdown also switched to daily cumulative PnL curve
+- Added Sharpe > 3.0 sanity warning (fires per-result, suppressed in MC loop)
+- Added daily_pnl_series to JSON report
+- Suppress_warnings param added to calc_metrics for MC loop calls
