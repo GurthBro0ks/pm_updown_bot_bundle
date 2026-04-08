@@ -15,6 +15,10 @@ import re
 from typing import Optional, Tuple
 
 import requests
+from dotenv import load_dotenv
+
+# Load .env so API keys are available on standalone import
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -510,11 +514,8 @@ def multi_model_debate(
     critic_provider = _get_critic_provider()
     is_critic_grok = (critic_provider and critic_provider["name"] in ("grok_fast", "grok_420"))
 
-    # If using Grok for critic, inject the forecaster probability into the system prompt
-    if is_critic_grok and critic_provider:
-        critic_system = CRITIC_SYSTEM.format(forecaster_prob=forecaster_prob)
-    else:
-        critic_system = CRITIC_SYSTEM.format(forecaster_prob=forecaster_prob)
+    # Inject the forecaster probability into the critic system prompt
+    critic_system = CRITIC_SYSTEM.replace("{forecaster_prob}", str(forecaster_prob))
 
     critic_result = None
     if critic_provider:

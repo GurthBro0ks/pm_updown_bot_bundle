@@ -57,3 +57,19 @@
 - Fallback: if either role fails, degrades to single-model mode
 - JSON parsing with regex fallback for unreliable AI JSON producers
 - 15-second timeout per role call
+
+## Debate validation + micro-live audit
+- Debate: Grok API key SET, but api.x.ai timed out (network unreachable from NUC1).
+  Correctly falls back to single-model mode.
+  Bug fixed: CRITIC_SYSTEM used .format() with unescaped braces (KeyError).
+  Added load_dotenv() to sentiment_scorer.py so keys load on standalone import.
+- run-micro-live.sh: correctly passes --mode micro-live, --max-pos 10.0, 5s abort delay
+- .env has KALSHI_KEY, KALSHI_TRADING_KEY, KALSHI_TRADING_SECRET_FILE all set
+- Kalshi API: balance = $108 confirmed via get_balance()
+- Order placement: utils/kalshi_orders.py has place_order() method
+- Paper→live toggle: runner.py --mode flag (shadow/micro-live/real-live)
+- CRITICAL BUG: runner.py accepts --mode micro-live but kalshi_optimize.py
+  only handles shadow/real-live. micro-live falls through to else→skips all trades!
+  This means ./run-micro-live.sh currently does NOTHING.
+  Fix needed: add mode=="micro-live" handling to kalshi_optimize.py.
+- Ready for supervised first micro-live trade once micro-live mode bug is fixed.
