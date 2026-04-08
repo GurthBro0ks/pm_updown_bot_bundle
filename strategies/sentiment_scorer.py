@@ -1,8 +1,8 @@
 """AI prior scoring for Kelly sizing in Kalshi strategy.
 
 Cascade order (required):
-1) grok_420
-2) grok_fast
+1) grok_fast
+2) grok_420 (disabled — model name deprecated)
 3) glm
 """
 
@@ -22,15 +22,15 @@ CALL_TIMEOUT_SECONDS = 10
 
 PROVIDERS = (
     {
-        "name": "grok_420",
-        "url": "https://api.x.ai/v1/chat/completions",
-        "model": "grok-4.20-beta-0309-reasoning",
-        "key_envs": ("XAI_API_KEY", "GROK_API_KEY", "X_AI_API"),
-    },
-    {
         "name": "grok_fast",
         "url": "https://api.x.ai/v1/chat/completions",
         "model": "grok-4-1-fast-reasoning",
+        "key_envs": ("XAI_API_KEY", "GROK_API_KEY", "X_AI_API"),
+    },
+    {
+        "name": "grok_420",
+        "url": "https://api.x.ai/v1/chat/completions",
+        "model": "grok-4.20-beta-0309-reasoning",
         "key_envs": ("XAI_API_KEY", "GROK_API_KEY", "X_AI_API"),
     },
     {
