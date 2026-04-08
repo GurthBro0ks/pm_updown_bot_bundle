@@ -1,0 +1,13 @@
+{
+  "backtest_kalshi": {
+    "status": "built",
+    "file": "backtest_kalshi.py",
+    "metrics": ["sharpe", "drawdown", "win_rate", "profit_factor"],
+    "description": "Kalshi vectorized backtesting harness — synthetic mode from prior_validation records + proof packs",
+    "outputs": [
+      "proofs/backtest_report_YYYYMMDD.json",
+      "proofs/backtest_equity_curve_YYYYMMDD.png"
+    ],
+    "cli": "python3 backtest_kalshi.py --days 30 --mc-sims 500"
+  }
+}
