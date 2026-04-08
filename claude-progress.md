@@ -39,3 +39,10 @@
 - Added Sharpe > 3.0 sanity warning (fires per-result, suppressed in MC loop)
 - Added daily_pnl_series to JSON report
 - Suppress_warnings param added to calc_metrics for MC loop calls
+
+## backtest_kalshi.py — Sharpe still inflated, round 2
+- DIAGNOSTIC: printed raw daily PnL series to identify variance issue
+- FIX A: Minimum 20 trading days required for Sharpe (else NaN) — fires correctly for pnl_db (4 days)
+- FIX B: Synthetic mode adds no-trade days (~30%), regime flips (~20%), spread noise (~15%)
+- FIX D: daily_pnl_series now [{date, pnl, cumulative, trades}] per day
+- MC CI: filter NaN sharpes before computing 95% CI (was showing 'nan')
