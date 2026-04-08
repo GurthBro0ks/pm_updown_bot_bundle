@@ -73,3 +73,17 @@
   This means ./run-micro-live.sh currently does NOTHING.
   Fix needed: add mode=="micro-live" handling to kalshi_optimize.py.
 - Ready for supervised first micro-live trade once micro-live mode bug is fixed.
+
+## Network diag + micro-live fix
+- GROK NETWORK: api.x.ai resolves (104.18.18.80), IPv4 HTTP 200 confirmed.
+  Python requests test: Status 200, works correctly.
+  Earlier timeout: was hitting wrong endpoint in earlier test, fixed now.
+- GLM KEY INVALID: GLM key returns 401 on all endpoints — critic always falls
+  back to forecaster-only. Debate still returns debate_used=true with forecaster result.
+- MICRO-LIVE FIX: Added is_live normalization in kalshi_optimize.py:
+  - is_live = mode in ("real-live", "micro-live")
+  - Hard caps: bankroll=$25, max_pos=$5, max_daily_loss=$10
+  - Log prefix "[MICRO-LIVE]" for easy grep
+  - No code duplication, all gates still enforced
+  - runner.py dry_run=(mode=="shadow") correctly passes dry_run=False for micro-live
+  - Validation: `[MICRO-LIVE] Hard caps applied: bankroll=$1.08, max_pos=$5.00` (verified)

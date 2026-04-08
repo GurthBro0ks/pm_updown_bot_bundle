@@ -405,7 +405,20 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     if min_edge_override is not None:
         logger.info(f"Regime min_edge override: {min_edge_override:.2f}%")
     logger.info("=" * 60)
-    
+
+    # ── Micro-live normalization ─────────────────────────────────────────────
+    # micro-live = real-live with hard caps (no code duplication)
+    is_live = mode in ("real-live", "micro-live")
+    MICRO_LIVE_LOG = "[MICRO-LIVE]"
+    if mode == "micro-live":
+        bankroll = min(bankroll, 25.0)
+        max_pos_usd = min(max_pos_usd, 5.0)
+        max_daily_loss = 10.0
+        logger.info(
+            "%s Hard caps applied: bankroll=$%.2f, max_pos=$%.2f, max_daily_loss=$%.2f",
+            MICRO_LIVE_LOG, bankroll, max_pos_usd, max_daily_loss,
+        )
+
     # Get risk caps
     risk_caps = {
         "max_pos_usd": max_pos_usd,
@@ -611,24 +624,19 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
             logger.debug(f"Market {market_id}: Failed gates: {violations}")
             continue
         
-        # Execute trade (in real-live mode only)
-        if mode == "real-live" and not dry_run:
-            # This is where actual order placement would happen
-            # For now, just log what would happen
-            logger.info(f"Would place order on {market_id}: {order_side} ${optimal_size:.2f} @ {order_price:.4f}")
+        # Execute trade (in live modes: real-live or micro-live)
+        if is_live and not dry_run:
+            prefix = MICRO_LIVE_LOG if mode == "micro-live" else ""
+            logger.info(f"{prefix} LIVE: Would place order on {market_id}: {order_side} ${optimal_size:.2f} @ {order_price:.4f}")
         elif dry_run:
-            # Log simulated order
-            logger.info(f"SHADOW MODE: Would place order on {market_id}: {order_side} ${optimal_size:.2f} @ {order_price:.4f}")
-        else:
-            # Default: don't trade
-            logger.debug(f"Market {market_id}: No mode specified, skipping")
-            continue
+            prefix = MICRO_LIVE_LOG if mode == "micro-live" else "SHADOW MODE"
+            logger.info(f"{prefix}: Would place order on {market_id}: {order_side} ${optimal_size:.2f} @ {order_price:.4f}")
         
         # Update metrics
         total_trades += 1
         if use_maker and yes_price == 0.50:
             total_filled += 1  # Assume maker orders fill
-        total_volume += optimal_size if mode == "real-live" or dry_run else 0
+        total_volume += optimal_size if is_live or dry_run else 0
         
         # Calculate expected profit
         if use_maker and yes_price == 0.50:
@@ -691,7 +699,7 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Kalshi Optimization - Phase 1 (Quick Wins)")
-    parser.add_argument("--mode", choices=["shadow", "real-live"], default="shadow", help="Execution mode")
+    parser.add_argument("--mode", choices=["shadow", "micro-live", "real-live"], default="shadow", help="Execution mode (micro-live = real trades with hard caps)")
     parser.add_argument("--bankroll", type=float, default=100.0, help="Bankroll in USD")
     parser.add_argument("--max-pos", type=float, default=10.0, help="Max position size in USD")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
