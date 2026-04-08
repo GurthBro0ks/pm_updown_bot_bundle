@@ -35,7 +35,7 @@ PROVIDERS = (
     },
     {
         "name": "glm",
-        "url": "https://api.z.ai/api/paas/v4/chat/completions",
+        "url": "https://api.z.ai/api/coding/paas/v4/chat/completions",
         "model": "glm-5.1",
         "key_envs": ("GLM_API_KEY", "ZHIPU_API"),
     },
