@@ -105,7 +105,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def estimate_true_price(market_question: str, market_id: str) -> float:
+def estimate_true_price(market_question: str, market_id: str, tier: str = "premium") -> float:
     """Estimate YES probability via AI cascade; fallback to 0.5."""
     if get_ai_prior is None:
         logger.warning(
@@ -115,7 +115,7 @@ def estimate_true_price(market_question: str, market_id: str) -> float:
         return 0.5
 
     try:
-        prob = float(get_ai_prior(market_question))
+        prob = float(get_ai_prior(market_question, tier=tier, market_ticker=market_id))
         if 0.0 <= prob <= 1.0:
             return prob
     except Exception as exc:
@@ -430,11 +430,42 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     # Filter for liquidity
     markets = filter_low_liquidity_markets(markets, min_liquidity_usd=0.0, max_trades=20)
 
-    # Precompute AI priors once per market so all downstream checks reuse them.
-    for market in markets:
+    # Sort by volume descending — highest liquidity gets AI calls (best edge)
+    markets.sort(key=lambda m: m.get("volume_usd", 0) or m.get("liquidity", 0), reverse=True)
+
+    # Read cost control limits
+    ai_max_priors = int(os.getenv("AI_MAX_PRIORS_PER_RUN", "50"))
+    ai_premium_max = int(os.getenv("AI_PREMIUM_MAX", "10"))
+    ai_bulk_max = ai_max_priors - ai_premium_max
+
+    logger.info(
+        "AI tier limits: premium=%d bulk=%d skip_remaining=%d (total markets=%d)",
+        ai_premium_max,
+        ai_bulk_max,
+        max(0, len(markets) - ai_max_priors),
+        len(markets),
+    )
+
+    # Precompute AI priors with cost-aware tiering.
+    for idx, market in enumerate(markets):
         market_question = market.get("title", market.get("question", ""))
         market_id = market.get("ticker", market.get("id", "?"))
-        market["_ai_true_price"] = estimate_true_price(market_question, market_id)
+
+        # Assign tier based on position in volume-sorted list
+        if idx < ai_premium_max:
+            tier = "premium"
+        elif idx < ai_max_priors:
+            tier = "bulk"
+        else:
+            tier = "skip"
+
+        if tier != "skip":
+            market["_ai_true_price"] = estimate_true_price(market_question, market_id, tier=tier)
+            # Tag for downstream validation
+            market["_ai_tier"] = tier
+        else:
+            market["_ai_true_price"] = 0.5
+            market["_ai_tier"] = "skip"
     
     # Calculate optimal order size
     optimal_size = calculate_optimal_order_size(bankroll, len(markets), risk_caps["max_pos_usd"])

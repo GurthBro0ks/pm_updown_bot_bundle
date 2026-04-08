@@ -35,11 +35,16 @@ PROVIDERS = (
     },
     {
         "name": "glm",
-        "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
-        "model": "glm-4.6",
+        "url": "https://api.z.ai/api/paas/v4/chat/completions",
+        "model": "glm-5.1",
         "key_envs": ("GLM_API_KEY", "ZHIPU_API"),
     },
 )
+
+# Cost-aware tier config
+TIER_PREMARY_PROVIDER = os.getenv("AI_PRIMARY_PROVIDER", "glm")
+TIER_PREMIUM_PROVIDER = os.getenv("AI_PREMIUM_PROVIDER", "grok_420")
+TIER_PREMIUM_MAX = int(os.getenv("AI_PREMIUM_MAX", "10"))
 
 PROMPT_SYSTEM = (
     "You estimate prediction market YES probabilities. "
@@ -155,27 +160,56 @@ def _call_provider(provider: dict, market_text: str) -> Optional[float]:
         return None
 
 
-def get_ai_prior(market_text: str) -> float:
-    """Return calibrated YES probability in [0,1]."""
+def _get_providers_for_tier(tier: str):
+    """Return ordered provider list based on cost tier."""
+    if tier == "bulk":
+        return [p for p in PROVIDERS if p["name"] == TIER_PREMARY_PROVIDER]
+    elif tier == "premium":
+        premium = [p for p in PROVIDERS if p["name"] == TIER_PREMIUM_PROVIDER]
+        primary = [p for p in PROVIDERS if p["name"] == TIER_PREMARY_PROVIDER]
+        return premium + primary
+    else:  # skip or unknown
+        return []
+
+
+def get_ai_prior(market_text: str, tier: str = "premium", market_ticker: str = None) -> float:
+    """Return calibrated YES probability in [0,1].
+
+    Args:
+        market_text: Market question/title text
+        tier: "premium" (grok+glm fallback), "bulk" (glm only), "skip" (return 0.5)
+        market_ticker: Optional ticker for logging
+    """
     normalized = (market_text or "").strip()
+    ticker_str = f" market: {market_ticker}" if market_ticker else ""
+
+    if tier == "skip":
+        logger.info("[kelly] AI prior: source=rate_limited prob=0.500 (skipped%s)", ticker_str)
+        return 0.5
+
     if not normalized:
-        logger.warning("[kelly] AI prior: source=fallback_empty prob=0.500")
+        logger.warning("[kelly] AI prior: source=fallback_empty prob=0.500%s", ticker_str)
+        return 0.5
+
+    providers = _get_providers_for_tier(tier)
+    if not providers:
+        logger.info("[kelly] AI prior: source=rate_limited prob=0.500 (skipped%s)", ticker_str)
         return 0.5
 
     has_any_key = False
-    for provider in PROVIDERS:
+    for provider in providers:
         key, _ = _first_key(provider["key_envs"])
         if key:
             has_any_key = True
         prob = _call_provider(provider, normalized)
         if prob is not None:
-            logger.info("[kelly] AI prior: source=%s prob=%.3f", provider["name"], prob)
+            logger.info("[kelly] AI prior: source=%s prob=%.3f (%s%s)", provider["name"], prob, tier, ticker_str)
             return prob
 
     if not has_any_key:
-        logger.warning("[kelly] AI prior: source=fallback_no_keys prob=0.500")
+        logger.warning("[kelly] AI prior: source=fallback_no_keys prob=0.500%s", ticker_str)
     else:
-        logger.warning("[kelly] AI prior: source=fallback_all_failed prob=0.500")
+        logger.warning("[kelly] AI prior: source=fallback_all_failed prob=0.500%s", ticker_str)
     return 0.5
 
 
@@ -184,9 +218,10 @@ def get_ai_stock_sentiment(headline_text, ticker=None):
     return 0.5
 
 
-def get_bayesian_prior(market: dict, providers: list = None) -> float:
+def get_bayesian_prior(market: dict, providers: list = None, tier: str = "premium") -> float:
     """Compatibility wrapper for legacy callsites."""
     _ = providers  # Unused; kept for callsite compatibility.
     text = market.get("title") or market.get("question") or market.get("description") or ""
-    return get_ai_prior(text)
+    ticker = market.get("ticker") or market.get("id")
+    return get_ai_prior(text, tier=tier, market_ticker=ticker)
 
