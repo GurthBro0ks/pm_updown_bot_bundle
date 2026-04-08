@@ -43,7 +43,7 @@ PROVIDERS = (
 
 # Cost-aware tier config
 TIER_PREMARY_PROVIDER = os.getenv("AI_PRIMARY_PROVIDER", "glm")
-TIER_PREMIUM_PROVIDER = os.getenv("AI_PREMIUM_PROVIDER", "grok_420")
+TIER_PREMIUM_PROVIDER = os.getenv("AI_PREMIUM_PROVIDER", "grok_fast")
 TIER_PREMIUM_MAX = int(os.getenv("AI_PREMIUM_MAX", "10"))
 
 PROMPT_SYSTEM = (
