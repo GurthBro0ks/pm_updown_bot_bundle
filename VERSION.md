@@ -1,13 +1,13 @@
 # Version Snapshot — pm_updown_bot_bundle
 
-> Generated: 2026-04-09T15:55:38Z | Host: slimy-nuc1
+> Generated: 2026-04-09T20:55:55Z | Host: slimy-nuc1
 
 ## Git State
 - **Branch:** `feat/ibkr-forecast-integration`
-- **HEAD:** `1cdbede`
-- **Last commit:** `2026-04-09` — `fix: volume_24h+liquidity_usd field names, drop short-term vol floor to 0`
+- **HEAD:** `6de4022`
+- **Last commit:** `2026-04-09` — `fix: remove dead GLM from cascade, gemini replaces as fallback`
 - **Remote:** `git@github.com:GurthBro0ks/pm_updown_bot_bundle.git`
-- **Dirty:** YES (1 uncommitted)
+- **Dirty:** NO
 
 ## Runtime
 - **Runtime info:** N/A
