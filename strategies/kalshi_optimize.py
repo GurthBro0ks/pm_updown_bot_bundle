@@ -447,7 +447,7 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     markets.sort(key=lambda m: m.get("volume_usd", 0) or m.get("liquidity", 0), reverse=True)
 
     # Read cost control limits
-    ai_max_priors = int(os.getenv("AI_MAX_PRIORS_PER_RUN", "50"))
+    ai_max_priors = int(os.getenv("AI_MAX_PRIORS_PER_RUN", "10"))
     ai_premium_max = int(os.getenv("AI_PREMIUM_MAX", "10"))
     ai_bulk_max = ai_max_priors - ai_premium_max
 

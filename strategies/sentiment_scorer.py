@@ -22,7 +22,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-CALL_TIMEOUT_SECONDS = 10
+CALL_TIMEOUT_SECONDS = 30
 
 PROVIDERS = (
     {
@@ -39,8 +39,8 @@ PROVIDERS = (
     },
     {
         "name": "glm",
-        "url": "https://api.z.ai/api/coding/paas/v4/chat/completions",
-        "model": "glm-5.1",
+        "url": "https://api.z.ai/api/paas/v4/chat/completions",
+        "model": "glm-4-plus",
         "key_envs": ("GLM_API_KEY", "ZHIPU_API"),
     },
 )
