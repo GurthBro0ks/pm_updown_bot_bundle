@@ -501,7 +501,7 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     for m in premium_markets:
         m["_ai_tier"] = "premium"
 
-    ai_bulk_max = max(0, ai_max_priors - len(premium_markets))
+    ai_bulk_max = 0
     bulk_count = 0
     for m in markets:
         if m["_ai_tier"] == "premium":
