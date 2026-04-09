@@ -1,11 +1,11 @@
 # Version Snapshot — pm_updown_bot_bundle
 
-> Generated: 2026-04-09T11:02:29Z | Host: slimy-nuc1
+> Generated: 2026-04-09T11:25:08Z | Host: slimy-nuc1
 
 ## Git State
 - **Branch:** `feat/ibkr-forecast-integration`
-- **HEAD:** `47302e4`
-- **Last commit:** `2026-04-09` — `chore: MAX_OPEN_ORDERS 20 -> 50`
+- **HEAD:** `9e20ce2`
+- **Last commit:** `2026-04-09` — `feat: 10 short + 10 long premium markets, expand weather/econ categories`
 - **Remote:** `git@github.com:GurthBro0ks/pm_updown_bot_bundle.git`
 - **Dirty:** NO
 
