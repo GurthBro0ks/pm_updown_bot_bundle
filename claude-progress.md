@@ -87,3 +87,16 @@
   - No code duplication, all gates still enforced
   - runner.py dry_run=(mode=="shadow") correctly passes dry_run=False for micro-live
   - Validation: `[MICRO-LIVE] Hard caps applied: bankroll=$1.08, max_pos=$5.00` (verified)
+
+## Production hardening: dedup + order_id + cron
+- FIX: order_id extracted from Kalshi API response (was 'unknown')
+  - Kalshi returns `{'order': {'order_id': 'xxx', ...}}`, now correctly extracted
+- FIX: Dedup — checks existing open orders + positions before placing
+  - Uses `get_orders(status='open')` + `get_positions()` at start of run
+  - Skips any market where we already have an open order or position
+- FIX: MAX_OPEN_ORDERS=20 safety cap prevents runaway accumulation
+  - Logs warning and skips entire run if already at cap
+- CRON: scripts/cron_micro_live.sh runs every 4 hours with DEBATE_MODE=true
+  - Installed: 0 */4 * * * /opt/slimy/pm_updown_bot_bundle/scripts/cron_micro_live.sh
+  - Timeout: 600s max per run, logs to logs/cron_micro_live.log
+- Committed and pushed: 85e832f
