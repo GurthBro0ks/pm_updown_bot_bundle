@@ -654,6 +654,44 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
         if is_live and not dry_run:
             prefix = MICRO_LIVE_LOG if mode == "micro-live" else ""
 
+            # ── Dedup: skip markets with existing open orders ─────────────
+            if idx == 0:  # only check once at start of run
+                try:
+                    from utils.kalshi_orders import KalshiOrderClient
+                    order_client_dedup = KalshiOrderClient()
+                    existing_orders = order_client_dedup.get_orders(status="open")
+                    existing_positions = order_client_dedup.get_positions()
+                except Exception as e:
+                    logger.warning("%s Could not fetch existing orders/positions: %s", prefix, e)
+                    existing_orders = []
+                    existing_positions = []
+
+                existing_order_tickers = {o.get("ticker") for o in existing_orders if o.get("ticker")}
+                existing_position_tickers = {p.get("ticker") for p in existing_positions if p.get("ticker")}
+                all_existing_tickers = existing_order_tickers | existing_position_tickers
+
+                MAX_OPEN_ORDERS = 20
+                if len(existing_orders) >= MAX_OPEN_ORDERS:
+                    logger.warning(
+                        "%s Already have %d open orders (max %d), skipping run",
+                        prefix, len(existing_orders), MAX_OPEN_ORDERS,
+                    )
+                    break
+
+                optimize_kalshi_strategy._existing_tickers = all_existing_tickers
+                optimize_kalshi_strategy._existing_orders_count = len(existing_orders)
+
+                logger.info(
+                    "%s Existing open orders: %d, positions: %d",
+                    prefix, len(existing_orders), len(existing_positions),
+                )
+            else:
+                all_existing_tickers = getattr(optimize_kalshi_strategy, "_existing_tickers", set())
+
+            if market_id in all_existing_tickers:
+                logger.info("%s SKIP %s — already have open order or position", prefix, market_id)
+                continue
+
             # Safety countdown on first order of session
             if not optimize_kalshi_strategy._first_order_placed:
                 logger.warning(
@@ -675,10 +713,10 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
                     quantity=quantity,
                     price_cents=price_cents,
                 )
+                order_id = result.get("order", {}).get("order_id", "unknown")
                 logger.info(
                     "%s ORDER PLACED: %s %s @ %dc -> order_id=%s",
-                    prefix, order_side, market_id, price_cents,
-                    result.get("order_id", "unknown"),
+                    prefix, order_side, market_id, price_cents, order_id,
                 )
                 # Write to proof pack
                 proof_data.setdefault("orders_placed", []).append({
