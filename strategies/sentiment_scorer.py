@@ -174,11 +174,14 @@ def _call_provider(provider: dict, market_text: str) -> Optional[float]:
 def _get_providers_for_tier(tier: str):
     """Return ordered provider list based on cost tier."""
     if tier == "bulk":
-        return [p for p in PROVIDERS if p["name"] == TIER_PREMARY_PROVIDER]
+        primary = [p for p in PROVIDERS if p["name"] == TIER_PREMARY_PROVIDER]
+        gemini = [p for p in PROVIDERS if p["name"] == "gemini"]
+        return primary + gemini
     elif tier == "premium":
         premium = [p for p in PROVIDERS if p["name"] == TIER_PREMIUM_PROVIDER]
         primary = [p for p in PROVIDERS if p["name"] == TIER_PREMARY_PROVIDER]
-        return premium + primary
+        gemini = [p for p in PROVIDERS if p["name"] == "gemini"]
+        return premium + primary + gemini
     else:  # skip or unknown
         return []
 
