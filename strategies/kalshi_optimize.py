@@ -41,26 +41,32 @@ except Exception:
     validate_prior = None
 
 # Stub for missing function
-def check_micro_live_gates(market, size, price, risk_caps, venue):
+def check_micro_live_gates(market, size, price, risk_caps, venue, computed_edge_pct=None):
     """
     Micro-live risk gates - must pass ALL to execute real trades
-    
+
+    Args:
+        computed_edge_pct: Pre-computed edge after fees (optional). If provided,
+                           this takes precedence over market.get("edge_pct").
     Returns: (passed: bool, violations: list)
     """
     violations = []
-    
+
     # Gate 1: Position size limit
     if size > risk_caps.get("max_pos_usd", 10):
         violations.append(f"Size ${size:.2f} > max ${risk_caps['max_pos_usd']}")
-    
+
     # Gate 2: Minimum liquidity
     liquidity = market.get("volume_usd", 0) or market.get("liquidity", 0)
     min_liq = risk_caps.get("liquidity_min_usd", 1000)
     if liquidity < min_liq:
         violations.append(f"Liquidity ${liquidity:.0f} < min ${min_liq}")
-    
-    # Gate 3: Edge after fees
-    edge = market.get("edge_pct", 0) or market.get("expected_edge_pct", 0)
+
+    # Gate 3: Edge after fees — use computed value if available
+    if computed_edge_pct is not None:
+        edge = computed_edge_pct
+    else:
+        edge = market.get("edge_pct", 0) or market.get("expected_edge_pct", 0)
     min_edge = risk_caps.get("edge_after_fees_pct", 0.5)
     if edge < min_edge:
         violations.append(f"Edge {edge:.1f}% < min {min_edge}%")
@@ -480,17 +486,21 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
             market["_ai_true_price"] = 0.5
             market["_ai_tier"] = "skip"
     
-    # Calculate optimal order size
-    optimal_size = calculate_optimal_order_size(bankroll, len(markets), risk_caps["max_pos_usd"])
-    logger.info(f"Optimal order size: ${optimal_size:.2f} per market")
+    # Calculate optimal order size using only markets with real AI priors
+    ai_markets = [m for m in markets if m.get("_ai_true_price", 0.5) != 0.5]
+    num_ai_markets = max(len(ai_markets), 1)
+    optimal_size = calculate_optimal_order_size(bankroll, num_ai_markets, risk_caps["max_pos_usd"])
+    logger.info(f"Optimal order size: ${optimal_size:.2f} per market (Kelly on {num_ai_markets} AI-priced markets)")
     
-    # Find best maker markets
+    # Find best maker market (BONUS optimization — not a gate for order execution)
     effective_min_edge = min_edge_override if min_edge_override is not None else risk_caps["edge_after_fees_pct"]
     logger.info("Finding best maker markets...")
     best_maker_market = find_best_maker_market(markets, effective_min_edge)
-    
+
     if best_maker_market:
         logger.info(f"Best maker market: {best_maker_market.get('id')} at {best_maker_market.get('odds', {}).get('yes', 0.0):.4f} (maker fee: {get_maker_fee(best_maker_market.get('odds', {}).get('yes', 0.0)):.2f}¢)")
+    else:
+        logger.info("No profitable maker markets found — will use limit orders on AI-priced markets")
     
     # Track metrics
     total_trades = 0
@@ -509,6 +519,11 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
         market_id = market.get("id")
         yes_price = market.get("odds", {}).get("yes", 0.0)
         true_price = market.get("_ai_true_price", 0.5)
+
+        # Skip markets with no AI signal (tier="skip" = no API call was made)
+        if market.get("_ai_tier") == "skip":
+            logger.debug(f"Market {market_id}: tier=skip, skipping — no AI signal")
+            continue
 
         # AI prior self-validation gate
         if validate_prior is not None:
@@ -625,7 +640,7 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
             logger.debug(f"Market {market_id}: Edge before fees: {edge_before_fees_pct:.2f}%, expected taker fee: {expected_taker_fee_pct:.2f}%")
         
         # Check if order passes gates
-        passed, violations = check_micro_live_gates(market, optimal_size, yes_price, risk_caps, "kalshi")
+        passed, violations = check_micro_live_gates(market, optimal_size, yes_price, risk_caps, "kalshi", computed_edge_pct=edge_after_fees_pct)
         
         if not passed:
             logger.debug(f"Market {market_id}: Failed gates: {violations}")
