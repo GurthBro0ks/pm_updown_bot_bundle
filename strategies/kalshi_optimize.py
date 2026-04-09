@@ -57,7 +57,7 @@ def check_micro_live_gates(market, size, price, risk_caps, venue, computed_edge_
         violations.append(f"Size ${size:.2f} > max ${risk_caps['max_pos_usd']}")
 
     # Gate 2: Minimum liquidity
-    liquidity = market.get("volume_fp", 0) or market.get("liquidity_dollars", 0)
+    liquidity = market.get("volume_24h", 0) or market.get("liquidity_usd", 0)
     min_liq = risk_caps.get("liquidity_min_usd", 1000)
     if liquidity < min_liq:
         violations.append(f"Liquidity ${liquidity:.0f} < min ${min_liq}")
@@ -453,7 +453,7 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     # Each bucket gets up to 10 markets; together they form the 20-market AI premium tier
     now_ts = datetime.now(timezone.utc).timestamp()
     SHORT_DAYS = 7
-    SHORT_MIN_VOL = 500
+    SHORT_MIN_VOL = 0
     SHORT_MAX = 10
     LONG_MAX = 10
 
@@ -472,14 +472,14 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
             except Exception:
                 pass
         m["_days_to_end"] = days_left
-        vol = m.get("volume_fp", 0) or m.get("liquidity_dollars", 0)
+        vol = m.get("volume_24h", 0) or m.get("liquidity_usd", 0)
         if days_left <= SHORT_DAYS and vol > SHORT_MIN_VOL:
             short_bucket.append(m)
         else:
             long_bucket.append(m)
 
-    short_bucket.sort(key=lambda m: m.get("volume_fp", 0) or m.get("liquidity_dollars", 0), reverse=True)
-    long_bucket.sort(key=lambda m: m.get("volume_fp", 0) or m.get("liquidity_dollars", 0), reverse=True)
+    short_bucket.sort(key=lambda m: m.get("volume_24h", 0) or m.get("liquidity_usd", 0), reverse=True)
+    long_bucket.sort(key=lambda m: m.get("volume_24h", 0) or m.get("liquidity_usd", 0), reverse=True)
 
     short_premium = short_bucket[:SHORT_MAX]
     long_premium = long_bucket[:LONG_MAX]
