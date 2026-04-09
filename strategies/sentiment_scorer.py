@@ -1,10 +1,9 @@
 """AI prior scoring for Kelly sizing in Kalshi strategy.
 
-Cascade order (required):
+Cascade order:
 1) grok_fast
-2) grok_420 (disabled — model name deprecated)
-3) gemini (primary critic)
-4) glm (fallback critic)
+2) grok_420
+3) gemini (fallback)
 """
 
 from __future__ import annotations
@@ -46,12 +45,6 @@ PROVIDERS = (
         "key_envs": ("XAI_API_KEY", "GROK_API_KEY", "X_AI_API"),
     },
     {
-        "name": "glm",
-        "url": "https://api.z.ai/api/paas/v4/chat/completions",
-        "model": "glm-4-plus",
-        "key_envs": ("GLM_API_KEY", "ZHIPU_API"),
-    },
-    {
         "name": "gemini",
         "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         "model": "gemini-2.5-flash",
@@ -60,7 +53,7 @@ PROVIDERS = (
 )
 
 # Cost-aware tier config
-TIER_PREMARY_PROVIDER = os.getenv("AI_PRIMARY_PROVIDER", "glm")
+TIER_PREMARY_PROVIDER = os.getenv("AI_PRIMARY_PROVIDER", "grok_fast")
 TIER_PREMIUM_PROVIDER = os.getenv("AI_PREMIUM_PROVIDER", "grok_fast")
 TIER_PREMIUM_MAX = int(os.getenv("AI_PREMIUM_MAX", "10"))
 
@@ -195,7 +188,7 @@ def get_ai_prior(market_text: str, tier: str = "premium", market_ticker: str = N
 
     Args:
         market_text: Market question/title text
-        tier: "premium" (grok+glm fallback), "bulk" (glm only), "skip" (return 0.5)
+        tier: "premium" (grok+gemini fallback), "bulk" (gemini only), "skip" (return 0.5)
         market_ticker: Optional ticker for logging
     """
     normalized = (market_text or "").strip()
@@ -423,14 +416,9 @@ def _get_forecaster_provider() -> Optional[dict]:
 
 
 def _get_critic_provider() -> Optional[dict]:
-    """Return the Gemini (primary critic), GLM (fallback), or Grok adversarial."""
+    """Return the Gemini (primary critic) or Grok adversarial."""
     for p in PROVIDERS:
         if p["name"] == "gemini":
-            key, _ = _first_key(p["key_envs"])
-            if key:
-                return p
-    for p in PROVIDERS:
-        if p["name"] == "glm":
             key, _ = _first_key(p["key_envs"])
             if key:
                 return p
@@ -483,7 +471,7 @@ def multi_model_debate(
 
     Roles:
       1. FORECASTER (Grok primary) — direct probability estimate
-      2. CRITIC (Gemini primary, GLM fallback, Grok adversarial) — adjusted probability + critique strength
+      2. CRITIC (Gemini primary, Grok adversarial) — adjusted probability + critique strength
       3. SYNTHESIZER (local math) — weighted average with disagreement flag
 
     Args:

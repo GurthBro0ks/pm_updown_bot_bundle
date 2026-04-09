@@ -122,3 +122,12 @@
 
 ### Next
 - pm_updown_bot_bundle OPERATIONAL
+
+## Fix PROVIDERS cascade: remove dead GLM, gemini as fallback
+- GLM removed from PROVIDERS (401/429 on every call)
+- Cascade: grok_fast → grok_420 → gemini
+- Gemini is fast, free, works — replaces GLM as fallback
+- PROVIDERS tuple was malformed (missing `},` on gemini, stray `{`)
+- All glm references cleaned up (docstring, comments, dead loop)
+- Critic provider correctly returns gemini
+- get_ai_prior(tier='bulk') returns valid result via gemini
