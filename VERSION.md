@@ -1,13 +1,13 @@
 # Version Snapshot — pm_updown_bot_bundle
 
-> Generated: 2026-04-09T11:25:08Z | Host: slimy-nuc1
+> Generated: 2026-04-09T11:46:17Z | Host: slimy-nuc1
 
 ## Git State
 - **Branch:** `feat/ibkr-forecast-integration`
-- **HEAD:** `9e20ce2`
-- **Last commit:** `2026-04-09` — `feat: 10 short + 10 long premium markets, expand weather/econ categories`
+- **HEAD:** `47a246f`
+- **Last commit:** `2026-04-09` — `fix: volume_fp + liquidity_dollars match Kalshi API fields`
 - **Remote:** `git@github.com:GurthBro0ks/pm_updown_bot_bundle.git`
-- **Dirty:** NO
+- **Dirty:** YES (1 uncommitted)
 
 ## Runtime
 - **Runtime info:** N/A
