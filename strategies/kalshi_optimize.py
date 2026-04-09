@@ -449,42 +449,76 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     # Filter for liquidity
     markets = filter_low_liquidity_markets(markets, min_liquidity_usd=0.0, max_trades=20)
 
-    # Sort by volume descending — highest liquidity gets AI calls (best edge)
-    markets.sort(key=lambda m: m.get("volume_usd", 0) or m.get("liquidity", 0), reverse=True)
+    # Split premium into two volume-sorted buckets: short-term (<=7d) and long-term (>7d)
+    # Each bucket gets up to 10 markets; together they form the 20-market AI premium tier
+    now_ts = datetime.now(timezone.utc).timestamp()
+    SHORT_DAYS = 7
+    SHORT_MIN_VOL = 500
+    SHORT_MAX = 10
+    LONG_MAX = 10
 
-    # Read cost control limits
-    ai_max_priors = int(os.getenv("AI_MAX_PRIORS_PER_RUN", "10"))
-    ai_premium_max = int(os.getenv("AI_PREMIUM_MAX", "10"))
-    ai_bulk_max = ai_max_priors - ai_premium_max
+    short_bucket = []
+    long_bucket = []
+    for m in markets:
+        end_time = m.get("close_time") or m.get("expiration_date")
+        days_left = float("inf")
+        if end_time:
+            try:
+                if isinstance(end_time, str):
+                    end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
+                else:
+                    end_dt = end_time
+                days_left = (end_dt.timestamp() - now_ts) / 86400
+            except Exception:
+                pass
+        m["_days_to_end"] = days_left
+        vol = m.get("volume_usd", 0) or m.get("liquidity", 0)
+        if days_left <= SHORT_DAYS and vol > SHORT_MIN_VOL:
+            short_bucket.append(m)
+        else:
+            long_bucket.append(m)
+
+    short_bucket.sort(key=lambda m: m.get("volume_usd", 0) or m.get("liquidity", 0), reverse=True)
+    long_bucket.sort(key=lambda m: m.get("volume_usd", 0) or m.get("liquidity", 0), reverse=True)
+
+    short_premium = short_bucket[:SHORT_MAX]
+    long_premium = long_bucket[:LONG_MAX]
+    premium_markets = short_premium + long_premium
 
     logger.info(
-        "AI tier limits: premium=%d bulk=%d skip_remaining=%d (total markets=%d)",
-        ai_premium_max,
-        ai_bulk_max,
-        max(0, len(markets) - ai_max_priors),
-        len(markets),
+        "[PREMIUM] Short-term: %d, Long-term: %d, Total: %d (max %d each)",
+        len(short_premium),
+        len(long_premium),
+        len(premium_markets),
+        SHORT_MAX,
     )
 
-    # Precompute AI priors with cost-aware tiering.
-    for idx, market in enumerate(markets):
-        market_question = market.get("title", market.get("question", ""))
-        market_id = market.get("ticker", market.get("id", "?"))
+    # Tag premium markets; bulk tier absorbs remaining markets up to ai_bulk_max
+    for m in markets:
+        m["_ai_tier"] = "skip"
+        m["_ai_true_price"] = 0.5
 
-        # Assign tier based on position in volume-sorted list
-        if idx < ai_premium_max:
-            tier = "premium"
-        elif idx < ai_max_priors:
-            tier = "bulk"
-        else:
-            tier = "skip"
+    for m in premium_markets:
+        m["_ai_tier"] = "premium"
 
-        if tier != "skip":
-            market["_ai_true_price"] = estimate_true_price(market_question, market_id, tier=tier)
-            # Tag for downstream validation
-            market["_ai_tier"] = tier
-        else:
-            market["_ai_true_price"] = 0.5
-            market["_ai_tier"] = "skip"
+    ai_bulk_max = max(0, ai_max_priors - len(premium_markets))
+    bulk_count = 0
+    for m in markets:
+        if m["_ai_tier"] == "premium":
+            continue
+        if bulk_count < ai_bulk_max:
+            m["_ai_tier"] = "bulk"
+            bulk_count += 1
+        if bulk_count >= ai_bulk_max:
+            break
+
+    for m in markets:
+        if m["_ai_tier"] != "skip":
+            m["_ai_true_price"] = estimate_true_price(
+                m.get("title", m.get("question", "")),
+                m.get("ticker", m.get("id", "?")),
+                tier=m["_ai_tier"],
+            )
     
     # Calculate optimal order size using only markets with real AI priors
     ai_markets = [m for m in markets if m.get("_ai_true_price", 0.5) != 0.5]

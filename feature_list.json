@@ -30,5 +30,11 @@
     "file": "strategies/kalshi_optimize.py",
     "changes": ["Kelly num_markets: count of _ai_tier!=skip markets (7-10) not all markets (400+)", "check_micro_live_gates: pass computed edge_after_fees_pct directly instead of re-reading stale market.get(edge_pct)", "Maker search demoted from blocker to bonus optimization", "Skip tier=skip markets before validation loop"],
     "description": "Kelly was dividing bankroll by 400+ markets → $0.07/market. Now divides by 7-10 AI-priced markets → $2.50-$3.57/market. Also fixed edge gate bug where market.get(edge_pct) returned None causing all orders to fail."
+  },
+  "premium_10_10_split": {
+    "status": "built",
+    "file": "strategies/kalshi_optimize.py",
+    "changes": ["AI_MAX_PRIORS_PER_RUN default: 10 → 20", "AI_PREMIUM_MAX default: 10 → 20", "Premium tier split: 10 short-term (<=7d expiry, vol>500) + 10 long-term (>7d expiry)", "Bulk tier absorbs remaining 0 markets (premium=20, ai_max=20, bulk=0)", "Log line: [PREMIUM] Short-term: N, Long-term: N, Total: N (max 10 each)", "KALSHI_BLOCKED_CATEGORIES: weather/economics NOT blocked (Entertainment/Mentions/Social/Exotics only)"],
+    "description": "Premium tier expanded from 10 → 20 markets: 10 short-term (<=7d expiry) + 10 long-term (>7d expiry), each sorted by volume desc. Category blocklist confirmed clean — no weather/economics exclusions."
   }
 }

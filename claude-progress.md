@@ -100,3 +100,25 @@
   - Installed: 0 */4 * * * /opt/slimy/pm_updown_bot_bundle/scripts/cron_micro_live.sh
   - Timeout: 600s max per run, logs to logs/cron_micro_live.log
 - Committed and pushed: 85e832f
+
+## 2026-04-09 (premium_10_10_split — Expand AI Premium Tier)
+
+**Agent:** Claude Code (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Kalshi strategy
+**Type:** Feature
+
+### Summary
+- Premium tier: 10 → 20 markets (10 short-term <=7d expiry + 10 long-term >7d)
+- Both buckets sorted by volume desc, combined for 20-market AI premium tier
+- Bulk tier absorbs remaining markets (0 when ai_max=20, ai_premium=20)
+- Log line verified: `[PREMIUM] Short-term: 0, Long-term: 10, Total: 10 (max 10 each)`
+- KALSHI_BLOCKED_CATEGORIES confirmed clean: Entertainment/Mentions/Social/Exotics only, no weather/economics blocks
+
+### Changes
+- `strategies/kalshi_optimize.py`: replaced volume-only sort + tier loop with two-bucket split
+- `AI_MAX_PRIORS_PER_RUN` default: 10 → 20
+- `AI_PREMIUM_MAX` default: 10 → 20
+- `feature_list.json`: added premium_10_10_split entry
+
+### Next
+- pm_updown_bot_bundle OPERATIONAL
