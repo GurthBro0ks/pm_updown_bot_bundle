@@ -16,8 +16,8 @@
     "roles": ["forecaster", "critic", "synthesizer"],
     "gate_type": "soft",
     "env_flag": "DEBATE_MODE",
-    "description": "3-role adversarial debate: Forecaster (Grok), Critic (GLM), Synthesizer (local). Weighted average with consensus/disagreement flag. Opt-in via DEBATE_MODE=true",
-    "notes": ["GLM_API_KEY INVALID as of 2026-04-09 — 401 on both general and coding endpoints. Critic role will fall back. URL updated to api.z.ai/api/paas/v4, model to glm-4-plus"]
+    "description": "3-role adversarial debate: Forecaster (Grok), Critic (Gemini native API), Synthesizer (local). Weighted average with consensus/disagreement flag. Opt-in via DEBATE_MODE=true",
+    "notes": ["2026-04-09: Gemini 2.5 Flash replaces dead GLM as primary critic. Uses native google.generativeai API (OpenAI compat truncates). Cascade: Gemini → GLM (dead) → Grok adversarial. Debate example: Grok 0.75 vs Gemini 0.45, critique_strength=0.85, consensus=disagree"]
   },
   "ai_provider_config": {
     "status": "fixed",
