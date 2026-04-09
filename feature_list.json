@@ -16,6 +16,13 @@
     "roles": ["forecaster", "critic", "synthesizer"],
     "gate_type": "soft",
     "env_flag": "DEBATE_MODE",
-    "description": "3-role adversarial debate: Forecaster (Grok), Critic (GLM), Synthesizer (local). Weighted average with consensus/disagreement flag. Opt-in via DEBATE_MODE=true"
+    "description": "3-role adversarial debate: Forecaster (Grok), Critic (GLM), Synthesizer (local). Weighted average with consensus/disagreement flag. Opt-in via DEBATE_MODE=true",
+    "notes": ["GLM_API_KEY INVALID as of 2026-04-09 — 401 on both general and coding endpoints. Critic role will fall back. URL updated to api.z.ai/api/paas/v4, model to glm-4-plus"]
+  },
+  "ai_provider_config": {
+    "status": "fixed",
+    "file": "strategies/sentiment_scorer.py",
+    "changes": ["GLM URL: api.z.ai/api/coding/paas/v4 → api.z.ai/api/paas/v4", "GLM model: glm-5.1 → glm-4-plus", "Grok timeout: 10s → 30s", "AI bulk tier: ai_max_priors default 50 → 10 (bulk=0, premium-only)"],
+    "description": "AI provider configuration fixes — GLM URL, model, Grok timeout, premium-only tier"
   }
 }
