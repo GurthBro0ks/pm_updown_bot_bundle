@@ -670,7 +670,7 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
                 existing_position_tickers = {p.get("ticker") for p in existing_positions if p.get("ticker")}
                 all_existing_tickers = existing_order_tickers | existing_position_tickers
 
-                MAX_OPEN_ORDERS = 20
+                MAX_OPEN_ORDERS = 50
                 if len(existing_orders) >= MAX_OPEN_ORDERS:
                     logger.warning(
                         "%s Already have %d open orders (max %d), skipping run",
