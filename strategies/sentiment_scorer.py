@@ -3,7 +3,8 @@
 Cascade order (required):
 1) grok_fast
 2) grok_420 (disabled — model name deprecated)
-3) glm
+3) gemini (primary critic)
+4) glm (fallback critic)
 """
 
 from __future__ import annotations
@@ -16,6 +17,13 @@ from typing import Optional, Tuple
 
 import requests
 from dotenv import load_dotenv
+
+# Native Gemini API (OpenAI compat endpoint truncates responses)
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
 
 # Load .env so API keys are available on standalone import
 load_dotenv()
@@ -42,6 +50,12 @@ PROVIDERS = (
         "url": "https://api.z.ai/api/paas/v4/chat/completions",
         "model": "glm-4-plus",
         "key_envs": ("GLM_API_KEY", "ZHIPU_API"),
+    },
+    {
+        "name": "gemini",
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+        "model": "gemini-2.5-flash",
+        "key_envs": ("GEMINI_API_KEY",),
     },
 )
 
@@ -320,6 +334,11 @@ def _call_debate_role(
     if not api_key:
         return None
 
+    # ── Gemini: use native API (OpenAI compat endpoint truncates) ────────────
+    if provider["name"] == "gemini" and GEMINI_AVAILABLE:
+        return _call_gemini_native(provider, system_prompt, user_prompt, timeout)
+
+    # ── All other providers: OpenAI-compatible ───────────────────────────────
     payload = {
         "model": provider["model"],
         "messages": [
@@ -327,7 +346,7 @@ def _call_debate_role(
             {"role": "user", "content": user_prompt},
         ],
         "temperature": 0.1,
-        "max_tokens": 200,
+        "max_tokens": 1500,
     }
 
     headers = {
@@ -368,6 +387,31 @@ def _call_debate_role(
         return None
 
 
+def _call_gemini_native(
+    provider: dict,
+    system_prompt: str,
+    user_prompt: str,
+    timeout: int = DEBATE_TIMEOUT_SECONDS,
+) -> Optional[dict]:
+    """Call Gemini using native API (avoids OpenAI compat truncation issues)."""
+    try:
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY", ""))
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        combined = f"{system_prompt}\n\n{user_prompt}"
+        response = model.generate_content(
+            combined,
+            generation_config=genai.types.GenerationConfig(
+                response_mime_type="application/json",
+                temperature=0.1,
+            ),
+        )
+        parsed = json.loads(response.text)
+        return parsed
+    except Exception as exc:
+        logger.warning("[debate] Gemini native call failed: %s", exc)
+        return None
+
+
 def _get_forecaster_provider() -> Optional[dict]:
     """Return the Grok (forecaster) provider."""
     for p in PROVIDERS:
@@ -379,7 +423,12 @@ def _get_forecaster_provider() -> Optional[dict]:
 
 
 def _get_critic_provider() -> Optional[dict]:
-    """Return the GLM (critic) provider, or fall back to Grok adversarial."""
+    """Return the Gemini (primary critic), GLM (fallback), or Grok adversarial."""
+    for p in PROVIDERS:
+        if p["name"] == "gemini":
+            key, _ = _first_key(p["key_envs"])
+            if key:
+                return p
     for p in PROVIDERS:
         if p["name"] == "glm":
             key, _ = _first_key(p["key_envs"])
@@ -434,7 +483,7 @@ def multi_model_debate(
 
     Roles:
       1. FORECASTER (Grok primary) — direct probability estimate
-      2. CRITIC (GLM or Grok-adversarial) — adjusted probability + critique strength
+      2. CRITIC (Gemini primary, GLM fallback, Grok adversarial) — adjusted probability + critique strength
       3. SYNTHESIZER (local math) — weighted average with disagreement flag
 
     Args:
