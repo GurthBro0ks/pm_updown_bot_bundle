@@ -1,13 +1,13 @@
 # Version Snapshot — pm_updown_bot_bundle
 
-> Generated: 2026-04-09T09:54:05Z | Host: slimy-nuc1
+> Generated: 2026-04-09T11:02:29Z | Host: slimy-nuc1
 
 ## Git State
 - **Branch:** `feat/ibkr-forecast-integration`
-- **HEAD:** `85e832f`
-- **Last commit:** `2026-04-09` — `feat: order dedup, order_id parsing, cron schedule, max-orders cap`
+- **HEAD:** `47302e4`
+- **Last commit:** `2026-04-09` — `chore: MAX_OPEN_ORDERS 20 -> 50`
 - **Remote:** `git@github.com:GurthBro0ks/pm_updown_bot_bundle.git`
-- **Dirty:** YES (1 uncommitted)
+- **Dirty:** NO
 
 ## Runtime
 - **Runtime info:** N/A
