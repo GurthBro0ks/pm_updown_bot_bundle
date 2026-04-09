@@ -700,6 +700,18 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
         elif dry_run:
             prefix = MICRO_LIVE_LOG if mode == "micro-live" else "SHADOW MODE"
             logger.info(f"{prefix}: Would place order on {market_id}: {order_side} ${optimal_size:.2f} @ {order_price:.4f}")
+            # Record computed-but-not-placed order in proof_data so the proof pack
+            # reflects planned activity even in shadow mode
+            price_cents_shadow = int(order_price * 100)
+            proof_data.setdefault("orders_placed", []).append({
+                "market_id": market_id,
+                "side": order_side,
+                "price_cents": price_cents_shadow,
+                "quantity": 1,
+                "result": None,  # shadow mode — no real order placed
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "mode": mode,
+            })
         
         # Update metrics
         total_trades += 1
