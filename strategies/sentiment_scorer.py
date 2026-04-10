@@ -133,7 +133,7 @@ def _call_provider(provider: dict, market_text: str) -> Optional[float]:
             },
         ],
         "temperature": 0.0,
-        "max_tokens": 80,
+        "max_tokens": 500,
     }
 
     headers = {
