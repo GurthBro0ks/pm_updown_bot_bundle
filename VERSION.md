@@ -1,13 +1,13 @@
 # Version Snapshot — pm_updown_bot_bundle
 
-> Generated: 2026-04-10T06:30:30Z | Host: slimy-nuc1
+> Generated: 2026-04-10T18:41:47Z | Host: slimy-nuc1
 
 ## Git State
 - **Branch:** `feat/ibkr-forecast-integration`
-- **HEAD:** `58de0bd`
-- **Last commit:** `2026-04-10` — `fix: pre-dedup premium markets, faster grok timeout`
+- **HEAD:** `e94276c`
+- **Last commit:** `2026-04-10` — `chore: update progress with get_orders status filter fix`
 - **Remote:** `git@github.com:GurthBro0ks/pm_updown_bot_bundle.git`
-- **Dirty:** NO
+- **Dirty:** YES (1 uncommitted)
 
 ## Runtime
 - **Runtime info:** N/A
