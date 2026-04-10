@@ -158,3 +158,14 @@
   - Was only checking market.id vs order.ticker → cross-field mismatch missed 10 of 18 orders
 - Committed and pushed: 2de38ca
 
+## Fix get_orders status filter (2026-04-10)
+- BUG: get_orders() ignored status param entirely — no API param, no client-side filter
+- API returned all 18 canceled orders when caller asked for "open" orders
+- Dedup falsely blocked all new orders (18 canceled orders matched by ticker)
+- FIX: _request() now accepts params kwarg for query string
+- FIX: get_orders() passes status to API + client-side filter as backup
+- Default changed from "open" to "resting" (Kalshi uses "resting" not "open")
+- Dedup callers in kalshi_optimize.py updated to use status="resting"
+- Validation: resting=0, canceled=18, all=18 — correct filtering confirmed
+- Committed and pushed: 675ab39
+
