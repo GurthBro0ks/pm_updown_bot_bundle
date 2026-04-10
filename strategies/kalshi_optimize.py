@@ -454,7 +454,7 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
         try:
             from utils.kalshi_orders import KalshiOrderClient
             order_client = KalshiOrderClient()
-            existing_orders = order_client.get_orders(status="open") or []
+            existing_orders = order_client.get_orders(status="resting") or []
             existing_positions = order_client.get_positions() or []
             existing_tickers = set()
             for o in existing_orders:
@@ -725,7 +725,7 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
                 try:
                     from utils.kalshi_orders import KalshiOrderClient
                     order_client_dedup = KalshiOrderClient()
-                    existing_orders = order_client_dedup.get_orders(status="open")
+                    existing_orders = order_client_dedup.get_orders(status="resting")
                     existing_positions = order_client_dedup.get_positions()
                 except Exception as e:
                     logger.warning("%s Could not fetch existing orders/positions: %s", prefix, e)

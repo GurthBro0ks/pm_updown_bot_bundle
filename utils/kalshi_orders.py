@@ -179,7 +179,7 @@ class KalshiOrderClient:
             "Content-Type": "application/json",
         }
 
-    def _request(self, method: str, path: str, body: Optional[dict] = None, retries: int = 0) -> dict:
+    def _request(self, method: str, path: str, body: Optional[dict] = None, retries: int = 0, params: Optional[dict] = None) -> dict:
         """
         Make an authenticated request to the Kalshi API.
 
@@ -193,6 +193,7 @@ class KalshiOrderClient:
             path: API path (e.g., /portfolio/balance)
             body: Request body dict (for POST/PUT)
             retries: Current retry count
+            params: Query string params dict
 
         Returns:
             Response JSON as dict
@@ -208,15 +209,15 @@ class KalshiOrderClient:
         url = f"{self.base_url}{path}"
 
         if body:
-            resp = requests.request(method, url, headers=headers, json=body, timeout=15)
+            resp = requests.request(method, url, headers=headers, json=body, params=params, timeout=15)
         else:
-            resp = requests.request(method, url, headers=headers, timeout=15)
+            resp = requests.request(method, url, headers=headers, params=params, timeout=15)
 
         if resp.status_code == 429:
             if retries < self.MAX_RETRIES:
                 logger.warning(f"Rate limited, retrying in {self.RETRY_DELAY_SEC}s (attempt {retries + 1}/{self.MAX_RETRIES})")
                 time.sleep(self.RETRY_DELAY_SEC)
-                return self._request(method, path, body, retries + 1)
+                return self._request(method, path, body, retries + 1, params)
             raise KalshiRateLimitError(f"Rate limit hit after {self.MAX_RETRIES} retries")
 
         if resp.status_code == 401 or resp.status_code == 403:
@@ -344,18 +345,22 @@ class KalshiOrderClient:
         data = self._request("GET", "/portfolio/positions")
         return data.get("positions", [])
 
-    def get_orders(self, status: str = "open") -> list:
+    def get_orders(self, status: str = "resting") -> list:
         """
         Get orders, optionally filtered by status.
 
         Args:
-            status: Filter by status — "open", "filled", "cancelled", "all"
+            status: Filter — "resting", "canceled", "executed", "all"
 
         Returns:
-            List of order dicts
+            List of order dicts matching status
         """
-        data = self._request("GET", "/portfolio/orders", retries=0)
-        return data.get("orders", [])
+        params = {} if status == "all" else {"status": status}
+        data = self._request("GET", "/portfolio/orders", params=params, retries=0)
+        orders = data.get("orders", [])
+        if status != "all":
+            orders = [o for o in orders if o.get("status") == status]
+        return orders
 
     def get_order(self, order_id: str) -> dict:
         """
