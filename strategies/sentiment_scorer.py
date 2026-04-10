@@ -29,7 +29,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-CALL_TIMEOUT_SECONDS = 15
+CALL_TIMEOUT_SECONDS = 25
 
 PROVIDERS = (
     {
@@ -81,8 +81,12 @@ def _extract_probability(raw_text: str) -> Optional[float]:
 
     text = raw_text.strip()
     if text.startswith("```"):
-        text = text.strip("`")
-        text = text.replace("json", "", 1).strip()
+        parts = text.split("```")
+        if len(parts) >= 2:
+            text = parts[1]
+            if text.startswith("json"):
+                text = text[4:]
+            text = text.strip()
 
     parsed: Optional[dict] = None
     try:
@@ -155,9 +159,10 @@ def _call_provider(provider: dict, market_text: str) -> Optional[float]:
         prob = _extract_probability(content)
         if prob is None:
             logger.warning(
-                "[kelly] AI prior parse failure: source=%s key_env=%s",
+                "[kelly] AI prior parse failure: source=%s key_env=%s raw=%s",
                 provider["name"],
                 key_name,
+                content[:200],
             )
             return None
         return prob

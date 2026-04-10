@@ -466,7 +466,12 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
                 if t:
                     existing_tickers.add(t)
             before = len(markets)
-            markets = [m for m in markets if m.get("id") not in existing_tickers]
+            # Check both market.id and market.ticker against existing order tickers
+            markets = [
+                m for m in markets
+                if m.get("id") not in existing_tickers
+                and m.get("ticker") not in existing_tickers
+            ]
             logger.info(
                 "[PREMIUM] Pre-dedup: %d -> %d markets (excluded %d existing)",
                 before,
