@@ -1,11 +1,11 @@
 # Version Snapshot — pm_updown_bot_bundle
 
-> Generated: 2026-04-10T18:41:47Z | Host: slimy-nuc1
+> Generated: 2026-04-10T19:21:44Z | Host: slimy-nuc1
 
 ## Git State
 - **Branch:** `feat/ibkr-forecast-integration`
-- **HEAD:** `e94276c`
-- **Last commit:** `2026-04-10` — `chore: update progress with get_orders status filter fix`
+- **HEAD:** `851e457`
+- **Last commit:** `2026-04-10` — `fix: replace undefined idx with function attr flag for dedup-once`
 - **Remote:** `git@github.com:GurthBro0ks/pm_updown_bot_bundle.git`
 - **Dirty:** YES (1 uncommitted)
 
