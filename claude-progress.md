@@ -131,3 +131,20 @@
 - All glm references cleaned up (docstring, comments, dead loop)
 - Critic provider correctly returns gemini
 - get_ai_prior(tier='bulk') returns valid result via gemini
+
+## Cron run discovery 2026-04-10
+- 00:00 and 04:00 UTC cron runs: both exit code 0, no orders placed
+- Balance: $108, open orders: 18 (BTC/ETH INXY binaries from yesterday)
+- Dedup working: 18 existing open orders correctly skip all markets
+- api.x.ai Grok timeouts: ~25% of calls timing out at 30s (5/20 at 00:00, 5/17 at 04:00)
+- gemini fallback also failing (parse failure — dotenv not loading in cron subprocess)
+- Only 3 markets hit fallback_all_failed (got prob=0.5 fallback)
+- ROOT CAUSE of today's silent skip: Grok slow/unstable → 20 markets × 30s timeout = ~10 min → runner times out before reaching market evaluation gate
+  - cron_micro_live.sh has 60s timeout on runner.py subprocess
+  - Runner exits cleanly with code 0 before placing any orders
+  - Proof packs NOT written for today's runs (market eval loop never reached)
+- Fix options:
+  A) Reduce grok_fast timeout from 30s to 10s (more aggressive timeout, faster cascade)
+  B) Increase cron timeout from 60s to 300s (give more time for 20 AI priors)
+  C) Add parallel AI prior fetching (async calls for all 20 markets simultaneously)
+  D) Reduce AI premium tier from 20 to 10 markets per run

@@ -29,7 +29,7 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-CALL_TIMEOUT_SECONDS = 30
+CALL_TIMEOUT_SECONDS = 15
 
 PROVIDERS = (
     {

@@ -449,6 +449,33 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
     # Filter for liquidity
     markets = filter_low_liquidity_markets(markets, min_liquidity_usd=0.0, max_trades=20)
 
+    # Pre-dedup: exclude markets we already own or have open orders on
+    if is_live:
+        try:
+            from utils.kalshi_orders import KalshiOrderClient
+            order_client = KalshiOrderClient()
+            existing_orders = order_client.get_orders(status="open") or []
+            existing_positions = order_client.get_positions() or []
+            existing_tickers = set()
+            for o in existing_orders:
+                t = o.get("ticker") or o.get("market_ticker")
+                if t:
+                    existing_tickers.add(t)
+            for p in existing_positions:
+                t = p.get("ticker") or p.get("market_ticker")
+                if t:
+                    existing_tickers.add(t)
+            before = len(markets)
+            markets = [m for m in markets if m.get("id") not in existing_tickers]
+            logger.info(
+                "[PREMIUM] Pre-dedup: %d -> %d markets (excluded %d existing)",
+                before,
+                len(markets),
+                len(existing_tickers),
+            )
+        except Exception as e:
+            logger.warning("[PREMIUM] Pre-dedup failed: %s", e)
+
     # Split premium into two volume-sorted buckets: short-term (<=7d) and long-term (>7d)
     # Each bucket gets up to 10 markets; together they form the 20-market AI premium tier
     now_ts = datetime.now(timezone.utc).timestamp()
