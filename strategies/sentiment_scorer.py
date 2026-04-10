@@ -79,37 +79,37 @@ def _extract_probability(raw_text: str) -> Optional[float]:
     if not raw_text:
         return None
 
-    text = raw_text.strip()
-    if text.startswith("```"):
-        parts = text.split("```")
-        if len(parts) >= 2:
-            text = parts[1]
-            if text.startswith("json"):
-                text = text[4:]
-            text = text.strip()
-
-    parsed: Optional[dict] = None
+    # Strategy 1: Try json.loads with fence stripping
+    cleaned = raw_text.strip()
     try:
-        maybe = json.loads(text)
-        if isinstance(maybe, dict):
-            parsed = maybe
-    except Exception:
-        parsed = None
+        import json
+        # Remove ```json and ``` fences via regex
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```\s*$", "", cleaned)
+        cleaned = cleaned.strip()
+        data = json.loads(cleaned)
+        if isinstance(data, dict):
+            for key in ("probability", "prob", "p_yes", "yes_probability"):
+                if key in data:
+                    try:
+                        return _clamp_probability(float(data[key]))
+                    except (ValueError, TypeError):
+                        pass
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
 
-    if parsed is not None:
-        for key in ("probability", "prob", "p_yes", "yes_probability"):
-            if key in parsed:
-                try:
-                    return _clamp_probability(float(parsed[key]))
-                except Exception:
-                    pass
-
-    match = re.search(r"(?<!\d)(0(?:\.\d+)?|1(?:\.0+)?)(?!\d)", text)
+    # Strategy 2: Regex extraction of "probability": NUMBER
+    match = re.search(r'"(?:probability|prob|p_yes|yes_probability)"\s*:\s*([\d.]+)', raw_text)
     if match:
         try:
             return _clamp_probability(float(match.group(1)))
-        except Exception:
-            return None
+        except ValueError:
+            pass
+
+    # Strategy 3: Any 0.xxx number as last resort
+    match = re.search(r"\b0\.\d+\b", raw_text)
+    if match:
+        return _clamp_probability(float(match.group(0)))
 
     return None
 
@@ -159,10 +159,10 @@ def _call_provider(provider: dict, market_text: str) -> Optional[float]:
         prob = _extract_probability(content)
         if prob is None:
             logger.warning(
-                "[kelly] AI prior parse failure: source=%s key_env=%s raw=%s",
+                "[kelly] AI prior parse failure: source=%s key_env=%s raw=%r",
                 provider["name"],
                 key_name,
-                content[:200],
+                content[:500],
             )
             return None
         return prob
@@ -372,7 +372,7 @@ def _call_debate_role(
         parsed = _extract_json_flexible(content)
         if parsed is None:
             logger.warning(
-                "[debate] Parse failure: provider=%s key_env=%s content=%s",
+                "[debate] Parse failure: provider=%s key_env=%s raw=%r",
                 provider["name"],
                 key_name,
                 content[:100],

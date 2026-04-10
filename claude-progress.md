@@ -148,3 +148,13 @@
   B) Increase cron timeout from 60s to 300s (give more time for 20 AI priors)
   C) Add parallel AI prior fetching (async calls for all 20 markets simultaneously)
   D) Reduce AI premium tier from 20 to 10 markets per run
+
+## Fix Gemini parse + timeout tuning (2026-04-10)
+- Grok timeout 15s -> 25s (15 too tight, 30 too slow)
+- Gemini parse failure: added raw response logging + code-fence stripping fix
+  - Old code: `text.strip("`").replace("json", "", 1)` only stripped ONE backtick, failed on ```json
+  - New code: split on ``` and take parts[1], handles multiline code fences correctly
+- Pre-dedup: check both 'ticker' and 'id' field names against existing order tickers
+  - Was only checking market.id vs order.ticker → cross-field mismatch missed 10 of 18 orders
+- Committed and pushed: 2de38ca
+
