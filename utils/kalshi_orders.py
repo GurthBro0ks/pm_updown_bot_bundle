@@ -96,7 +96,7 @@ class KalshiOrderClient:
     """
 
     # Hard safety caps
-    MAX_ORDER_CENTS = 10          # $0.10 max per order
+    MAX_ORDER_CENTS = 50          # $0.10 max per order
     MAX_QUANTITY = 1             # 1 contract max
     DAILY_LOSS_LIMIT_CENTS = 50  # $0.50 max daily loss
 
