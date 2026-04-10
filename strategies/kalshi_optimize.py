@@ -721,7 +721,8 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
             prefix = MICRO_LIVE_LOG if mode == "micro-live" else ""
 
             # ── Dedup: skip markets with existing open orders ─────────────
-            if idx == 0:  # only check once at start of run
+            if not hasattr(optimize_kalshi_strategy, "_dedup_fetched"):
+                optimize_kalshi_strategy._dedup_fetched = True
                 try:
                     from utils.kalshi_orders import KalshiOrderClient
                     order_client_dedup = KalshiOrderClient()
