@@ -1,11 +1,11 @@
 # Version Snapshot — pm_updown_bot_bundle
 
-> Generated: 2026-04-09T20:55:55Z | Host: slimy-nuc1
+> Generated: 2026-04-10T06:30:30Z | Host: slimy-nuc1
 
 ## Git State
 - **Branch:** `feat/ibkr-forecast-integration`
-- **HEAD:** `6de4022`
-- **Last commit:** `2026-04-09` — `fix: remove dead GLM from cascade, gemini replaces as fallback`
+- **HEAD:** `58de0bd`
+- **Last commit:** `2026-04-10` — `fix: pre-dedup premium markets, faster grok timeout`
 - **Remote:** `git@github.com:GurthBro0ks/pm_updown_bot_bundle.git`
 - **Dirty:** NO
 
@@ -16,7 +16,7 @@
 - **Listening ports:** none detected
 
 ## Last Verified
-- **Date:** 2026-04-09
+- **Date:** 2026-04-10
 - **Verification:** `git --no-pager -C /opt/slimy/pm_updown_bot_bundle log -1 --oneline`
 
 ## Host Notes
