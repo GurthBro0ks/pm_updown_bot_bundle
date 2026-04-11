@@ -1,13 +1,13 @@
 # Version Snapshot — pm_updown_bot_bundle
 
-> Generated: 2026-04-11T22:27:44Z | Host: slimy-nuc1
+> Generated: 2026-04-11T22:43:08Z | Host: slimy-nuc1
 
 ## Git State
 - **Branch:** `feat/ibkr-forecast-integration`
-- **HEAD:** `ca7d1b4`
-- **Last commit:** `2026-04-10` — `chore: raise MAX_ORDER_CENTS 10->50 for day`
+- **HEAD:** `56fa582`
+- **Last commit:** `2026-04-11` — `docs: auto-sync project docs from slimy-nuc1 2026-04-11`
 - **Remote:** `git@github.com:GurthBro0ks/pm_updown_bot_bundle.git`
-- **Dirty:** YES (3 uncommitted)
+- **Dirty:** NO
 
 ## Runtime
 - **Runtime info:** N/A
