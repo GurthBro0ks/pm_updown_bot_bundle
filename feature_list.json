@@ -1,4 +1,19 @@
 {
+  "cents_dollars_fix": {
+    "status": "fixed",
+    "file": "strategies/kalshi_optimize.py, utils/kalshi_orders.py, tests/test_unit_conventions.py",
+    "changes": [
+      "Proof pack orders_placed: added size_usd (float, dollars) and cost_usd (float, dollars) fields alongside price_cents",
+      "Live mode: cost_usd extracted from taker_fill_cost_dollars API field; fallback = price_cents/100",
+      "Shadow mode: cost_usd = price_cents_shadow/100 (estimated)",
+      "Added cents_to_usd(cents) and usd_to_cents(dollars) helpers in utils/kalshi_orders.py",
+      "Added 15-unit test suite tests/test_unit_conventions.py verifying cents/dollars separation",
+      "Logger: order placed line now shows @ Nc -> cost=$X.XXXX"
+    ],
+    "classification": "cosmetic — decision logic NOT affected. Budget guards, Kelly sizer, risk caps all use correct dollar floats.",
+    "audit_report": "/tmp/cents_audit.md"
+  },
+
   "backtest_kalshi": {
     "status": "built",
     "file": "backtest_kalshi.py",

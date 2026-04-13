@@ -1,5 +1,52 @@
 # Claude Progress — pm_updown_bot_bundle
 
+## 2026-04-13 (sr-notify fix-qa — Cents/Dollars Unit Audit + Fix)
+
+**Agent:** Claude Code (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Kalshi micro-live
+**Type:** Bug Fix (Cosmetic — decision logic NOT affected)
+
+### Classification
+- **Cosmetic only?** YES — display layer bug, decision logic unaffected
+- **Decision logic affected?** NO — all budget guards, Kelly sizer, risk caps use correct dollar floats
+- **Historical pnl.db corrupted?** NO — pnl.db has no Kalshi Phase 1 entries (kalshi_optimize.py does not call record_trade)
+- **Budget guard / cash remaining affected?** NO — bankroll is dollar float throughout
+
+### Bug Root Cause
+`price_cents` (int, 1-99) stored in proof pack orders. A display consumer that reads it as a dollar float and formats with `$` prefix overstates by 100x (5 cents → displayed as $5.00). The `$6.94` the user reported was the result of this misread.
+
+### Audit Report
+Full trace at `/tmp/cents_audit.md` — covers: (a) Kalshi API ingestion, (b) order placement, (c) fill handling, (d) pnl.db writes, (e) proof pack / scratchpad, (f) display formatting, (g) budget guards, (h) Kelly sizer, (i) risk caps.
+
+### What Changed
+- `strategies/kalshi_optimize.py`:
+  - Proof pack `orders_placed` entries now include `size_usd` (float, dollars) and `cost_usd` (float, dollars) alongside `price_cents`
+  - Live mode: `cost_usd` extracted from `taker_fill_cost_dollars` API field; fallback `price_cents/100`
+  - Shadow mode: `cost_usd` estimated as `price_cents/100`
+  - Log line now shows `ORDER PLACED: ... @ Nc -> cost=$X.XXXX`
+- `utils/kalshi_orders.py`:
+  - Added `cents_to_usd(cents: int) -> float` helper
+  - Added `usd_to_cents(dollars: Union[int,float]) -> int` helper
+- `tests/test_unit_conventions.py`: new 15-test suite verifying cents/dollars separation
+
+### Evidence — Tonight's 9 Orders (2026-04-13 15:21 UTC)
+Proof pack: `proofs/kalshi_optimized_20260413_152108.json`
+- 9 orders, only 1 filled (KXINXU-26APR13H1600-T6849.9999 @ 13c, cost=$0.12+$0.01fee=$0.13)
+- `total_volume` = $11.84 (sum of size_usd, correct)
+- Actual total spend = ~$0.47 (sum of cost_usd)
+- `price_cents` values (5,4,1,5,3,8,5,13,1) — if displayed as dollars → $45.00 (WRONG)
+- After fix: `cost_usd` field = $0.05, $0.04, $0.01, etc. (CORRECT)
+
+### Tests
+```
+pytest tests/test_unit_conventions.py -v → 15 passed
+pytest tests/test_contract_signals.py tests/test_fear_regime.py -v → 24 passed
+```
+
+### Next
+- Morning review: verify display layer is reading `cost_usd` not `price_cents` for any dashboard consumers
+- If dashboard still shows wrong numbers, check if it's reading from a cached/old proof pack
+
 ## 2026-04-08 (backtest_kalshi.py — Vectorized Backtesting Harness)
 
 **Agent:** Claude Code (SlimyAI NUC1)

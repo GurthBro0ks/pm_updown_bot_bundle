@@ -780,16 +780,27 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
                     quantity=quantity,
                     price_cents=price_cents,
                 )
-                order_id = result.get("order", {}).get("order_id", "unknown")
+                # Extract actual cost in USD from fill response
+                # taker_fill_cost_dollars is the cost in dollars (e.g., "0.120000" = $0.12)
+                result_order = result.get("order", {})
+                taker_cost_str = result_order.get("taker_fill_cost_dollars", "0")
+                try:
+                    cost_usd = float(taker_cost_str)
+                except (ValueError, TypeError):
+                    cost_usd = price_cents / 100.0  # fallback: convert cents to dollars
+                order_id = result_order.get("order_id", "unknown")
+
                 logger.info(
-                    "%s ORDER PLACED: %s %s @ %dc -> order_id=%s",
-                    prefix, order_side, market_id, price_cents, order_id,
+                    "%s ORDER PLACED: %s %s @ %dc -> order_id=%s cost=$%.4f",
+                    prefix, order_side, market_id, price_cents, order_id, cost_usd,
                 )
-                # Write to proof pack
+                # Write to proof pack — price_cents is int (cents), size_usd and cost_usd are float (dollars)
                 proof_data.setdefault("orders_placed", []).append({
                     "market_id": market_id,
                     "side": order_side,
-                    "price_cents": price_cents,
+                    "price_cents": price_cents,     # INTEGER — price in cents (1-99)
+                    "size_usd": optimal_size,       # FLOAT — position size in dollars
+                    "cost_usd": cost_usd,           # FLOAT — actual fill cost in dollars
                     "quantity": quantity,
                     "result": result,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -804,14 +815,15 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
                 })
         elif dry_run:
             prefix = MICRO_LIVE_LOG if mode == "micro-live" else "SHADOW MODE"
-            logger.info(f"{prefix}: Would place order on {market_id}: {order_side} ${optimal_size:.2f} @ {order_price:.4f}")
-            # Record computed-but-not-placed order in proof_data so the proof pack
-            # reflects planned activity even in shadow mode
             price_cents_shadow = int(order_price * 100)
+            cost_usd_shadow = price_cents_shadow / 100.0  # estimated cost in dollars
+            logger.info(f"{prefix}: Would place order on {market_id}: {order_side} ${optimal_size:.2f} @ {order_price:.4f} (%dc, ~$%.2f)", price_cents_shadow, cost_usd_shadow)
             proof_data.setdefault("orders_placed", []).append({
                 "market_id": market_id,
                 "side": order_side,
-                "price_cents": price_cents_shadow,
+                "price_cents": price_cents_shadow,  # INTEGER — price in cents
+                "size_usd": optimal_size,           # FLOAT — position size in dollars
+                "cost_usd": cost_usd_shadow,        # FLOAT — estimated cost in dollars
                 "quantity": 1,
                 "result": None,  # shadow mode — no real order placed
                 "timestamp": datetime.now(timezone.utc).isoformat(),

@@ -40,9 +40,20 @@ import requests
 import base64
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
-from cryptography.hazmat.primitives.asymmetric import padding
+# ---------------------------------------------------------------------------
+# Unit conversion helpers
+# ---------------------------------------------------------------------------
+
+def cents_to_usd(cents: int) -> float:
+    """Convert integer cents to dollar float. E.g., 5 -> 0.05, 99 -> 0.99."""
+    return cents / 100.0
+
+
+def usd_to_cents(dollars: Union[int, float]) -> int:
+    """Convert dollar amount to integer cents. E.g., 0.05 -> 5, 0.99 -> 99."""
+    return int(dollars * 100)
 from cryptography.hazmat.primitives import hashes, serialization
 
 logger = logging.getLogger(__name__)
