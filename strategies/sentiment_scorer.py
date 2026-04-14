@@ -114,7 +114,7 @@ def _extract_probability(raw_text: str) -> Optional[float]:
     return None
 
 
-def _call_provider(provider: dict, market_text: str) -> Optional[float]:
+def _call_provider(provider: dict, market_text: str, timeout: float = None) -> Optional[float]:
     api_key, key_name = _first_key(provider["key_envs"])
     if not api_key:
         return None
@@ -146,7 +146,7 @@ def _call_provider(provider: dict, market_text: str) -> Optional[float]:
             provider["url"],
             headers=headers,
             json=payload,
-            timeout=CALL_TIMEOUT_SECONDS,
+            timeout=timeout if timeout is not None else CALL_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
 
@@ -191,13 +191,21 @@ def _get_providers_for_tier(tier: str):
         return []
 
 
-def get_ai_prior(market_text: str, tier: str = "premium", market_ticker: str = None) -> float:
+def get_ai_prior(
+    market_text: str,
+    tier: str = "premium",
+    market_ticker: str = None,
+    timeout: float = None,
+) -> float:
     """Return calibrated YES probability in [0,1].
 
     Args:
         market_text: Market question/title text
         tier: "premium" (grok+gemini fallback), "bulk" (gemini only), "skip" (return 0.5)
         market_ticker: Optional ticker for logging
+        timeout: Per-call timeout in seconds. If provided, overrides the default
+                 CALL_TIMEOUT_SECONDS for this individual call. Useful when budget
+                 is running low and we don't want a slow provider to blow past budget.
     """
     normalized = (market_text or "").strip()
     ticker_str = f" market: {market_ticker}" if market_ticker else ""
@@ -220,7 +228,7 @@ def get_ai_prior(market_text: str, tier: str = "premium", market_ticker: str = N
         key, _ = _first_key(provider["key_envs"])
         if key:
             has_any_key = True
-        prob = _call_provider(provider, normalized)
+        prob = _call_provider(provider, normalized, timeout=timeout)
         if prob is not None:
             logger.info("[kelly] AI prior: source=%s prob=%.3f (%s%s)", provider["name"], prob, tier, ticker_str)
             return prob

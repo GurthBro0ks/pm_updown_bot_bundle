@@ -224,6 +224,23 @@ def get_venue_config(venue: str) -> dict:
 for directory in [PROOF_DIR, LOGS_DIR, PAPER_TRADING_DIR, CONFIG_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
 
+# ============================================================================
+# Stage Budgets — Per-stage wall-clock budgets (Reliability Phase 1, Module 1)
+# ============================================================================
+# Total MUST be <= 570s (600s cron timeout - 30s safety buffer)
+STAGE_BUDGETS = {
+    "pre_scan": 60,
+    "ai_cascade": 300,
+    "kelly_sizing": 60,
+    "order_submission": 120,
+    "proof_pack_write": 30,
+}
+_assert_total = sum(STAGE_BUDGETS.values())
+assert _assert_total <= 570, (
+    f"STAGE_BUDGETS total ({_assert_total}s) exceeds 570s safety limit. "
+    "Reduce stage budgets before deploying."
+)
+
 # ─── Sentiment Scorer ─────────────────────────────────────────
 SENTIMENT_PROVIDERS = ["grok_420", "glm"]  # Grok primary, GLM fallback, MiniMax disabled (insufficient balance)
 # grok_fast removed 2026-04-14 due to 70% timeout rate on api.x.ai causing cron timeout overruns. Revisit once provider recovers. See /tmp/zero_orders_diagnostic.md

@@ -111,8 +111,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def estimate_true_price(market_question: str, market_id: str, tier: str = "premium") -> float:
-    """Estimate YES probability via AI cascade; fallback to 0.5."""
+def estimate_true_price(
+    market_question: str,
+    market_id: str,
+    tier: str = "premium",
+    timeout: float = None,
+) -> float:
+    """
+    Estimate YES probability via AI cascade; fallback to 0.5.
+
+    Args:
+        market_question: Market question text.
+        market_id: Market ticker/id.
+        tier: AI tier ("premium" or "bulk").
+        timeout: Per-call timeout in seconds. If provided, passed to
+                 get_ai_prior so a slow provider call doesn't blow past budget.
+    """
     if get_ai_prior is None:
         logger.warning(
             "[kelly] AI prior: source=fallback_import_missing prob=0.500 market=%s",
@@ -121,7 +135,7 @@ def estimate_true_price(market_question: str, market_id: str, tier: str = "premi
         return 0.5
 
     try:
-        prob = float(get_ai_prior(market_question, tier=tier, market_ticker=market_id))
+        prob = float(get_ai_prior(market_question, tier=tier, market_ticker=market_id, timeout=timeout))
         if 0.0 <= prob <= 1.0:
             return prob
     except Exception as exc:
@@ -388,7 +402,15 @@ def get_edge_after_fees(market: dict, true_price: float = None) -> float:
     
     return edge_after_fees_pct
 
-def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: float = 10.0, dry_run: bool = True, min_edge_override: float = None, scratchpad=None):
+def optimize_kalshi_strategy(
+    mode: str,
+    bankroll: float = 100.0,
+    max_pos_usd: float = 10.0,
+    dry_run: bool = True,
+    min_edge_override: float = None,
+    scratchpad=None,
+    stage_budget=None,
+):
     """
     Main function for Phase 1 Kalshi optimization
 
@@ -398,6 +420,11 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
         max_pos_usd: Maximum position size
         dry_run: If True, only simulate without executing
         scratchpad: Scratchpad instance for event logging (optional)
+        stage_budget: StageBudget instance for the ai_cascade stage.
+                      If provided, budget.exhausted() is checked before each
+                      per-market prior call, and budget.remaining() is passed
+                      as the per-call timeout. On exhaustion, the cascade loop
+                      breaks with whatever priors were collected.
 
     Returns:
         Number of orders placed
@@ -544,13 +571,43 @@ def optimize_kalshi_strategy(mode: str, bankroll: float = 100.0, max_pos_usd: fl
         if bulk_count >= ai_bulk_max:
             break
 
-    for m in markets:
-        if m["_ai_tier"] != "skip":
-            m["_ai_true_price"] = estimate_true_price(
-                m.get("title", m.get("question", "")),
-                m.get("ticker", m.get("id", "?")),
-                tier=m["_ai_tier"],
+    # AI cascade loop with per-market budget check (Reliability Phase 1, Module 1)
+    cascade_markets = [m for m in markets if m.get("_ai_tier") != "skip"]
+    cascade_skipped = 0
+    for m in cascade_markets:
+        if stage_budget is not None and stage_budget.exhausted():
+            logger.warning(
+                "[budget] ai_cascade exhausted: %d/%d markets got priors, %d skipped (run_id=%s)",
+                len([x for x in cascade_markets if x.get("_ai_true_price", None) is not None]),
+                len(cascade_markets),
+                cascade_skipped,
+                getattr(stage_budget, "_cron_run_id", "n/a"),
             )
+            if stage_budget is not None:
+                stage_budget._items_skipped += (len(cascade_markets) - cascade_skipped)
+            if scratchpad is not None:
+                scratchpad.log(
+                    "cascade_budget_exhausted",
+                    stage="ai_cascade",
+                    markets_with_priors=len([x for x in cascade_markets if x.get("_ai_true_price", 0.5) != 0.5]),
+                    markets_total=len(cascade_markets),
+                    cron_run_id=getattr(stage_budget, "_cron_run_id", "n/a"),
+                )
+            break
+
+        per_call_timeout = stage_budget.remaining() if stage_budget else None
+        m["_ai_true_price"] = estimate_true_price(
+            m.get("title", m.get("question", "")),
+            m.get("ticker", m.get("id", "?")),
+            tier=m["_ai_tier"],
+            timeout=per_call_timeout,
+        )
+        if stage_budget is not None:
+            stage_budget.mark_processed()
+    else:
+        # Loop completed normally (no break)
+        if stage_budget is not None:
+            stage_budget._items_skipped = 0
     
     # Calculate optimal order size using only markets with real AI priors
     ai_markets = [m for m in markets if m.get("_ai_true_price", 0.5) != 0.5]

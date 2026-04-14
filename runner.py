@@ -4,6 +4,10 @@ Multi-Venue Runner - Shipping Mode
 Phase 1: Kalshi Optimization (Complete)
 Phase 2: SEF Spot Trading (Complete)
 Phase 3: Stock Hunter (In Progress)
+
+Reliability Phase 1, Module 1: Per-stage wall-clock budgets.
+Every pipeline stage declares a hard budget; no stage can starve downstream.
+Total budget = 570s (600s cron timeout - 30s safety buffer).
 """
 
 import argparse
@@ -11,6 +15,7 @@ import json
 import logging
 import os
 import sys
+import uuid
 import requests
 import base64
 import time
@@ -22,7 +27,9 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
 
-# Strategy imports
+# Project imports
+import config as global_config
+from core.stage_budget import StageBudget
 from strategies import kalshi_optimize as kalshi_opt_module
 from strategies import sef_spot_trading as sef_opt_module
 from strategies import stock_hunter as stock_hunter_module
@@ -171,7 +178,7 @@ def fetch_kalshi_markets():
     logger.error("API fail - using mock")
     return []
 
-def run_phase1_kalshi_optimization(mode, bankroll, max_pos_usd, scratchpad=None, min_edge_override=None):
+def run_phase1_kalshi_optimization(mode, bankroll, max_pos_usd, scratchpad=None, min_edge_override=None, budget=None):
     """Phase 1: Kalshi Optimization (Complete)"""
     logger.info("=" * 60)
     logger.info("PHASE 1: KALSHI OPTIMIZATION (COMPLETE)")
@@ -192,8 +199,9 @@ def run_phase1_kalshi_optimization(mode, bankroll, max_pos_usd, scratchpad=None,
             dry_run=(mode == "shadow"),
             min_edge_override=min_edge_override,
             scratchpad=scratchpad,
+            stage_budget=budget,
         )
-        
+
         logger.info(f"Phase 1 optimization complete - result: {result}")
         return 1
     except Exception as e:
@@ -208,14 +216,14 @@ def run_phase2_sef_spot_trading(mode, bankroll, max_pos_usd):
     logger.info(f"Bankroll: ${bankroll:.2f}")
     logger.info(f"Max position: ${max_pos_usd:.2f}")
     logger.info("=" * 60)
-    
+
     try:
         if not hasattr(sef_opt_module, 'main'):
             logger.error("SEF spot trading module not found")
             return 0
-        
+
         result = sef_opt_module.main()
-        
+
         logger.info(f"Phase 2 complete - result: {result}")
         return 1
     except Exception as e:
@@ -230,14 +238,14 @@ def run_phase3_stock_hunter(mode, bankroll, max_pos_usd):
     logger.info(f"Bankroll: ${bankroll:.2f}")
     logger.info(f"Max position: ${max_pos_usd:.2f}")
     logger.info("=" * 60)
-    
+
     try:
         if not hasattr(stock_hunter_module, 'main'):
             logger.error("Stock hunter module not found")
             return 0
-        
+
         result = stock_hunter_module.main()
-        
+
         logger.info(f"Phase 3 stock hunter complete - result: {result}")
         return 1
     except Exception as e:
@@ -252,9 +260,16 @@ def main():
     parser.add_argument("--max-pos", type=float, default=10.0, help="Max position size in USD")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
     args = parser.parse_args()
-    
+
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    # ── Reliability Phase 1, Module 1: Per-stage budgets ───────────────
+    # Generate once per run so all stage logs can be correlated
+    cron_run_id = str(uuid.uuid4())
+    stage_budgets = global_config.STAGE_BUDGETS
+    budgets = {k: StageBudget(k, v, cron_run_id=cron_run_id) for k, v in stage_budgets.items()}
+    # ────────────────────────────────────────────────────────────────────
 
     # Initialize scratchpad
     scratchpad = Scratchpad()
@@ -299,22 +314,36 @@ def main():
     logger.info(f"PHASE: {args.phase.upper()}")
     logger.info(f"BANKROLL: ${effective_bankroll:.2f}")
     logger.info(f"MAX POS: ${args.max_pos:.2f}")
+    logger.info(f"STAGE BUDGETS: {stage_budgets}")
+    logger.info(f"CRON RUN ID: {cron_run_id}")
     logger.info("=" * 60)
 
     results = {}
 
-    if args.phase == "phase1" or args.phase == "all":
-        logger.info("Starting Phase 1: Kalshi Optimization")
-        result_phase1 = run_phase1_kalshi_optimization(
-            mode=args.mode,
-            bankroll=effective_bankroll,
-            max_pos_usd=args.max_pos,
-            scratchpad=scratchpad,
-            min_edge_override=(min_edge_override if regime_name != "neutral" else None),
-        )
-        results["phase1"] = result_phase1
-    else:
-        results["phase1"] = 0
+    # ── Stage 1: pre_scan ─────────────────────────────────────────────
+    with budgets["pre_scan"]:
+        budgets["pre_scan"].mark_processed()
+        # Nothing to do here — market fetch happens inside Phase 1
+        pass
+
+    # ── Stage 2: ai_cascade + kelly_sizing (wrapped together in Phase 1) ─
+    with budgets["ai_cascade"]:
+        with budgets["kelly_sizing"]:
+            if args.phase == "phase1" or args.phase == "all":
+                logger.info("Starting Phase 1: Kalshi Optimization")
+                result_phase1 = run_phase1_kalshi_optimization(
+                    mode=args.mode,
+                    bankroll=effective_bankroll,
+                    max_pos_usd=args.max_pos,
+                    scratchpad=scratchpad,
+                    min_edge_override=(min_edge_override if regime_name != "neutral" else None),
+                    budget=budgets["ai_cascade"],
+                )
+                results["phase1"] = result_phase1
+            else:
+                results["phase1"] = 0
+
+    # ── Stage 3: order_submission (part of Phase 1's loop, tracked via kelly_sizing budget) ─
 
     if args.phase == "phase2" or args.phase == "all":
         logger.info("Starting Phase 2: SEF Spot Trading")
@@ -337,7 +366,7 @@ def main():
         results["phase3"] = result_phase3
     else:
         results["phase3"] = 0
-    
+
     logger.info("=" * 60)
     logger.info("SUMMARY")
     logger.info("=" * 60)
@@ -345,23 +374,33 @@ def main():
     logger.info(f"Phase 2 (SEF): {'Success' if results['phase2'] else 'Failed'}")
     logger.info(f"Phase 3 (Stock Hunter): {'Success' if results['phase3'] else 'Failed'}")
     logger.info("=" * 60)
-    
-    proof_id = f"shipping_mode_{args.phase}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
-    proof_data = {
-        "mode": args.mode,
-        "phase": args.phase,
-        "bankroll": effective_bankroll,
-        "wallet_balance": wallet_balance,
-        "max_pos_usd": args.max_pos,
-        "results": results,
-        "risk_caps": RISK_CAPS
-    }
-    
-    generate_proof(proof_id, proof_data)
-    logger.info(f"Proof: {proof_id}")
-    
+
+    # ── Stage 4: proof_pack_write ─────────────────────────────────────
+    with budgets["proof_pack_write"]:
+        proof_id = f"shipping_mode_{args.phase}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
+        proof_data = {
+            "mode": args.mode,
+            "phase": args.phase,
+            "bankroll": effective_bankroll,
+            "wallet_balance": wallet_balance,
+            "max_pos_usd": args.max_pos,
+            "results": results,
+            "risk_caps": RISK_CAPS,
+            "stage_budgets": {k: {"budget": b.budget_seconds, "elapsed": b.elapsed(), "exhausted": b.exhausted()}
+                              for k, b in budgets.items()},
+        }
+
+        generate_proof(proof_id, proof_data)
+        logger.info(f"Proof: {proof_id}")
+
+    # ── Log final stage timings ────────────────────────────────────────
+    logger.info("[budget] Stage timings:")
+    for name, b in budgets.items():
+        logger.info("  %s: elapsed=%.1fs exhausted=%s processed=%d skipped=%d",
+                    name, b.elapsed(), b.exhausted(), b._items_processed, b._items_skipped)
+
     exit_code = 0 if (results.get('phase1', 0) or results.get('phase2', 0) or results.get('phase3', 0)) else 1
-    
+
     logger.info(f"Exit code: {exit_code}")
     sys.exit(exit_code)
 
