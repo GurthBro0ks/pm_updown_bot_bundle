@@ -247,3 +247,12 @@ SENTIMENT_PROVIDERS = ["grok_420", "glm"]  # Grok primary, GLM fallback, MiniMax
 # PRODUCTION: ["grok_420", "grok_fast", "minimax", "glm"]
 SENTIMENT_MAX_MARKETS = 50
 SENTIMENT_CACHE_TTL = 600
+
+# ─── Canary Configuration — Reliability Phase 1, Module 4 ─────────────────────
+# Pre-run health check: validates full stack in <=30s before burning cron budget.
+# A canary failure means "abort this cron run", not "abort the bot".
+CANARY_ENABLED = True
+CANARY_TICKER = "KXINXY-26DEC31H1600-B5700"  # S&P 500 Dec 31 2026 in [5600,5799.99] range — stable fixture with volume
+CANARY_BUDGET_SECONDS = 30  # Total wall-clock budget for all checks combined
+CANARY_QUESTION = "Will the S&P 500 close above 5000 on December 31, 2026?"
+CANARY_ABORT_ON_FAILURE = True  # If False, log warning but proceed with the run

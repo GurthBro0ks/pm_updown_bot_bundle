@@ -30,6 +30,7 @@ from cryptography.hazmat.primitives import hashes
 # Project imports
 import config as global_config
 from core.stage_budget import StageBudget
+from core.canary import run_canary, CanaryFailure
 from strategies import kalshi_optimize as kalshi_opt_module
 from strategies import sef_spot_trading as sef_opt_module
 from strategies import stock_hunter as stock_hunter_module
@@ -263,6 +264,27 @@ def main():
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    # ── Reliability Phase 1, Module 4: Pre-run Canary Check ──────────────
+    # Runs BEFORE stage budgets to catch degraded stack early.
+    # Canary time (30s) is OUTSIDE the 570s stage budget envelope.
+    if global_config.CANARY_ENABLED:
+        logger.info("[canary] Running pre-run canary check (budget=%.1fs)...", global_config.CANARY_BUDGET_SECONDS)
+        canary_passed, canary_results = run_canary()
+        if not canary_passed and global_config.CANARY_ABORT_ON_FAILURE:
+            failed = next((r for r in canary_results if not r.passed), None)
+            logger.error(
+                "[canary] ABORTING RUN — check '%s' failed: %s",
+                failed.check_name if failed else "unknown",
+                failed.error if failed else "unknown",
+            )
+            logger.error("[canary] Full results: %s", [
+                {"check": r.check_name, "passed": r.passed, "elapsed": r.elapsed_seconds, "error": r.error}
+                for r in canary_results
+            ])
+            sys.exit(2)
+        logger.info("[canary] Canary passed — proceeding to stage budgets")
+    # ────────────────────────────────────────────────────────────────────
 
     # ── Reliability Phase 1, Module 1: Per-stage budgets ───────────────
     # Generate once per run so all stage logs can be correlated
