@@ -258,3 +258,19 @@ CANARY_TICKER = "KXINXY-26DEC31H1600-B5700"  # S&P 500 Dec 31 2026 in [5600,5799
 CANARY_BUDGET_SECONDS = 30  # Total wall-clock budget for all checks combined
 CANARY_QUESTION = "Will the S&P 500 close above 5000 on December 31, 2026?"
 CANARY_ABORT_ON_FAILURE = True  # If False, log warning but proceed with the run
+
+# ─── Circuit Breaker Configuration — Reliability Phase 1, Module 2 ──────────
+CIRCUIT_BREAKER_ENABLED = True
+CIRCUIT_BREAKER_PATH = RUNTIME_DIR / "circuit_breakers.json"
+CIRCUIT_BREAKER_DEFAULTS = {
+    "window_size": 20,
+    "failure_threshold": 0.5,
+    "cooldown_seconds": 300,
+    "min_calls_before_opening": 20,
+}
+PROVIDER_CALL_TIMEOUTS = {
+    "grok_420": 10,
+    "grok_fast": 8,
+    "gemini": 10,
+    "glm": 10,
+}

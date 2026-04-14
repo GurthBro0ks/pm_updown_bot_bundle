@@ -36,6 +36,7 @@ from strategies import kalshi_optimize as kalshi_opt_module
 from strategies import sef_spot_trading as sef_opt_module
 from strategies import stock_hunter as stock_hunter_module
 from strategies import fear_regime
+from strategies.sentiment_scorer import save_all_breakers, log_breaker_summaries
 from utils.kalshi import get_kalshi_balance
 from utils.scratchpad import Scratchpad
 
@@ -396,6 +397,14 @@ def main():
         )
     except Exception as e:
         logger.warning("[cursor] Failed to advance/save cursor: %s", e)
+    # ────────────────────────────────────────────────────────────────────
+
+    # ── Save circuit breaker state after cascade (Module 2) ─────────
+    try:
+        save_all_breakers()
+        log_breaker_summaries(scratchpad, cron_run_id)
+    except Exception as e:
+        logger.warning("[breaker] Post-cascade save failed: %s", e)
     # ────────────────────────────────────────────────────────────────────
 
     # ── Stage 3: order_submission (part of Phase 1's loop, tracked via kelly_sizing budget) ─

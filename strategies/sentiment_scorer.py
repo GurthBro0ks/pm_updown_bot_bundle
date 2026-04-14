@@ -8,6 +8,7 @@ Cascade order:
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import os
@@ -30,6 +31,21 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 CALL_TIMEOUT_SECONDS = 25
+
+
+class RateLimitError(Exception):
+    pass
+
+
+def _scratchpad_instance():
+    from utils.scratchpad import Scratchpad
+    return Scratchpad()
+
+
+try:
+    from core.circuit_breaker import BreakerState as BreakerState_v2
+except Exception:
+    BreakerState_v2 = None
 
 PROVIDERS = (
     {
@@ -56,6 +72,77 @@ PROVIDERS = (
 TIER_PREMARY_PROVIDER = os.getenv("AI_PRIMARY_PROVIDER", "grok_fast")
 TIER_PREMIUM_PROVIDER = os.getenv("AI_PREMIUM_PROVIDER", "grok_fast")
 TIER_PREMIUM_MAX = int(os.getenv("AI_PREMIUM_MAX", "10"))
+
+# ── Circuit Breaker Setup (Module 2) ──────────────────────────────
+_breakers = {}
+_guarded_providers = {}
+
+def _init_circuit_breakers():
+    global _breakers, _guarded_providers
+    try:
+        from core.circuit_breaker import load_breakers, get_breaker, BreakerConfig
+        from core.provider_wrapper import GuardedProvider, ai_prior_validator
+        import config as _cfg
+
+        if not _cfg.CIRCUIT_BREAKER_ENABLED:
+            return
+
+        defaults = _cfg.CIRCUIT_BREAKER_DEFAULTS
+        _breakers = load_breakers(
+            _cfg.CIRCUIT_BREAKER_PATH,
+            default_config=BreakerConfig(name="__default__", **defaults),
+        )
+
+        for provider in PROVIDERS:
+            cfg = BreakerConfig(name=provider["name"], **defaults)
+            breaker = get_breaker(provider["name"], _breakers, cfg)
+            call_fn = functools.partial(_call_provider_unwrapped, provider)
+            timeout = _cfg.PROVIDER_CALL_TIMEOUTS.get(provider["name"], CALL_TIMEOUT_SECONDS)
+            gp = GuardedProvider(
+                provider_name=provider["name"],
+                call_fn=call_fn,
+                validator=ai_prior_validator,
+                breaker=breaker,
+                per_call_timeout=timeout,
+                skip_exception_types=(RateLimitError,),
+            )
+            _guarded_providers[provider["name"]] = gp
+            gp.reset_run_stats()
+        logger.info("[breaker] Initialized %d guarded providers", len(_guarded_providers))
+    except Exception as e:
+        logger.warning("[breaker] Init failed (%s), breakers disabled", e)
+
+
+def save_all_breakers():
+    try:
+        from core.circuit_breaker import save_breakers
+        import config as _cfg
+        if _breakers and _cfg.CIRCUIT_BREAKER_ENABLED:
+            save_breakers(_breakers, _cfg.CIRCUIT_BREAKER_PATH)
+            logger.info("[breaker] Saved %d breaker states", len(_breakers))
+    except Exception as e:
+        logger.warning("[breaker] save_all_breakers failed: %s", e)
+
+
+def log_breaker_summaries(scratchpad, cron_run_id: str):
+    try:
+        for name, gp in _guarded_providers.items():
+            summary = gp.get_run_summary()
+            if scratchpad is not None:
+                scratchpad.log(
+                    "breaker_summary",
+                    cron_run_id=cron_run_id,
+                    provider_name=name,
+                    calls_this_run=summary["calls_this_run"],
+                    successes_this_run=summary["successes_this_run"],
+                    failures_this_run=summary["failures_this_run"],
+                    short_circuits_this_run=summary["short_circuits_this_run"],
+                    avg_latency_seconds=summary["avg_latency_seconds"],
+                    final_state=summary["final_state"],
+                    success_rate=summary["success_rate"],
+                )
+    except Exception as e:
+        logger.warning("[breaker] log_breaker_summaries failed: %s", e)
 
 PROMPT_SYSTEM = (
     "You estimate prediction market YES probabilities. "
@@ -176,6 +263,60 @@ def _call_provider(provider: dict, market_text: str, timeout: float = None) -> O
         return None
 
 
+def _call_provider_unwrapped(provider: dict, market_text: str, timeout: float = None) -> float:
+    api_key, key_name = _first_key(provider["key_envs"])
+    if not api_key:
+        raise ValueError(f"No API key for {provider['name']}")
+
+    payload = {
+        "model": provider["model"],
+        "messages": [
+            {"role": "system", "content": PROMPT_SYSTEM},
+            {
+                "role": "user",
+                "content": (
+                    "Market text:\n"
+                    f"{market_text}\n\n"
+                    "Return a calibrated YES probability only as JSON."
+                ),
+            },
+        ],
+        "temperature": 0.0,
+        "max_tokens": 500,
+    }
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    response = requests.post(
+        provider["url"],
+        headers=headers,
+        json=payload,
+        timeout=timeout if timeout is not None else CALL_TIMEOUT_SECONDS,
+    )
+
+    if response.status_code == 429:
+        raise RateLimitError(f"Rate limited: {provider['name']}")
+
+    response.raise_for_status()
+
+    data = response.json()
+    content = (
+        data.get("choices", [{}])[0]
+        .get("message", {})
+        .get("content", "")
+    )
+    prob = _extract_probability(content)
+    if prob is None:
+        raise ValueError(f"Parse failure: {provider['name']}: {content[:200]}")
+    return prob
+
+
+_init_circuit_breakers()
+
+
 def _get_providers_for_tier(tier: str):
     """Return ordered provider list based on cost tier."""
     if tier == "bulk":
@@ -223,6 +364,57 @@ def get_ai_prior(
         logger.info("[kelly] AI prior: source=rate_limited prob=0.500 (skipped%s)", ticker_str)
         return 0.5
 
+    # ── Circuit breaker path ──────────────────────────────────────
+    if _guarded_providers:
+        provider_names = [p["name"] for p in providers]
+        has_any_key = any(_first_key(p["key_envs"])[0] for p in providers)
+        all_short_circuit = True
+        provider_states = {}
+
+        for pname in provider_names:
+            gp = _guarded_providers.get(pname)
+            if gp is None:
+                continue
+            result, status = gp.call(normalized, timeout=timeout)
+            provider_states[pname] = gp.breaker.state.name
+
+            if status == "short_circuit":
+                continue
+            if status == "rate_limit":
+                continue
+
+            all_short_circuit = False
+
+            if status == "success" and result is not None:
+                logger.info("[kelly] AI prior: source=%s prob=%.3f (%s%s)", pname, result, tier, ticker_str)
+                return result
+
+        # All providers failed or short-circuited
+        all_open = all(
+            _guarded_providers.get(pn) and
+            _guarded_providers[pn].breaker.state in (BreakerState_v2.OPEN, BreakerState_v2.HALF_OPEN)
+            for pn in provider_names
+            if pn in _guarded_providers
+        ) if provider_names else False
+
+        if all_short_circuit:
+            logger.warning("[kelly] cascade_all_providers_down: all short-circuited%s ticker=%s", ticker_str, market_ticker)
+            try:
+                _scratchpad_instance().log(
+                    "cascade_all_providers_down",
+                    ticker=market_ticker,
+                    provider_states=provider_states,
+                )
+            except Exception:
+                pass
+
+        if not has_any_key:
+            logger.warning("[kelly] AI prior: source=fallback_no_keys prob=0.500%s", ticker_str)
+        else:
+            logger.warning("[kelly] AI prior: source=fallback_all_failed prob=0.500%s", ticker_str)
+        return 0.5
+
+    # ── Legacy path (no circuit breakers) ─────────────────────────
     has_any_key = False
     for provider in providers:
         key, _ = _first_key(provider["key_envs"])
