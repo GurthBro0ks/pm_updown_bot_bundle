@@ -11,8 +11,8 @@ source .env 2>/dev/null
 set +a
 export DEBATE_MODE=true
 
-# Run with timeout (10 min max)
-timeout 600 ./venv/bin/python3 runner.py --mode micro-live --phase phase1 \
+# Run with timeout (10.5 min max)
+timeout 630 ./venv/bin/python3 runner.py --mode micro-live --phase phase1 \
     >> logs/cron_micro_live.log 2>&1
 
 # Log completion

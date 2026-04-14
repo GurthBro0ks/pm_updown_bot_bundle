@@ -31,6 +31,7 @@ from cryptography.hazmat.primitives import hashes
 import config as global_config
 from core.stage_budget import StageBudget
 from core.canary import run_canary, CanaryFailure
+from core.market_cursor import MarketCursor, load_cursor, save_cursor, compute_list_hash, rotate_markets, advance_cursor
 from strategies import kalshi_optimize as kalshi_opt_module
 from strategies import sef_spot_trading as sef_opt_module
 from strategies import stock_hunter as stock_hunter_module
@@ -179,7 +180,7 @@ def fetch_kalshi_markets():
     logger.error("API fail - using mock")
     return []
 
-def run_phase1_kalshi_optimization(mode, bankroll, max_pos_usd, scratchpad=None, min_edge_override=None, budget=None):
+def run_phase1_kalshi_optimization(mode, bankroll, max_pos_usd, scratchpad=None, min_edge_override=None, budget=None, cursor=None):
     """Phase 1: Kalshi Optimization (Complete)"""
     logger.info("=" * 60)
     logger.info("PHASE 1: KALSHI OPTIMIZATION (COMPLETE)")
@@ -191,9 +192,9 @@ def run_phase1_kalshi_optimization(mode, bankroll, max_pos_usd, scratchpad=None,
     try:
         if not hasattr(kalshi_opt_module, 'optimize_kalshi_strategy'):
             logger.error("Kalshi optimization module not found")
-            return 0
+            return 1, 0, 0
 
-        result = kalshi_opt_module.optimize_kalshi_strategy(
+        result, markets_processed, total_markets = kalshi_opt_module.optimize_kalshi_strategy(
             mode=mode,
             bankroll=bankroll,
             max_pos_usd=max_pos_usd,
@@ -201,13 +202,14 @@ def run_phase1_kalshi_optimization(mode, bankroll, max_pos_usd, scratchpad=None,
             min_edge_override=min_edge_override,
             scratchpad=scratchpad,
             stage_budget=budget,
+            cursor=cursor,
         )
 
         logger.info(f"Phase 1 optimization complete - result: {result}")
-        return 1
+        return 1, markets_processed, total_markets
     except Exception as e:
         logger.error(f"Phase 1 error: {str(e)}")
-        return 0
+        return 0, 0, 0
 
 def run_phase2_sef_spot_trading(mode, bankroll, max_pos_usd):
     """Phase 2: SEF Spot Trading (Complete)"""
@@ -342,6 +344,14 @@ def main():
 
     results = {}
 
+    # ── Reliability Phase 1, Module 1.5: Rotating market cursor ────────
+    cursor_path = global_config.MARKET_CURSOR_PATH
+    cursor = load_cursor(cursor_path)
+    cursor_index_before = cursor.index
+    logger.info("[cursor] Loaded: index=%d hash=%s rotations=%d",
+                cursor.index, cursor.list_hash[:12] if cursor.list_hash else "(none)", cursor.total_rotations)
+    # ────────────────────────────────────────────────────────────────────
+
     # ── Stage 1: pre_scan ─────────────────────────────────────────────
     with budgets["pre_scan"]:
         budgets["pre_scan"].mark_processed()
@@ -353,17 +363,40 @@ def main():
         with budgets["kelly_sizing"]:
             if args.phase == "phase1" or args.phase == "all":
                 logger.info("Starting Phase 1: Kalshi Optimization")
-                result_phase1 = run_phase1_kalshi_optimization(
+                result_phase1, markets_processed, total_markets = run_phase1_kalshi_optimization(
                     mode=args.mode,
                     bankroll=effective_bankroll,
                     max_pos_usd=args.max_pos,
                     scratchpad=scratchpad,
                     min_edge_override=(min_edge_override if regime_name != "neutral" else None),
                     budget=budgets["ai_cascade"],
+                    cursor=cursor,
                 )
                 results["phase1"] = result_phase1
             else:
                 results["phase1"] = 0
+                markets_processed = 0
+                total_markets = 0
+
+    # ── Advance cursor after cascade (Module 1.5) ─────────────────────
+    try:
+        cursor_after = advance_cursor(cursor, markets_processed, total_markets)
+        save_cursor(cursor_after, cursor_path)
+        logger.info("[cursor] Advanced: index=%d->%d processed=%d total=%d rotations=%d",
+                    cursor_index_before, cursor_after.index, markets_processed, total_markets, cursor_after.total_rotations)
+        scratchpad.log(
+            "cursor_advance",
+            cron_run_id=cron_run_id,
+            index_before=cursor_index_before,
+            index_after=cursor_after.index,
+            markets_processed=markets_processed,
+            total_markets=total_markets,
+            rotations_completed=cursor_after.total_rotations,
+            hash_changed=False,
+        )
+    except Exception as e:
+        logger.warning("[cursor] Failed to advance/save cursor: %s", e)
+    # ────────────────────────────────────────────────────────────────────
 
     # ── Stage 3: order_submission (part of Phase 1's loop, tracked via kelly_sizing budget) ─
 

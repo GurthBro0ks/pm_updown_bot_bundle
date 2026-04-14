@@ -53,6 +53,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Runtime state (cursor, etc.)
+runtime/
+
 # Test artifacts
 test_*.json
 test_output/

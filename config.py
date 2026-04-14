@@ -182,6 +182,8 @@ PROOF_DIR = BASE_DIR / "proofs"
 LOGS_DIR = BASE_DIR / "logs"
 PAPER_TRADING_DIR = BASE_DIR / "paper_trading"
 CONFIG_DIR = BASE_DIR / "config"
+RUNTIME_DIR = Path(os.getenv("RUNTIME_DIR", "/home/slimy/runtime"))
+MARKET_CURSOR_PATH = RUNTIME_DIR / "market_cursor.json"
 
 PAPER_BALANCE_FILE = PAPER_TRADING_DIR / "paper_balance.json"
 TRADE_LOG_FILE = PAPER_TRADING_DIR / "trade_log.json"

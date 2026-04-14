@@ -26,6 +26,12 @@ except Exception:
     get_ai_prior = None
 
 try:
+    from core.market_cursor import rotate_markets as _rotate_markets, compute_list_hash as _compute_list_hash
+except Exception:
+    _rotate_markets = None
+    _compute_list_hash = None
+
+try:
     from strategies.contract_signals import (
         compute_momentum,
         compute_zscore,
@@ -410,6 +416,7 @@ def optimize_kalshi_strategy(
     min_edge_override: float = None,
     scratchpad=None,
     stage_budget=None,
+    cursor=None,
 ):
     """
     Main function for Phase 1 Kalshi optimization
@@ -475,6 +482,40 @@ def optimize_kalshi_strategy(
     
     # Filter for liquidity
     markets = filter_low_liquidity_markets(markets, min_liquidity_usd=0.0, max_trades=20)
+
+    # ── Rotating market cursor (Reliability Phase 1, Module 1.5) ──────
+    cursor_hash_changed = False
+    if cursor is not None and _rotate_markets is not None:
+        result = _rotate_markets(markets, cursor)
+        rotated_markets, updated_cursor, cursor_hash_changed = result
+        cursor.index = updated_cursor.index
+        cursor.list_hash = updated_cursor.list_hash
+        cursor.total_rotations = updated_cursor.total_rotations
+        if cursor_hash_changed:
+            logger.warning(
+                "[cursor] Market list hash changed, reset cursor to 0 (run_id=%s)",
+                getattr(stage_budget, "_cron_run_id", "n/a"),
+            )
+            if scratchpad is not None:
+                scratchpad.log(
+                    "cursor_reset",
+                    cron_run_id=getattr(stage_budget, "_cron_run_id", "n/a"),
+                    old_hash=result[1].list_hash if cursor_hash_changed else cursor.list_hash,
+                    new_hash=updated_cursor.list_hash,
+                    reason="list_changed",
+                )
+        markets = rotated_markets
+        logger.info("[cursor] Rotation applied: index=%d list_size=%d", updated_cursor.index, len(markets))
+        if scratchpad is not None:
+            scratchpad.log(
+                "cursor_state",
+                cron_run_id=getattr(stage_budget, "_cron_run_id", "n/a"),
+                index=updated_cursor.index,
+                list_hash=updated_cursor.list_hash,
+                total_rotations=updated_cursor.total_rotations,
+                list_size=len(markets),
+            )
+    # ────────────────────────────────────────────────────────────────────
 
     # Pre-dedup: exclude markets we already own or have open orders on
     if is_live:
@@ -574,6 +615,7 @@ def optimize_kalshi_strategy(
     # AI cascade loop with per-market budget check (Reliability Phase 1, Module 1)
     cascade_markets = [m for m in markets if m.get("_ai_tier") != "skip"]
     cascade_skipped = 0
+    cascade_attempted = 0
     for m in cascade_markets:
         if stage_budget is not None and stage_budget.exhausted():
             logger.warning(
@@ -602,6 +644,7 @@ def optimize_kalshi_strategy(
             tier=m["_ai_tier"],
             timeout=per_call_timeout,
         )
+        cascade_attempted += 1
         if stage_budget is not None:
             stage_budget.mark_processed()
     else:
@@ -947,7 +990,7 @@ def optimize_kalshi_strategy(
     
     logger.info(f"Proof: {proof_id}")
     
-    return 0
+    return 0, cascade_attempted, len(markets)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Kalshi Optimization - Phase 1 (Quick Wins)")
@@ -960,7 +1003,7 @@ if __name__ == "__main__":
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
     
-    exit_code = optimize_kalshi_strategy(
+    exit_code, _, _ = optimize_kalshi_strategy(
         mode=args.mode,
         bankroll=args.bankroll,
         max_pos_usd=args.max_pos,
