@@ -30,6 +30,12 @@ logger = logging.getLogger(__name__)
 
 CALL_TIMEOUT_SECONDS = 25
 
+_last_prior_was_fallback = False
+
+
+def was_last_prior_fallback():
+    return _last_prior_was_fallback
+
 
 class RateLimitError(Exception):
     pass
@@ -94,7 +100,7 @@ def _build_providers():
 PROVIDERS = _build_providers()
 
 # Cost-aware tier config
-TIER_PREMARY_PROVIDER = os.getenv("AI_PRIMARY_PROVIDER", "grok_420")
+TIER_PREMARY_PROVIDER = os.getenv("AI_PRIMARY_PROVIDER", "gemini")
 TIER_PREMIUM_PROVIDER = os.getenv("AI_PREMIUM_PROVIDER", "grok_420")
 TIER_PREMIUM_MAX = int(os.getenv("AI_PREMIUM_MAX", "10"))
 
@@ -378,15 +384,19 @@ def get_ai_prior(
 
     if tier == "skip":
         logger.info("[kelly] AI prior: source=rate_limited prob=0.500 (skipped%s)", ticker_str)
+        global _last_prior_was_fallback
+        _last_prior_was_fallback = True
         return 0.5
 
     if not normalized:
         logger.warning("[kelly] AI prior: source=fallback_empty prob=0.500%s", ticker_str)
+        _last_prior_was_fallback = True
         return 0.5
 
     providers = _get_providers_for_tier(tier)
     if not providers:
         logger.info("[kelly] AI prior: source=rate_limited prob=0.500 (skipped%s)", ticker_str)
+        _last_prior_was_fallback = True
         return 0.5
 
     # ── Circuit breaker path ──────────────────────────────────────
@@ -412,6 +422,7 @@ def get_ai_prior(
 
             if status == "success" and result is not None:
                 logger.info("[kelly] AI prior: source=%s prob=%.3f (%s%s)", pname, result, tier, ticker_str)
+                _last_prior_was_fallback = False
                 return result
 
         # All providers failed or short-circuited
@@ -437,6 +448,7 @@ def get_ai_prior(
             logger.warning("[kelly] AI prior: source=fallback_no_keys prob=0.500%s", ticker_str)
         else:
             logger.warning("[kelly] AI prior: source=fallback_all_failed prob=0.500%s", ticker_str)
+        _last_prior_was_fallback = True
         return 0.5
 
     # ── Legacy path (no circuit breakers) ─────────────────────────
@@ -448,12 +460,14 @@ def get_ai_prior(
         prob = _call_provider(provider, normalized, timeout=timeout)
         if prob is not None:
             logger.info("[kelly] AI prior: source=%s prob=%.3f (%s%s)", provider["name"], prob, tier, ticker_str)
+            _last_prior_was_fallback = False
             return prob
 
     if not has_any_key:
         logger.warning("[kelly] AI prior: source=fallback_no_keys prob=0.500%s", ticker_str)
     else:
         logger.warning("[kelly] AI prior: source=fallback_all_failed prob=0.500%s", ticker_str)
+    _last_prior_was_fallback = True
     return 0.5
 
 

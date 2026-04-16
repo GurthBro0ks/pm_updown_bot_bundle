@@ -21,9 +21,10 @@ sys.path.insert(0, '/opt/slimy/pm_updown_bot_bundle')
 from utils.proof import generate_proof
 from utils.kalshi import fetch_kalshi_markets
 try:
-    from strategies.sentiment_scorer import get_ai_prior
+    from strategies.sentiment_scorer import get_ai_prior, was_last_prior_fallback as _was_last_prior_fallback
 except Exception:
     get_ai_prior = None
+    _was_last_prior_fallback = None
 
 try:
     from core.market_cursor import rotate_markets as _rotate_markets, compute_list_hash as _compute_list_hash
@@ -56,7 +57,7 @@ def check_micro_live_gates(market, size, price, risk_caps, venue, computed_edge_
                            this takes precedence over market.get("edge_pct").
     Returns: (passed: bool, violations: list)
     """
-    from config import MIN_PRICE_CENTS
+    from config import MIN_PRICE_CENTS, SKIP_FALLBACK_PRIORS
     violations = []
 
     # Gate 0: Minimum price floor (Becker trap protection)
@@ -65,6 +66,13 @@ def check_micro_live_gates(market, size, price, risk_caps, venue, computed_edge_
         violations.append(
             f"[GATE] Rejected {market.get('ticker', market.get('id', '?'))}: "
             f"price {price_cents}c < {MIN_PRICE_CENTS}c minimum floor (Becker trap protection)"
+        )
+
+    # Gate F: Fallback prior rejection
+    if SKIP_FALLBACK_PRIORS and market.get("_ai_prior_is_fallback"):
+        violations.append(
+            f"[GATE] Rejected {market.get('ticker', market.get('id', '?'))}: "
+            f"fallback prior (cascade failed, no real AI view)"
         )
 
     # Gate 1: Position size limit
@@ -653,6 +661,10 @@ def optimize_kalshi_strategy(
             tier=m["_ai_tier"],
             timeout=per_call_timeout,
         )
+        if _was_last_prior_fallback is not None:
+            m["_ai_prior_is_fallback"] = _was_last_prior_fallback()
+        else:
+            m["_ai_prior_is_fallback"] = (m["_ai_true_price"] == 0.5)
         cascade_attempted += 1
         if stage_budget is not None:
             stage_budget.mark_processed()
@@ -848,6 +860,13 @@ def optimize_kalshi_strategy(
                             gate_name="min_price_floor",
                             price_cents=int(round(yes_price * 100)),
                             reason=v,
+                        )
+                    if "fallback prior" in v:
+                        scratchpad.log(
+                            "gate_rejection",
+                            ticker=market_id,
+                            gate_name="fallback_prior",
+                            reason="cascade_failed",
                         )
             continue
         

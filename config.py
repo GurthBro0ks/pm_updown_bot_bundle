@@ -244,10 +244,12 @@ assert _assert_total <= 570, (
 )
 
 # ─── Sentiment Scorer ─────────────────────────────────────────
-SENTIMENT_PROVIDERS = ["grok_420", "gemini"]  # grok_420 primary (reasoning), gemini fallback (fast, cheap)
+SENTIMENT_PROVIDERS = ["gemini", "grok_420"]  # gemini primary (3.1s/call, 100% success), grok_420 secondary (reasoning model for when gemini fails/low-conf)
+# Reordered 2026-04-16: grok_420 was primary at 21.5s/call, processing only 14 markets per 300s cascade budget.
+# gemini at 3.1s/call processes ~80 markets per 300s. grok_420 still runs as fallback.
+# See /tmp/run_1200_2026-04-16.md for diagnostic evidence.
 # grok_fast excluded: LLM bias on long-dated tails (0.95-1.00 priors on 5c markets), slow (18.9s/call), worst success rate (76%)
 # glm excluded: API key expired (401 from bigmodel.cn) — re-enable once key is renewed
-# PRODUCTION: ["grok_420", "glm", "gemini"] once glm key is renewed
 SENTIMENT_MAX_MARKETS = 50
 SENTIMENT_CACHE_TTL = 600
 
@@ -279,6 +281,7 @@ PROVIDER_CALL_TIMEOUTS = {
 MIN_PRICE_CENTS = 5
 LONG_DATED_EXPIRY_DAYS = 30
 LONG_DATED_PRIOR_CAP_ABOVE_MARKET = 0.15
+SKIP_FALLBACK_PRIORS = True  # Gate F: reject orders when cascade failed and returned fallback prior=0.500
 
 DAILY_REPORT_ENABLED = True
 DAILY_REPORT_PATH = RUNTIME_DIR / "reports"
