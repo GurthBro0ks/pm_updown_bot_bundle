@@ -244,9 +244,10 @@ assert _assert_total <= 570, (
 )
 
 # ─── Sentiment Scorer ─────────────────────────────────────────
-SENTIMENT_PROVIDERS = ["grok_420", "glm"]  # Grok primary, GLM fallback, MiniMax disabled (insufficient balance)
-# grok_fast removed 2026-04-14 due to 70% timeout rate on api.x.ai causing cron timeout overruns. Revisit once provider recovers. See /tmp/zero_orders_diagnostic.md
-# PRODUCTION: ["grok_420", "grok_fast", "minimax", "glm"]
+SENTIMENT_PROVIDERS = ["grok_420", "gemini"]  # grok_420 primary (reasoning), gemini fallback (fast, cheap)
+# grok_fast excluded: LLM bias on long-dated tails (0.95-1.00 priors on 5c markets), slow (18.9s/call), worst success rate (76%)
+# glm excluded: API key expired (401 from bigmodel.cn) — re-enable once key is renewed
+# PRODUCTION: ["grok_420", "glm", "gemini"] once glm key is renewed
 SENTIMENT_MAX_MARKETS = 50
 SENTIMENT_CACHE_TTL = 600
 

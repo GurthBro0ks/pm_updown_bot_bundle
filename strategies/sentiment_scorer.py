@@ -1,9 +1,7 @@
 """AI prior scoring for Kelly sizing in Kalshi strategy.
 
-Cascade order:
-1) grok_fast
-2) grok_420
-3) gemini (fallback)
+Cascade order is driven by config.SENTIMENT_PROVIDERS (not hardcoded).
+See config.py for the active provider list and rationale for exclusions.
 """
 
 from __future__ import annotations
@@ -47,26 +45,53 @@ try:
 except Exception:
     BreakerState_v2 = None
 
-PROVIDERS = (
-    {
+_PROVIDER_REGISTRY = {
+    "grok_fast": {
         "name": "grok_fast",
         "url": "https://api.x.ai/v1/chat/completions",
         "model": "grok-4-1-fast-reasoning",
         "key_envs": ("XAI_API_KEY", "GROK_API_KEY", "X_AI_API"),
     },
-    {
+    "grok_420": {
         "name": "grok_420",
         "url": "https://api.x.ai/v1/chat/completions",
         "model": "grok-4.20-beta-0309-reasoning",
         "key_envs": ("XAI_API_KEY", "GROK_API_KEY", "X_AI_API"),
     },
-    {
+    "gemini": {
         "name": "gemini",
         "url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         "model": "gemini-2.5-flash",
         "key_envs": ("GEMINI_API_KEY",),
     },
-)
+    "glm": {
+        "name": "glm",
+        "url": "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+        "model": "glm-4-flash",
+        "key_envs": ("GLM_API_KEY",),
+    },
+}
+
+
+def _build_providers():
+    try:
+        import config as _cfg
+        names = _cfg.SENTIMENT_PROVIDERS
+    except Exception:
+        names = ["grok_420", "gemini"]
+    providers = []
+    for name in names:
+        if name in _PROVIDER_REGISTRY:
+            providers.append(_PROVIDER_REGISTRY[name])
+        else:
+            logger.warning("[scorer] Unknown provider %r in SENTIMENT_PROVIDERS, skipping", name)
+    if not providers:
+        logger.warning("[scorer] No valid providers configured, falling back to grok_420")
+        providers = [_PROVIDER_REGISTRY["grok_420"]]
+    return providers
+
+
+PROVIDERS = _build_providers()
 
 # Cost-aware tier config
 TIER_PREMARY_PROVIDER = os.getenv("AI_PRIMARY_PROVIDER", "grok_fast")
@@ -614,9 +639,10 @@ def _call_gemini_native(
 
 
 def _get_forecaster_provider() -> Optional[dict]:
-    """Return the Grok (forecaster) provider."""
-    for p in PROVIDERS:
-        if p["name"] == "grok_fast" or p["name"] == "grok_420":
+    """Return the Grok (forecaster) provider from registry."""
+    for name in ("grok_420", "grok_fast"):
+        p = _PROVIDER_REGISTRY.get(name)
+        if p:
             key, _ = _first_key(p["key_envs"])
             if key:
                 return p
@@ -625,12 +651,11 @@ def _get_forecaster_provider() -> Optional[dict]:
 
 def _get_critic_provider() -> Optional[dict]:
     """Return the Gemini (primary critic) or Grok adversarial."""
-    for p in PROVIDERS:
-        if p["name"] == "gemini":
-            key, _ = _first_key(p["key_envs"])
-            if key:
-                return p
-    # Fall back to grok_fast but with critic system prompt
+    p = _PROVIDER_REGISTRY.get("gemini")
+    if p:
+        key, _ = _first_key(p["key_envs"])
+        if key:
+            return p
     return _get_forecaster_provider()
 
 
