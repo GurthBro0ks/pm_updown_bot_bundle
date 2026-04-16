@@ -56,7 +56,16 @@ def check_micro_live_gates(market, size, price, risk_caps, venue, computed_edge_
                            this takes precedence over market.get("edge_pct").
     Returns: (passed: bool, violations: list)
     """
+    from config import MIN_PRICE_CENTS
     violations = []
+
+    # Gate 0: Minimum price floor (Becker trap protection)
+    price_cents = int(round(price * 100))
+    if price_cents < MIN_PRICE_CENTS:
+        violations.append(
+            f"[GATE] Rejected {market.get('ticker', market.get('id', '?'))}: "
+            f"price {price_cents}c < {MIN_PRICE_CENTS}c minimum floor (Becker trap protection)"
+        )
 
     # Gate 1: Position size limit
     if size > risk_caps.get("max_pos_usd", 10):
@@ -755,6 +764,26 @@ def optimize_kalshi_strategy(
         # Use validated/adjusted prior for all downstream Kelly sizing
         true_price = effective_prior
 
+        # Gate 2: Long-dated prior cap (Becker trap protection)
+        # Long-dated markets get inflated LLM priors that create illusory edge.
+        # Cap the prior to at most (market_price + 0.15) for markets > 30d expiry.
+        from config import LONG_DATED_EXPIRY_DAYS, LONG_DATED_PRIOR_CAP_ABOVE_MARKET
+        _days_to_end = market.get("_days_to_end")
+        if _days_to_end is not None and _days_to_end != float("inf"):
+            if _days_to_end > LONG_DATED_EXPIRY_DAYS:
+                market_price_prob = yes_price
+                cap = market_price_prob + LONG_DATED_PRIOR_CAP_ABOVE_MARKET
+                if true_price > cap:
+                    raw_prior = true_price
+                    true_price = cap
+                    logger.info(
+                        "[GATE] Long-dated prior capped: %s %.0fd expiry, prior %.3f -> %.3f (market+%.2f cap)",
+                        market_id, _days_to_end, raw_prior, cap, LONG_DATED_PRIOR_CAP_ABOVE_MARKET,
+                    )
+                    market["_prior_capped"] = True
+                    market["_prior_raw"] = raw_prior
+                    market["_prior_capped_to"] = cap
+
         # Calculate edge after fees
         edge_after_fees_pct = get_edge_after_fees(market, true_price=true_price)
         
@@ -810,6 +839,16 @@ def optimize_kalshi_strategy(
         
         if not passed:
             logger.debug(f"Market {market_id}: Failed gates: {violations}")
+            if scratchpad is not None:
+                for v in violations:
+                    if "minimum floor" in v:
+                        scratchpad.log(
+                            "gate_rejection",
+                            ticker=market_id,
+                            gate_name="min_price_floor",
+                            price_cents=int(round(yes_price * 100)),
+                            reason=v,
+                        )
             continue
         
         # Execute trade (in live modes: real-live or micro-live)
