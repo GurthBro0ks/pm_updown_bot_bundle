@@ -101,7 +101,9 @@ PROVIDERS = _build_providers()
 
 # Cost-aware tier config
 TIER_PREMARY_PROVIDER = os.getenv("AI_PRIMARY_PROVIDER", "gemini")
-TIER_PREMIUM_PROVIDER = os.getenv("AI_PREMIUM_PROVIDER", "grok_420")
+TIER_PREMIUM_PROVIDER = os.getenv("AI_PREMIUM_PROVIDER", "gemini")
+# grok_420 deprioritized due to 28.7s/call production latency exhausting
+# 300s cascade budget after ~10 markets. Revisit if latency improves.
 TIER_PREMIUM_MAX = int(os.getenv("AI_PREMIUM_MAX", "10"))
 
 # ── Circuit Breaker Setup (Module 2) ──────────────────────────────
