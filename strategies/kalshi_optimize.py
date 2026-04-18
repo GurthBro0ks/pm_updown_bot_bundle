@@ -20,6 +20,7 @@ sys.path.insert(0, '/opt/slimy/pm_updown_bot_bundle')
 # Local imports (avoid circular import)
 from utils.proof import generate_proof
 from utils.kalshi import fetch_kalshi_markets
+from utils.pnl_database import record_trade
 try:
     from strategies.sentiment_scorer import get_ai_prior, was_last_prior_fallback as _was_last_prior_fallback
 except Exception:
@@ -46,6 +47,29 @@ except Exception:
     volume_confidence = None
     expiry_confidence = None
     validate_prior = None
+
+_TICKER_CATEGORY_MAP = {
+    "KXINX": "index", "KXINXU": "index", "KXNDX": "index",
+    "KXNASDAQ100": "index", "KXNASDAQ100U": "index",
+    "KXBTC": "crypto", "KXETH": "crypto", "KXETHY": "crypto",
+    "KXMVESPORTS": "sports", "KXBUNDESLIGA": "sports",
+    "KXGOV": "politics", "KXECON": "economics",
+    "KXCOACH": "sports", "KXNFL": "sports",
+}
+
+
+def _extract_market_category(ticker: str) -> str:
+    prefix = ticker.split("-")[0] if "-" in ticker else ticker[:12]
+    for key, cat in _TICKER_CATEGORY_MAP.items():
+        if prefix.startswith(key):
+            return cat
+    if "SPORTS" in ticker or "NFL" in ticker or "NBA" in ticker:
+        return "sports"
+    if "INX" in ticker or "NASDAQ" in ticker:
+        return "index"
+    if "BTC" in ticker or "ETH" in ticker:
+        return "crypto"
+    return "other"
 
 # Stub for missing function
 def check_micro_live_gates(market, size, price, risk_caps, venue, computed_edge_pct=None):
@@ -964,6 +988,18 @@ def optimize_kalshi_strategy(
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "mode": mode,
                 })
+                _conf = market.get("_validation", {}).get("confidence")
+                _ai_tier = market.get("_ai_tier", "unknown")
+                try:
+                    record_trade(
+                        phase=mode, ticker=market_id, action="BUY",
+                        price=order_price, size_usd=cost_usd,
+                        confidence=_conf, signal_type=_ai_tier,
+                        market_category=_extract_market_category(market_id),
+                        order_type="limit",
+                    )
+                except Exception:
+                    pass
             except Exception as e:
                 logger.error("%s ORDER FAILED: %s", prefix, e)
                 proof_data.setdefault("orders_failed", []).append({
@@ -979,14 +1015,26 @@ def optimize_kalshi_strategy(
             proof_data.setdefault("orders_placed", []).append({
                 "market_id": market_id,
                 "side": order_side,
-                "price_cents": price_cents_shadow,  # INTEGER — price in cents
-                "size_usd": optimal_size,           # FLOAT — position size in dollars
-                "cost_usd": cost_usd_shadow,        # FLOAT — estimated cost in dollars
+                "price_cents": price_cents_shadow,
+                "size_usd": optimal_size,
+                "cost_usd": cost_usd_shadow,
                 "quantity": 1,
-                "result": None,  # shadow mode — no real order placed
+                "result": None,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "mode": mode,
             })
+            _conf = market.get("_validation", {}).get("confidence")
+            _ai_tier = market.get("_ai_tier", "unknown")
+            try:
+                record_trade(
+                    phase=mode, ticker=market_id, action="BUY",
+                    price=order_price, size_usd=optimal_size,
+                    confidence=_conf, signal_type=_ai_tier,
+                    market_category=_extract_market_category(market_id),
+                    order_type="limit",
+                )
+            except Exception:
+                pass
         
         # Update metrics
         total_trades += 1

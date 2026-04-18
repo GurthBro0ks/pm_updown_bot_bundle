@@ -25,26 +25,43 @@ def get_db() -> sqlite3.Connection:
     return conn
 
 
+def _migrate_schema(conn):
+    """Add new columns to existing tables (safe ALTER TABLE ADD COLUMN)."""
+    new_columns = {
+        "confidence": "REAL DEFAULT NULL",
+        "signal_type": "TEXT DEFAULT NULL",
+        "market_category": "TEXT DEFAULT NULL",
+        "order_type": "TEXT DEFAULT NULL",
+    }
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(trades)").fetchall()}
+    for col, definition in new_columns.items():
+        if col not in existing:
+            conn.execute(f"ALTER TABLE trades ADD COLUMN {col} {definition}")
+    conn.commit()
+
+
 def init_db():
     """Initialize database tables."""
     conn = get_db()
     try:
-        # Trades table - records buy/sell/exit trades with PnL
         conn.execute("""
             CREATE TABLE IF NOT EXISTS trades (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 phase TEXT NOT NULL,
                 ticker TEXT NOT NULL,
-                action TEXT NOT NULL,  -- BUY, EXIT
+                action TEXT NOT NULL,
                 price REAL NOT NULL,
                 size_usd REAL NOT NULL,
                 pnl_usd REAL DEFAULT 0,
                 pnl_pct REAL DEFAULT 0,
-                timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+                timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+                confidence REAL DEFAULT NULL,
+                signal_type TEXT DEFAULT NULL,
+                market_category TEXT DEFAULT NULL,
+                order_type TEXT DEFAULT NULL
             )
         """)
 
-        # Equity snapshots - portfolio state over time
         conn.execute("""
             CREATE TABLE IF NOT EXISTS equity_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,38 +72,41 @@ def init_db():
             )
         """)
 
-        # Signals table - trading signals
         conn.execute("""
             CREATE TABLE IF NOT EXISTS signals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 phase TEXT NOT NULL,
                 ticker TEXT NOT NULL,
-                signal_type TEXT NOT NULL,  -- buy, sell, exit
+                signal_type TEXT NOT NULL,
                 reason TEXT,
                 timestamp TEXT NOT NULL DEFAULT (datetime('now'))
             )
         """)
 
-        # Create indexes for common queries
         conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_phase ON trades(phase)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_equity_timestamp ON equity_snapshots(timestamp)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_signals_phase ON signals(phase)")
 
+        _migrate_schema(conn)
         conn.commit()
     finally:
         conn.close()
 
 
 def record_trade(phase: str, ticker: str, action: str, price: float, size_usd: float,
-                  pnl_usd: float = 0, pnl_pct: float = 0):
-    """Record a trade (buy or exit) with PnL."""
+                  pnl_usd: float = 0, pnl_pct: float = 0, confidence: float = None,
+                  signal_type: str = None, market_category: str = None,
+                  order_type: str = None):
+    """Record a trade (buy or exit) with PnL and optional metadata."""
     try:
         conn = get_db()
         conn.execute("""
-            INSERT INTO trades (phase, ticker, action, price, size_usd, pnl_usd, pnl_pct)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (phase, ticker, action, price, size_usd, pnl_usd, pnl_pct))
+            INSERT INTO trades (phase, ticker, action, price, size_usd, pnl_usd, pnl_pct,
+                                confidence, signal_type, market_category, order_type)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (phase, ticker, action, price, size_usd, pnl_usd, pnl_pct,
+              confidence, signal_type, market_category, order_type))
         conn.commit()
     except Exception as e:
         print(f"[PNL_DB_ERROR] Failed to record trade: {e}")

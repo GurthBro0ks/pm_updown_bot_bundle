@@ -263,15 +263,15 @@ def calculate_pnl(side: str, entry_price: float, size_usd: float, result: str) -
 # ---------------------------------------------------------------------------
 
 def get_existing_trade_keys(db_path: Path) -> set:
-    """Return set of (market_id, timestamp) pairs already in DB."""
+    """Return set of (ticker, action) pairs already in DB for shadow phase."""
     existing = set()
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         conn.row_factory = sqlite3.Row
-        rows = conn.execute("SELECT ticker, timestamp FROM trades WHERE action='EXIT'").fetchall()
+        rows = conn.execute("SELECT ticker, action FROM trades WHERE phase='shadow'").fetchall()
         conn.close()
         for r in rows:
-            existing.add((r["ticker"], r["timestamp"]))
+            existing.add((r["ticker"], r["action"]))
     except Exception:
         pass
     return existing
@@ -289,7 +289,7 @@ def write_shadow_trades(db_path: Path, resolved_trades: list[dict], dry_run: boo
 
         for trade in resolved_trades:
             try:
-                conn.execute("""
+                cursor = conn.execute("""
                     INSERT OR IGNORE INTO trades
                         (phase, ticker, action, price, size_usd, pnl_usd, pnl_pct, timestamp)
                     VALUES (?, ?, 'EXIT', ?, ?, ?, ?, ?)
@@ -302,7 +302,8 @@ def write_shadow_trades(db_path: Path, resolved_trades: list[dict], dry_run: boo
                     trade["pnl_pct"],
                     trade["timestamp"],
                 ))
-                inserted += 1
+                if cursor.rowcount > 0:
+                    inserted += 1
             except Exception:
                 pass
 
@@ -346,10 +347,10 @@ def main():
         print("[ERROR] No shadow trades found in logs", file=sys.stderr)
         return
 
-    # Deduplicate by (market_id, timestamp)
+    # Deduplicate by market_id (one entry per market)
     unique_trades = {}
     for t in shadow_trades:
-        key = (t["market_id"], t["timestamp"])
+        key = t["market_id"]
         if key not in unique_trades:
             unique_trades[key] = t
     shadow_trades = list(unique_trades.values())
@@ -361,8 +362,8 @@ def main():
     existing_keys = get_existing_trade_keys(DB_PATH)
     print(f"[INFO] Already in DB (skipped): {len(existing_keys)}", file=sys.stderr)
 
-    # Filter out already-in-DB trades
-    shadow_trades = [t for t in shadow_trades if (t["market_id"], t["timestamp"]) not in existing_keys]
+    # Filter out already-in-DB trades (by ticker+action pair)
+    shadow_trades = [t for t in shadow_trades if (t["market_id"], "EXIT") not in existing_keys]
     print(f"[INFO] After removing existing: {len(shadow_trades)}", file=sys.stderr)
 
     if not shadow_trades:
