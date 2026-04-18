@@ -370,10 +370,15 @@ def _enrich_with_price_context(text: str, ticker: Optional[str]) -> str:
         return text
     try:
         from providers.price_feed import enrich_market_text
-        return enrich_market_text(text, market_ticker=ticker)
+        text = enrich_market_text(text, market_ticker=ticker)
     except Exception as exc:
         logger.debug("[kelly] Price feed enrichment skipped: %s", exc)
-        return text
+    try:
+        from providers.polymarket_signal import enrich_market_text as poly_enrich
+        text = poly_enrich(text, kalshi_ticker=ticker)
+    except Exception as exc:
+        logger.debug("[kelly] Polymarket enrichment skipped: %s", exc)
+    return text
 
 
 def get_ai_prior(
