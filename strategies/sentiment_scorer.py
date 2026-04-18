@@ -365,6 +365,17 @@ def _get_providers_for_tier(tier: str):
         return []
 
 
+def _enrich_with_price_context(text: str, ticker: Optional[str]) -> str:
+    if not ticker:
+        return text
+    try:
+        from providers.price_feed import enrich_market_text
+        return enrich_market_text(text, market_ticker=ticker)
+    except Exception as exc:
+        logger.debug("[kelly] Price feed enrichment skipped: %s", exc)
+        return text
+
+
 def get_ai_prior(
     market_text: str,
     tier: str = "premium",
@@ -394,6 +405,8 @@ def get_ai_prior(
         logger.warning("[kelly] AI prior: source=fallback_empty prob=0.500%s", ticker_str)
         _last_prior_was_fallback = True
         return 0.5
+
+    normalized = _enrich_with_price_context(normalized, market_ticker)
 
     providers = _get_providers_for_tier(tier)
     if not providers:
