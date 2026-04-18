@@ -342,7 +342,18 @@ class KalshiOrderClient:
             client = KalshiOrderClient()
             print(client.get_balance())
         """
-        return self._request("GET", "/portfolio/balance")
+        raw = self._request("GET", "/portfolio/balance")
+        available = raw.get("balance", 0)
+        portfolio = raw.get("portfolio_value", 0)
+        if isinstance(available, (int, float)) and available > 100:
+            available = available / 100.0
+        if isinstance(portfolio, (int, float)) and portfolio > 100:
+            portfolio = portfolio / 100.0
+        return {
+            "available_balance": available,
+            "portfolio_value": portfolio,
+            "currency": "USD",
+        }
 
     def get_positions(self) -> list:
         """

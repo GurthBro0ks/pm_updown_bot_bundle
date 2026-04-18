@@ -938,14 +938,14 @@ def optimize_kalshi_strategy(
                     quantity=quantity,
                     price_cents=price_cents,
                 )
-                # Extract actual cost in USD from fill response
-                # taker_fill_cost_dollars is the cost in dollars (e.g., "0.120000" = $0.12)
                 result_order = result.get("order", {})
                 taker_cost_str = result_order.get("taker_fill_cost_dollars", "0")
                 try:
                     cost_usd = float(taker_cost_str)
                 except (ValueError, TypeError):
-                    cost_usd = price_cents / 100.0  # fallback: convert cents to dollars
+                    cost_usd = 0.0
+                if cost_usd == 0.0:
+                    cost_usd = price_cents / 100.0
                 order_id = result_order.get("order_id", "unknown")
 
                 logger.info(
