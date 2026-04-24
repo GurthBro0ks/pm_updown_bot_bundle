@@ -99,6 +99,69 @@ class TestFearRegime(unittest.TestCase):
         self.assertEqual(result["min_edge_override"], 0.12)
         self.assertEqual(result["vix"], 35.0)
 
+    def test_get_regime_extreme_greed(self):
+        """fg=85 -> regime=extreme_greed, min_edge=0.10."""
+        fr = __import__("strategies.fear_regime", fromlist=["get_regime"])
+
+        with patch.object(fr, "fetch_fear_greed", return_value={"value": 85, "classification": "Extreme Greed", "timestamp": "x"}), \
+             patch.object(fr, "fetch_vix", return_value=18.0):
+
+            result = fr.get_regime()
+
+        self.assertEqual(result["regime"], "extreme_greed")
+        self.assertEqual(result["min_edge_override"], 0.10)
+        self.assertEqual(result["fear_greed_value"], 85)
+        self.assertEqual(result["vix"], 18.0)
+
+    def test_get_regime_extreme_fear_plus_high_vol(self):
+        """fg=10, vix=40 -> regime=high_vol (VIX overrides extreme_fear), min_edge=0.12."""
+        fr = __import__("strategies.fear_regime", fromlist=["get_regime"])
+
+        with patch.object(fr, "fetch_fear_greed", return_value={"value": 10, "classification": "Extreme Fear", "timestamp": "x"}), \
+             patch.object(fr, "fetch_vix", return_value=40.0):
+
+            result = fr.get_regime()
+
+        self.assertEqual(result["regime"], "high_vol")
+        self.assertEqual(result["min_edge_override"], 0.12)
+        self.assertEqual(result["fear_greed_value"], 10)
+        self.assertEqual(result["vix"], 40.0)
+
+    def test_fetch_fear_greed_api_error(self):
+        """Non-200 status returns None gracefully."""
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+
+        with patch("strategies.fear_regime.requests.get", return_value=mock_response):
+            result = __import__("strategies.fear_regime", fromlist=["fetch_fear_greed"]).fetch_fear_greed()
+
+        self.assertIsNone(result)
+
+    def test_fetch_fear_greed_exception(self):
+        """Network exception returns None gracefully."""
+        with patch("strategies.fear_regime.requests.get", side_effect=ConnectionError("timeout")):
+            result = __import__("strategies.fear_regime", fromlist=["fetch_fear_greed"]).fetch_fear_greed()
+
+        self.assertIsNone(result)
+
+    def test_fetch_vix_returns_float(self):
+        """fetch_vix returns float from yfinance data."""
+        import pandas as pd
+        mock_df = pd.DataFrame({"Close": [18.5, 19.0]}, index=pd.date_range("2024-01-01", periods=2))
+
+        with patch("strategies.fear_regime.yfinance.download", return_value=mock_df):
+            result = __import__("strategies.fear_regime", fromlist=["fetch_vix"]).fetch_vix()
+
+        self.assertIsNotNone(result)
+        self.assertAlmostEqual(result, 19.0)
+
+    def test_fetch_vix_exception(self):
+        """yfinance exception returns None gracefully."""
+        with patch("strategies.fear_regime.yfinance.download", side_effect=Exception("API down")):
+            result = __import__("strategies.fear_regime", fromlist=["fetch_vix"]).fetch_vix()
+
+        self.assertIsNone(result)
+
     def test_get_regime_api_failure(self):
         """Both APIs fail -> returns safe defaults (neutral, min_edge=0.15)."""
         fr = __import__("strategies.fear_regime", fromlist=["get_regime"])
