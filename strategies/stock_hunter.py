@@ -39,8 +39,8 @@ from utils.position_sizer import size_position, get_circuit_breaker, update_bank
 try:
     from strategies.sentiment_scorer import get_ai_stock_sentiment
 except ImportError:
-    def get_ai_stock_sentiment(headline_text, ticker=None):
-        return 0.5
+    def get_ai_stock_sentiment(ticker, finnhub_av_score, headlines=None, blend_weight=0.5):
+        return finnhub_av_score if finnhub_av_score is not None else 0.5
 
 from utils.logging_config import setup_logging
 

@@ -491,9 +491,45 @@ def get_ai_prior(
     return 0.5
 
 
-def get_ai_stock_sentiment(headline_text, ticker=None):
-    """Stub for stock sentiment scoring. Returns neutral 0.5."""
-    return 0.5
+def get_ai_stock_sentiment(ticker, finnhub_av_score, headlines=None, blend_weight=0.5):
+    """AI-enhanced stock sentiment: Grok/GLM cascade blended with Finnhub/AlphaVantage score.
+
+    Args:
+        ticker: Stock ticker symbol (e.g. 'NVDA')
+        finnhub_av_score: Pre-computed Finnhub/AlphaVantage blended score (0.0-1.0)
+        headlines: Optional list of headline strings for AI context
+        blend_weight: Weight for AI score vs Finnhub/AV (0.5 = 50/50)
+
+    Returns:
+        Blended sentiment score (0.0-1.0)
+    """
+    if finnhub_av_score is None:
+        finnhub_av_score = 0.5
+
+    context_parts = [f"Stock ticker: {ticker}"]
+    if headlines:
+        for h in headlines[:5]:
+            context_parts.append(f"- {h}")
+    market_text = "\n".join(context_parts)
+
+    ai_score = get_ai_prior(market_text, tier="bulk", market_ticker=ticker)
+
+    if ai_score == 0.5:
+        logger.info(
+            "[scorer] AI stock: %s ai unavailable, using finnhub/av=%.4f",
+            ticker, finnhub_av_score,
+        )
+        return _clamp_probability(finnhub_av_score)
+
+    blended = blend_weight * ai_score + (1 - blend_weight) * finnhub_av_score
+    blended = _clamp_probability(blended)
+
+    logger.info(
+        "[scorer] AI stock blended: %s finnhub=%.4f ai=%.4f blended=%.4f",
+        ticker, finnhub_av_score, ai_score, blended,
+    )
+
+    return blended
 
 
 def get_bayesian_prior(market: dict, providers: list = None, tier: str = "premium") -> float:
