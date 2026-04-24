@@ -48,6 +48,11 @@ except Exception:
     expiry_confidence = None
     validate_prior = None
 
+try:
+    from config import SHADOW_PER_CALL_TIMEOUT_CAP
+except Exception:
+    SHADOW_PER_CALL_TIMEOUT_CAP = 5.0
+
 _TICKER_CATEGORY_MAP = {
     "KXINX": "index", "KXINXU": "index", "KXNDX": "index",
     "KXNASDAQ100": "index", "KXNASDAQ100U": "index",
@@ -679,6 +684,8 @@ def optimize_kalshi_strategy(
             break
 
         per_call_timeout = stage_budget.remaining() if stage_budget else None
+        if dry_run and per_call_timeout is not None:
+            per_call_timeout = min(per_call_timeout, SHADOW_PER_CALL_TIMEOUT_CAP)
         m["_ai_true_price"] = estimate_true_price(
             m.get("title", m.get("question", "")),
             m.get("ticker", m.get("id", "?")),

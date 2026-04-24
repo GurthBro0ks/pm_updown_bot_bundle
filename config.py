@@ -282,6 +282,7 @@ MIN_PRICE_CENTS = 5
 LONG_DATED_EXPIRY_DAYS = 30
 LONG_DATED_PRIOR_CAP_ABOVE_MARKET = 0.15
 SKIP_FALLBACK_PRIORS = True  # Gate F: reject orders when cascade failed and returned fallback prior=0.500
+SHADOW_PER_CALL_TIMEOUT_CAP = 5.0  # Max per-call timeout for shadow mode (seconds)
 
 DAILY_REPORT_ENABLED = True
 DAILY_REPORT_PATH = RUNTIME_DIR / "reports"

@@ -205,3 +205,36 @@ def test_validate_prior_all_signals_none():
     assert result["passed"] is True
     assert result["confidence"] == 1.0
     assert result["flags"] == []
+
+
+# --- shadow timeout cap ---
+
+
+def test_shadow_per_call_timeout_cap():
+    from config import SHADOW_PER_CALL_TIMEOUT_CAP
+    assert SHADOW_PER_CALL_TIMEOUT_CAP > 0
+    assert SHADOW_PER_CALL_TIMEOUT_CAP <= 15.0
+
+
+def test_shadow_timeout_capped_in_optimizer():
+    from unittest.mock import patch, MagicMock
+    cap = 5.0
+    fake_budget = MagicMock()
+    fake_budget.remaining.return_value = 300.0
+    fake_budget.exhausted.return_value = False
+    fake_budget.mark_processed = MagicMock()
+
+    with patch.dict('sys.modules', {
+        'strategies.sentiment_scorer': MagicMock(),
+        'core.market_cursor': MagicMock(),
+        'core.stage_budget': MagicMock(),
+    }):
+        import importlib
+        import strategies.kalshi_optimize as kmod
+        importlib.reload(kmod)
+
+    assert hasattr(kmod, 'SHADOW_PER_CALL_TIMEOUT_CAP')
+    per_call = fake_budget.remaining()
+    capped = min(per_call, kmod.SHADOW_PER_CALL_TIMEOUT_CAP)
+    assert capped <= cap
+    assert capped == kmod.SHADOW_PER_CALL_TIMEOUT_CAP
