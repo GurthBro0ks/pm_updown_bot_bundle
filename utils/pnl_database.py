@@ -97,16 +97,24 @@ def init_db():
 def record_trade(phase: str, ticker: str, action: str, price: float, size_usd: float,
                   pnl_usd: float = 0, pnl_pct: float = 0, confidence: float = None,
                   signal_type: str = None, market_category: str = None,
-                  order_type: str = None):
+                  order_type: str = None,
+                  ai_probability: float = None, edge_pct: float = None,
+                  kelly_fraction: float = None, expiration: str = None,
+                  days_to_expiry: float = None, liquidity_usd: float = None,
+                  cascade_provider: str = None):
     """Record a trade (buy or exit) with PnL and optional metadata."""
     try:
         conn = get_db()
         conn.execute("""
             INSERT INTO trades (phase, ticker, action, price, size_usd, pnl_usd, pnl_pct,
-                                confidence, signal_type, market_category, order_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                confidence, signal_type, market_category, order_type,
+                                ai_probability, edge_pct, kelly_fraction, expiration,
+                                days_to_expiry, liquidity_usd, cascade_provider)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (phase, ticker, action, price, size_usd, pnl_usd, pnl_pct,
-              confidence, signal_type, market_category, order_type))
+              confidence, signal_type, market_category, order_type,
+              ai_probability, edge_pct, kelly_fraction, expiration,
+              days_to_expiry, liquidity_usd, cascade_provider))
         conn.commit()
     except Exception as e:
         print(f"[PNL_DB_ERROR] Failed to record trade: {e}")

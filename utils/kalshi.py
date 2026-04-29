@@ -617,8 +617,8 @@ def get_kalshi_balance():
         data = resp.json()
         # Balance is returned in cents
         balance = data.get("balance", 0)
-        # API returns balance in dollars (confirmed: returns 108 for $108 account)
-        balance_usd = float(balance)
+        # Kalshi API returns balance in cents — convert to dollars
+        balance_usd = float(balance) / 100.0
         logger.info(f"[WALLET] Fetched balance: ${balance_usd:.2f}")
         return balance_usd
     except Exception as e:

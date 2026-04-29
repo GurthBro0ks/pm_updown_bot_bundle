@@ -21,6 +21,11 @@ sys.path.insert(0, '/opt/slimy/pm_updown_bot_bundle')
 from utils.proof import generate_proof
 from utils.kalshi import fetch_kalshi_markets
 from utils.pnl_database import record_trade
+
+try:
+    from utils.discord_notify import notify_order_placed
+except Exception:
+    notify_order_placed = None
 try:
     from strategies.sentiment_scorer import get_ai_prior, was_last_prior_fallback as _was_last_prior_fallback
 except Exception:
@@ -511,8 +516,8 @@ def optimize_kalshi_strategy(
         "max_daily_loss_usd": 50.0,
         "max_open_pos": 5,
         "max_daily_positions": 20,
-        "liquidity_min_usd": 0.0,
-        "edge_after_fees_pct": 0.5,
+        "liquidity_min_usd": 500.0,
+        "edge_after_fees_pct": 3.0,
         "market_end_hrs": 0
     }
     
@@ -877,6 +882,16 @@ def optimize_kalshi_strategy(
             edge_after_fees_pct = edge_before_fees_pct - expected_taker_fee_pct
             logger.debug(f"Market {market_id}: Edge before fees: {edge_before_fees_pct:.2f}%, expected taker fee: {expected_taker_fee_pct:.2f}%")
         
+        # Apply expiry penalty: >30d = 0.3x, >14d = 0.7x, <=7d = no penalty
+        _days_to_exp = market.get("_days_to_end")
+        if _days_to_exp is not None and _days_to_exp != float("inf"):
+            if _days_to_exp > 30:
+                edge_after_fees_pct *= 0.3
+                logger.debug(f"Market {market_id}: {int(_days_to_exp)}d expiry — applied 0.3x long-dated penalty")
+            elif _days_to_exp > 14:
+                edge_after_fees_pct *= 0.7
+                logger.debug(f"Market {market_id}: {int(_days_to_exp)}d expiry — applied 0.7x mid-dated penalty")
+        
         # Check if order passes gates
         passed, violations = check_micro_live_gates(market, optimal_size, yes_price, risk_caps, "kalshi", computed_edge_pct=edge_after_fees_pct)
         
@@ -994,6 +1009,13 @@ def optimize_kalshi_strategy(
                     "result": result,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "mode": mode,
+                    "ai_probability": true_price,
+                    "edge_pct": edge_after_fees_pct,
+                    "kelly_fraction": round(optimal_size / bankroll, 4) if bankroll > 0 else 0,
+                    "expiration": market.get("close_time") or market.get("expiration_date"),
+                    "days_to_expiry": market.get("_days_to_end"),
+                    "liquidity_usd": market.get("liquidity_usd"),
+                    "cascade_provider": market.get("_ai_tier", "unknown"),
                 })
                 _conf = market.get("_validation", {}).get("confidence")
                 _ai_tier = market.get("_ai_tier", "unknown")
@@ -1004,9 +1026,32 @@ def optimize_kalshi_strategy(
                         confidence=_conf, signal_type=_ai_tier,
                         market_category=_extract_market_category(market_id),
                         order_type="limit",
+                        ai_probability=true_price,
+                        edge_pct=edge_after_fees_pct,
+                        kelly_fraction=round(optimal_size / bankroll, 4) if bankroll > 0 else 0,
+                        expiration=market.get("close_time") or market.get("expiration_date"),
+                        days_to_expiry=market.get("_days_to_end"),
+                        liquidity_usd=market.get("liquidity_usd"),
+                        cascade_provider=market.get("_ai_tier", "unknown"),
                     )
                 except Exception:
                     pass
+                # Discord notification for order placed
+                if notify_order_placed:
+                    try:
+                        notify_order_placed(
+                            ticker=market_id,
+                            side=order_side,
+                            price_cents=price_cents,
+                            quantity=quantity,
+                            ai_probability=true_price,
+                            edge_pct=edge_after_fees_pct,
+                            kelly_fraction=round(optimal_size / bankroll, 4) if bankroll > 0 else 0,
+                            cascade_provider=market.get("_ai_tier", "unknown"),
+                            days_to_expiry=market.get("_days_to_end"),
+                        )
+                    except Exception:
+                        pass
             except Exception as e:
                 logger.error("%s ORDER FAILED: %s", prefix, e)
                 proof_data.setdefault("orders_failed", []).append({
@@ -1029,6 +1074,13 @@ def optimize_kalshi_strategy(
                 "result": None,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "mode": mode,
+                "ai_probability": true_price,
+                "edge_pct": edge_after_fees_pct,
+                "kelly_fraction": round(optimal_size / bankroll, 4) if bankroll > 0 else 0,
+                "expiration": market.get("close_time") or market.get("expiration_date"),
+                "days_to_expiry": market.get("_days_to_end"),
+                "liquidity_usd": market.get("liquidity_usd"),
+                "cascade_provider": market.get("_ai_tier", "unknown"),
             })
             _conf = market.get("_validation", {}).get("confidence")
             _ai_tier = market.get("_ai_tier", "unknown")
@@ -1039,10 +1091,33 @@ def optimize_kalshi_strategy(
                     confidence=_conf, signal_type=_ai_tier,
                     market_category=_extract_market_category(market_id),
                     order_type="limit",
+                    ai_probability=true_price,
+                    edge_pct=edge_after_fees_pct,
+                    kelly_fraction=round(optimal_size / bankroll, 4) if bankroll > 0 else 0,
+                    expiration=market.get("close_time") or market.get("expiration_date"),
+                    days_to_expiry=market.get("_days_to_end"),
+                    liquidity_usd=market.get("liquidity_usd"),
+                    cascade_provider=market.get("_ai_tier", "unknown"),
                 )
             except Exception:
                 pass
-        
+                # Discord notification for order placed (dry-run)
+                if notify_order_placed:
+                    try:
+                        notify_order_placed(
+                            ticker=market_id,
+                            side=order_side,
+                            price_cents=price_cents_shadow,
+                            quantity=1,
+                            ai_probability=true_price,
+                            edge_pct=edge_after_fees_pct,
+                            kelly_fraction=round(optimal_size / bankroll, 4) if bankroll > 0 else 0,
+                            cascade_provider=market.get("_ai_tier", "unknown"),
+                            days_to_expiry=market.get("_days_to_end"),
+                        )
+                    except Exception:
+                        pass
+
         # Update metrics
         total_trades += 1
         if use_maker and yes_price == 0.50:
