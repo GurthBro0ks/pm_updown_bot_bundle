@@ -32,6 +32,13 @@ def _migrate_schema(conn):
         "signal_type": "TEXT DEFAULT NULL",
         "market_category": "TEXT DEFAULT NULL",
         "order_type": "TEXT DEFAULT NULL",
+        "status": "TEXT DEFAULT 'open'",
+        "fill_time": "TEXT",
+        "settle_time": "TEXT",
+        "settled_price": "REAL",
+        "realized_pnl_usd": "REAL",
+        "kalshi_order_id": "TEXT",
+        "kalshi_market_id": "TEXT",
     }
     existing = {row[1] for row in conn.execute("PRAGMA table_info(trades)").fetchall()}
     for col, definition in new_columns.items():
@@ -58,7 +65,14 @@ def init_db():
                 confidence REAL DEFAULT NULL,
                 signal_type TEXT DEFAULT NULL,
                 market_category TEXT DEFAULT NULL,
-                order_type TEXT DEFAULT NULL
+                order_type TEXT DEFAULT NULL,
+                status TEXT DEFAULT 'open',
+                fill_time TEXT,
+                settle_time TEXT,
+                settled_price REAL,
+                realized_pnl_usd REAL,
+                kalshi_order_id TEXT,
+                kalshi_market_id TEXT
             )
         """)
 
