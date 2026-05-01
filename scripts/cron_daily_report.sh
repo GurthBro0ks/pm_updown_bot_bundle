@@ -21,9 +21,11 @@ from utils.discord_notify import send_daily_report
 
 # Get balance
 try:
-    from runner import get_balance, get_open_positions
-    balance = get_balance()
-    positions = get_open_positions()
+    from utils.kalshi_orders import KalshiOrderClient
+    client = KalshiOrderClient()
+    bal_data = client.get_balance()
+    balance = bal_data.get('balance', -1) if isinstance(bal_data, dict) else bal_data
+    positions = client.get_positions()
 except Exception as e:
     print(f'Failed to get live data: {e}')
     balance = -1
