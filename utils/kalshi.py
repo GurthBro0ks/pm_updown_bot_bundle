@@ -13,6 +13,8 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
 import base64
 
+from utils.kalshi_normalize import normalize_kalshi_market
+
 logger = logging.getLogger(__name__)
 
 # REMOVED 2026-03-14: KALSHI_TARGET_CATEGORIES - legacy allowlist, now using blocklist-only filtering
@@ -398,39 +400,16 @@ def fetch_kalshi_markets():
         ]
         logger.info(f"[KALSHI] Top 10 by volume: {top_10}")
 
-        # Step 9: Format markets for strategy use
+        # Step 9: Format markets for strategy use via normalization layer
         markets = []
         for m in filtered_markets:
-            ticker = m.get('ticker', '')
-            yes_bid_price = _safe_float(
-                m.get('_yes_bid_price', _market_price_value(m, 'yes_bid_dollars', 'yes_bid')),
-                0.0
-            )
-            yes_ask_price = _safe_float(
-                m.get('_yes_ask_price', _market_price_value(m, 'yes_ask_dollars', 'yes_ask')),
-                0.0
-            )
-            yes_price = _safe_float(m.get('_yes_price', yes_ask_price), 0.0)
-            no_price = 1.0 - yes_price
-            liquidity_usd = _safe_float(m.get('_liquidity_usd', 0), 0.0)
-            volume_24h = _safe_float(m.get('_volume_24h', 0), 0.0)
-
-            markets.append({
-                "id": ticker,
-                "question": m.get('short_name', m.get('title', ticker)),
-                "odds": {"yes": yes_price, "no": no_price},
-                "liquidity_usd": liquidity_usd,
-                "volume_24h": volume_24h,
-                "yes_bid_price": yes_bid_price,
-                "yes_ask_price": yes_ask_price,
-                "hours_to_end": 48,  # Placeholder
-                "close_time": m.get('close_time'),
-                "expiration_time": m.get('expiration_time'),
-                "series_ticker": m.get('series_ticker'),
-                "series_category": m.get('series_category'),
-                "fee_multiplier": _safe_float(m.get('fee_multiplier', 1), 1.0),
-                "fee_type": "quadratic" if _safe_float(m.get('fee_multiplier', 1), 1.0) < 1 else "standard",
-            })
+            norm = normalize_kalshi_market(m)
+            # Preserve series metadata not in the raw normalizer output
+            norm["series_ticker"] = m.get('series_ticker')
+            norm["series_category"] = m.get('series_category')
+            norm["fee_multiplier"] = _safe_float(m.get('fee_multiplier', 1), 1.0)
+            norm["fee_type"] = "quadratic" if _safe_float(m.get('fee_multiplier', 1), 1.0) < 1 else "standard"
+            markets.append(norm)
 
         if len(markets) == 0:
             logger.warning("[KALSHI] No markets with active trading prices. "

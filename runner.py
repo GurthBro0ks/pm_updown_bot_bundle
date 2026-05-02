@@ -145,41 +145,12 @@ def generate_proof(proof_id, data):
     logger.info(f"Proof: {proof_path}")
 
 def fetch_kalshi_markets():
-    api_key = os.getenv("KALSHI_KEY")
-    if not api_key:
-        logger.warning("WARNING: No KALSHI_KEY - using mock")
-        return [
-            {"id": "FED-25.FEB", "question": "Fed rate", "odds": {"yes": 0.72, "no": 0.28}, "liquidity_usd": 25000, "hours_to_end": 720, "fees_pct": 0.01},
-            {"id": "CPI-25.FEB", "question": "CPI", "odds": {"yes": 0.55, "no": 0.45}, "liquidity_usd": 50000, "hours_to_end": 48, "fees_pct": 0.01}
-        ]
-    headers = get_headers('GET', '/v1/markets')
-    resp = requests.get('https://api.elections.kalshi.com/trade-api/v2/markets', headers=headers, params={'status': 'open', 'limit': 100}, timeout=10)
-    if resp.status_code == 200:
-        data = resp.json() if resp.text.strip() else {"markets": []}
-        markets = []
-        for m in data.get('markets', []):
-            ticker = m.get('ticker', '')
-            yes_bid_cents = m.get('yes_bid', 0)
-            yes_ask_cents = m.get('yes_ask', 0)
-            if yes_ask_cents <= 0:
-                continue
-            yes_bid_cents = m.get('yes_bid', 0)
-            yes_ask_cents = m.get('yes_ask', 0)
-            yes_price_cents = (yes_bid_cents + yes_ask_cents) / 2
-            yes_price = yes_price_cents / 100.0
-            no_price = 1.0 - yes_price
-            liquidity_usd = m.get('open_interest', 0) * yes_price
-            markets.append({
-                "id": ticker,
-                "question": m.get('short_name', ticker),
-                "odds": {"yes": yes_price, "no": no_price},
-                "liquidity_usd": liquidity_usd,
-                "hours_to_end": 48
-            })
-        logger.info(f"Fetched {len(markets)} markets")
-        return markets
-    logger.error("API fail - using mock")
-    return []
+    """
+    Delegate to utils.kalshi.fetch_kalshi_markets() for normalized market data.
+    Kept here for backwards compatibility with any callers importing from runner.
+    """
+    from utils.kalshi import fetch_kalshi_markets as _utils_fetch
+    return _utils_fetch()
 
 def run_phase1_kalshi_optimization(mode, bankroll, max_pos_usd, scratchpad=None, min_edge_override=None, budget=None, cursor=None):
     """Phase 1: Kalshi Optimization (Complete)"""
@@ -259,11 +230,17 @@ def run_phase3_stock_hunter(mode, bankroll, max_pos_usd):
 def main():
     parser = argparse.ArgumentParser(description="Multi-Venue Runner - Shipping Mode")
     parser.add_argument("--mode", choices=["shadow", "micro-live", "real-live"], default="shadow", help="Execution mode (micro-live = real trades with risk gates)")
+    parser.add_argument("--venue", choices=["kalshi", "ibkr", "polymarket"], default="kalshi", help="Trading venue")
     parser.add_argument("--phase", choices=["phase1", "phase2", "phase3", "all"], default="all", help="Phase to execute")
     parser.add_argument("--bankroll", type=float, default=100.0, help="Bankroll in USD")
     parser.add_argument("--max-pos", type=float, default=10.0, help="Max position size in USD")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
     args = parser.parse_args()
+
+    # Venue validation: polymarket is not yet fully wired
+    if args.venue == "polymarket":
+        logger.error(" Venue 'polymarket' is not yet supported. Use 'kalshi' or 'ibkr'.")
+        sys.exit(1)
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
