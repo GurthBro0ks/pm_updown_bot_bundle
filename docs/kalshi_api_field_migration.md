@@ -87,17 +87,25 @@ python3 runner.py --mode shadow --venue kalshi
 Valid choices: `kalshi`, `ibkr`. `polymarket` is rejected at runtime (not yet wired).
 Default: `kalshi`.
 
+## Filtering Step Fix (2026-05-02)
+
+The pre-existing `_market_price_value()` bug in `utils/kalshi.py` was fixed:
+- **Before:** `market.get(dollars_key, 0)` with `> 0` check treated present-zero as missing.
+- **After:** Uses `dollars_key in market` for presence detection. Returns `None` for missing, `0.0` for present-zero.
+- Filtering logic updated to distinguish `is None` (missing) from `<= 0` (actual zero value).
+
+This ensures markets with valid zero prices (e.g., `yes_ask_dollars = "0.0000"`) are not incorrectly skipped or routed to legacy fallback.
+
 ## Remaining Unresolved Questions
 
-1. **Filtering bug:** `utils/kalshi.py` `_market_price_value()` still uses `> 0` truthiness checks. This is pre-existing and only affects the filtering step, not the normalized output.
-2. **Legacy code:** `.removed_20260227/` and `proofs/backups/` contain old code with legacy field references. These are archived and not in the active execution path.
-3. **Strategy code:** `strategies/kalshi_optimize.py` uses `volume_24h` and `liquidity_usd` from the normalized dict — these are the **internal** keys, not the raw API keys, so they are correct.
+1. **Legacy code:** `.removed_20260227/` and `proofs/backups/` contain old code with legacy field references. These are archived and not in the active execution path.
+2. **Strategy code:** `strategies/kalshi_optimize.py` uses `volume_24h` and `liquidity_usd` from the normalized dict — these are the **internal** keys, not the raw API keys, so they are correct.
 
 ## Files Changed
 
 - `runner.py` — added `--venue` arg, replaced `fetch_kalshi_markets()` with delegation to `utils.kalshi`
 - `utils/kalshi.py` — wired `normalize_kalshi_market()` into `fetch_kalshi_markets()` output formatting
 - `utils/kalshi_normalize.py` — **new** normalization layer
-- `tests/test_kalshi_normalize.py` — **new** test suite (32 tests, all passing)
+- `tests/test_kalshi_normalize.py` — **new** test suite (42 tests, all passing)
 - `scripts/audit_kalshi_fields.py` — **new** field audit tool
 - `scripts/kalshi_field_smoke.py` — **new** live API smoke test

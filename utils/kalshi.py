@@ -65,16 +65,28 @@ def _market_price_value(market, dollars_key, legacy_key):
     """
     Read current Kalshi *_dollars fields first, then legacy cent fields.
     Legacy fields may be cents (e.g. 37) or dollars (e.g. 0.37).
-    """
-    dollars_val = _safe_float(market.get(dollars_key, 0), 0.0)
-    if dollars_val > 0:
-        return dollars_val
 
+    Returns None if both modern and legacy fields are missing.
+    Returns 0.0 if the field is present with a zero value.
+    """
+    # Prefer modern *_dollars string field
+    if dollars_key in market:
+        val = market[dollars_key]
+        if val is not None and val != "":
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                pass
+
+    # Fallback to legacy field
     legacy_raw = market.get(legacy_key)
     if legacy_raw in (None, ""):
-        return 0.0
+        return None
 
-    legacy_val = _safe_float(legacy_raw, 0.0)
+    try:
+        legacy_val = float(legacy_raw)
+    except (TypeError, ValueError):
+        return None
     if legacy_val > 1.0:
         return legacy_val / 100.0
     return legacy_val
@@ -312,19 +324,24 @@ def fetch_kalshi_markets():
         for m in status_filtered:
             yes_bid_price = _market_price_value(m, 'yes_bid_dollars', 'yes_bid')
             yes_ask_price = _market_price_value(m, 'yes_ask_dollars', 'yes_ask')
-            if yes_ask_price <= 0:
+
+            # If ask is missing, try last_price; if also missing, skip.
+            # Present-zero ask (0.0) is kept as-is (rare but valid).
+            if yes_ask_price is None or yes_ask_price <= 0:
                 last_price = _market_price_value(m, 'last_price_dollars', 'last_price')
-                if last_price <= 0:
+                if last_price is None or last_price <= 0:
                     continue
                 yes_ask_price = last_price
                 ask_from_last_trade_count += 1
 
             # Ask-only books are common; midpoint with bid=0 underprices by 50%.
-            if yes_bid_price > 0:
+            # If bid is missing, treat as ask-only. Present-zero bid is included.
+            if yes_bid_price is not None and yes_bid_price > 0:
                 yes_price = (yes_bid_price + yes_ask_price) / 2.0
             else:
                 yes_price = yes_ask_price
-                ask_only_count += 1
+                if yes_bid_price is None:
+                    ask_only_count += 1
 
             m['_yes_bid_price'] = yes_bid_price
             m['_yes_ask_price'] = yes_ask_price

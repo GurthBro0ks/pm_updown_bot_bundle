@@ -364,5 +364,71 @@ class TestCompatibilityKeys:
         assert "hours_to_end" in result
 
 
+class TestMarketPriceValue:
+    """Tests for utils/kalshi.py _market_price_value() zero-handling fix."""
+
+    def test_present_zero_string_returns_zero(self):
+        from utils.kalshi import _market_price_value
+        market = {"yes_bid_dollars": "0.0000"}
+        result = _market_price_value(market, "yes_bid_dollars", "yes_bid")
+        assert result == pytest.approx(0.0)
+        assert result is not None
+
+    def test_present_zero_int_returns_zero(self):
+        from utils.kalshi import _market_price_value
+        market = {"yes_bid": 0}
+        result = _market_price_value(market, "yes_bid_dollars", "yes_bid")
+        assert result == pytest.approx(0.0)
+        assert result is not None
+
+    def test_missing_returns_none(self):
+        from utils.kalshi import _market_price_value
+        market = {}
+        result = _market_price_value(market, "yes_bid_dollars", "yes_bid")
+        assert result is None
+
+    def test_none_value_returns_none(self):
+        from utils.kalshi import _market_price_value
+        market = {"yes_bid_dollars": None}
+        result = _market_price_value(market, "yes_bid_dollars", "yes_bid")
+        assert result is None
+
+    def test_empty_string_returns_none(self):
+        from utils.kalshi import _market_price_value
+        market = {"yes_bid_dollars": ""}
+        result = _market_price_value(market, "yes_bid_dollars", "yes_bid")
+        assert result is None
+
+    def test_positive_string_returns_float(self):
+        from utils.kalshi import _market_price_value
+        market = {"yes_bid_dollars": "0.1200"}
+        result = _market_price_value(market, "yes_bid_dollars", "yes_bid")
+        assert result == pytest.approx(0.12)
+
+    def test_legacy_cents_converted(self):
+        from utils.kalshi import _market_price_value
+        market = {"yes_bid": 12}
+        result = _market_price_value(market, "yes_bid_dollars", "yes_bid")
+        assert result == pytest.approx(0.12)
+
+    def test_legacy_dollars_not_divided(self):
+        from utils.kalshi import _market_price_value
+        market = {"yes_bid": 0.12}
+        result = _market_price_value(market, "yes_bid_dollars", "yes_bid")
+        assert result == pytest.approx(0.12)
+
+    def test_modern_preferred_over_legacy(self):
+        from utils.kalshi import _market_price_value
+        market = {"yes_bid_dollars": "0.2500", "yes_bid": 30}
+        result = _market_price_value(market, "yes_bid_dollars", "yes_bid")
+        assert result == pytest.approx(0.25)
+
+    def test_present_zero_modern_not_falling_back_to_legacy(self):
+        from utils.kalshi import _market_price_value
+        market = {"yes_bid_dollars": "0.0000", "yes_bid": 5}
+        result = _market_price_value(market, "yes_bid_dollars", "yes_bid")
+        assert result == pytest.approx(0.0)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
