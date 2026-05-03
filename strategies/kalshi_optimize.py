@@ -292,7 +292,7 @@ def get_maker_fee(price: float) -> float:
     if price == 0.50:
         return 0.0
     
-    return 0.7 * price  # Taker fee (maker orders charge taker fee on fill)
+    return 0.07 * price  # Taker fee (maker orders charge taker fee on fill)
 
 def is_maker_profitable(price: float, true_price: float, win_prob: float, min_edge_pct: float = 0.5) -> bool:
     """
@@ -317,7 +317,7 @@ def is_maker_profitable(price: float, true_price: float, win_prob: float, min_ed
         expected_value = 0
     
     # Calculate fee (use maker fee if available, otherwise taker)
-    fee = get_maker_fee(price) if win_prob > 0.5 else 0.7 * price
+    fee = get_maker_fee(price) if win_prob > 0.5 else 0.07 * price
     
     # Calculate cost after fees
     cost = price + fee
@@ -496,7 +496,7 @@ def get_edge_after_fees(market: dict, true_price: float = None) -> float:
         edge_after_fees_pct = edge_before_fees_pct
     else:
         # Maker order charges taker fee on fill
-        maker_fee = 0.7 * yes_price
+        maker_fee = 0.07 * yes_price
         if true_price <= 0:
             edge_after_fees_pct = 0
         else:
@@ -951,8 +951,8 @@ def optimize_kalshi_strategy(
             # But if we're the taker, we get the spread
             # Probability of being maker: Not 100%, but significant
             # For simplicity, assume we pay 0.7% taker fee 50% of the time (when our order fills)
-            estimated_fee_pct = 0.35  # 0.7% taker fee / 2
-            fee_cost = order_price * estimated_fee_pct / 100  # 0.99 * 0.0035
+            estimated_fee_pct = 0.035  # 0.07% taker fee / 2
+            fee_cost = order_price * estimated_fee_pct / 100  # 0.99 * 0.00035
             
             logger.debug(f"Market {market_id}: Estimated fee: {estimated_fee_pct:.2f}% (${fee_cost:.4f})")
         
@@ -1233,7 +1233,7 @@ def optimize_kalshi_strategy(
             "side": order_side,
             "size": optimal_size,
             "price": order_price,
-            "fee": fee_cost if "fee_cost" in locals() else 0.7 * yes_price / 100,
+            "fee": fee_cost if "fee_cost" in locals() else 0.07 * yes_price / 100,
             "timestamp": datetime.now(timezone.utc).isoformat()
         })
     

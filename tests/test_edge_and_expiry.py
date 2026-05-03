@@ -163,3 +163,49 @@ class TestCashBalanceGuard:
         """Cash balance = $0.00 → order cycle skipped"""
         mock_balance.return_value = 0.0
         assert mock_balance.return_value < 1.0
+
+
+# ── Fee Calculation Tests ─────────────────────────────────────────────
+
+from strategies.kalshi_optimize import get_maker_fee, get_edge_after_fees
+
+
+class TestMakerFee:
+    def test_maker_fee_at_50c(self):
+        """Maker fee at exactly 50¢ is $0"""
+        assert get_maker_fee(0.50) == 0.0
+
+    def test_maker_fee_at_8c(self):
+        """Maker fee at 8¢ is 0.07 * 0.08 = 0.0056"""
+        fee = get_maker_fee(0.08)
+        assert fee == pytest.approx(0.0056, abs=1e-6)
+
+    def test_maker_fee_at_30c(self):
+        """Maker fee at 30¢ is 0.07 * 0.30 = 0.021"""
+        fee = get_maker_fee(0.30)
+        assert fee == pytest.approx(0.021, abs=1e-6)
+
+
+class TestEdgeAfterFees:
+    def test_edge_after_fees_8c_48prob(self):
+        """Edge after fees: yes_price=0.08, true_price=0.48 → ~460%"""
+        market = {"id": "TEST", "odds": {"yes": 0.08}}
+        edge = get_edge_after_fees(market, true_price=0.48)
+        # fee_adjusted_price = 0.08 + (0.07 * 0.08) = 0.0856
+        # edge = ((0.48 - 0.0856) / 0.0856) * 100 = 460.747%
+        assert edge == pytest.approx(460.747, rel=1e-3)
+
+    def test_edge_after_fees_50c(self):
+        """At exactly 50¢, no fee, edge equals before-fees edge"""
+        market = {"id": "TEST", "odds": {"yes": 0.50}}
+        edge = get_edge_after_fees(market, true_price=0.60)
+        # edge_before = ((0.60 - 0.50) / 0.50) * 100 = 20%
+        assert edge == pytest.approx(20.0, abs=1e-6)
+
+    def test_edge_after_fees_below_threshold(self):
+        """Edge below 3% threshold should be filtered out"""
+        market = {"id": "TEST", "odds": {"yes": 0.48}}
+        edge = get_edge_after_fees(market, true_price=0.50)
+        # fee_adjusted = 0.48 + (0.07 * 0.48) = 0.5136
+        # edge = ((0.50 - 0.5136) / 0.5136) * 100 = -2.65%
+        assert edge < 3.0
