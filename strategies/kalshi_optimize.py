@@ -67,6 +67,61 @@ _TICKER_CATEGORY_MAP = {
     "KXCOACH": "sports", "KXNFL": "sports",
 }
 
+# Edge calculation sanity limits
+MAX_EDGE_PCT = 500.0
+MIN_EDGE_PCT = -100.0
+
+# Expiry filters (configurable via env)
+MAX_DAYS_TO_EXPIRY = float(os.getenv("MAX_DAYS_TO_EXPIRY", "14") or "14")
+MAX_LONG_TERM_DAYS = float(os.getenv("MAX_LONG_TERM_DAYS", "30") or "30")
+
+
+def calculate_edge_pct(ai_prob: float, market_price: float, market_id: str = "?") -> float:
+    """
+    Calculate edge percentage with validation and sanity caps.
+
+    Formula: ((ai_prob - market_price) / market_price) * 100
+
+    Both inputs must be in 0.0-1.0 range (probability units).
+    Returns 0.0 if inputs are invalid or edge is negative.
+    Caps edge at MAX_EDGE_PCT (500%) with a warning.
+    """
+    # Validate inputs are not None
+    if ai_prob is None or market_price is None:
+        logger.debug("Edge calc skipped for %s: ai_prob=%s market_price=%s", market_id, ai_prob, market_price)
+        return 0.0
+
+    # Validate inputs are numeric
+    try:
+        ai_prob = float(ai_prob)
+        market_price = float(market_price)
+    except (TypeError, ValueError):
+        logger.debug("Edge calc skipped for %s: non-numeric ai_prob=%s market_price=%s", market_id, ai_prob, market_price)
+        return 0.0
+
+    # Validate inputs are in 0.0-1.0 range
+    if not (0.0 <= ai_prob <= 1.0):
+        logger.warning("Edge calc: ai_prob %.4f out of range [0,1] for %s — capping to [0,1]", ai_prob, market_id)
+        ai_prob = max(0.0, min(1.0, ai_prob))
+    if not (0.0 < market_price <= 1.0):
+        logger.debug("Edge calc skipped for %s: market_price %.4f out of range (0,1]", market_id, market_price)
+        return 0.0
+
+    # Calculate edge
+    edge = ((ai_prob - market_price) / market_price) * 100.0
+
+    # Sanity cap
+    if edge > MAX_EDGE_PCT:
+        logger.warning("Edge capped for %s: raw=%.2f%% -> capped=%.2f%%", market_id, edge, MAX_EDGE_PCT)
+        edge = MAX_EDGE_PCT
+
+    # Sanity floor: edge below -100% is nonsensical, skip
+    if edge < MIN_EDGE_PCT:
+        logger.warning("Edge rejected for %s: %.2f%% < %.2f%%", market_id, edge, MIN_EDGE_PCT)
+        return 0.0
+
+    return edge
+
 
 def _extract_market_category(ticker: str) -> str:
     prefix = ticker.split("-")[0] if "-" in ticker else ticker[:12]
@@ -304,12 +359,11 @@ def find_best_maker_market(markets: list, min_edge_pct: float = 0.5) -> dict:
             true_price = estimate_true_price(market_question, market_id)
         maker_fee = get_maker_fee(yes_price)
         
-        # Calculate if maker is profitable
-        edge_pct = 0.0  # Initialize
-        if is_maker_profitable(yes_price, true_price, 0.6):  # 60% win prob
-            current_edge_pct = ((true_price - yes_price) / yes_price) * 100
-            edge_pct = current_edge_pct
-            
+        # Calculate edge using validated helper
+        edge_pct = calculate_edge_pct(true_price, yes_price, market_id)
+        
+        # Check if maker is profitable
+        if edge_pct > 0 and is_maker_profitable(yes_price, true_price, 0.6):  # 60% win prob
             # Check if this market has better edge than current best
             if edge_pct > best_edge_pct:
                 best_edge_pct = edge_pct
@@ -433,15 +487,8 @@ def get_edge_after_fees(market: dict, true_price: float = None) -> float:
         market_id = market.get("ticker", market.get("id", "?"))
         true_price = estimate_true_price(market_question, market_id)
     
-    # Calculate probability-weighted fee
-    fee_pct = 0.07  # Probability-scaled fee
-    fee = fee_pct * yes_price  # 0.07 × yes_price
-    
-    # Calculate edge before fees
-    if yes_price < true_price:
-        edge_before_fees_pct = ((true_price - yes_price) / yes_price) * 100
-    else:
-        edge_before_fees_pct = 0
+    # Use validated edge helper
+    edge_before_fees_pct = calculate_edge_pct(true_price, yes_price, market.get("id", "?"))
     
     # Calculate edge after fees (using maker if available)
     if yes_price == 0.50:
@@ -453,9 +500,11 @@ def get_edge_after_fees(market: dict, true_price: float = None) -> float:
         if true_price <= 0:
             edge_after_fees_pct = 0
         else:
-            edge_after_fees_pct = ((true_price - (yes_price + maker_fee)) / true_price) * 100
+            # Fee-adjusted edge: account for maker fee
+            fee_adjusted_price = yes_price + maker_fee
+            edge_after_fees_pct = calculate_edge_pct(true_price, fee_adjusted_price, market.get("id", "?"))
     
-    logger.debug(f"Market {market.get('id')}: price={yes_price:.4f}, fee={fee:.4f}¢, edge_before={edge_before_fees_pct:.2f}%, edge_after={edge_after_fees_pct:.2f}%")
+    logger.debug(f"Market {market.get('id')}: price={yes_price:.4f}, edge_before={edge_before_fees_pct:.2f}%, edge_after={edge_after_fees_pct:.2f}%")
     
     return edge_after_fees_pct
 
@@ -600,16 +649,10 @@ def optimize_kalshi_strategy(
         except Exception as e:
             logger.warning("[PREMIUM] Pre-dedup failed: %s", e)
 
-    # Split premium into two volume-sorted buckets: short-term (<=7d) and long-term (>7d)
-    # Each bucket gets up to 10 markets; together they form the 20-market AI premium tier
+    # ── Expiry filter: reject markets too far in the future ─────────────
     now_ts = datetime.now(timezone.utc).timestamp()
-    SHORT_DAYS = 7
-    SHORT_MIN_VOL = 0
-    SHORT_MAX = 10
-    LONG_MAX = 10
-
-    short_bucket = []
-    long_bucket = []
+    before_expiry = len(markets)
+    markets_filtered = []
     for m in markets:
         end_time = m.get("close_time") or m.get("expiration_date")
         days_left = float("inf")
@@ -623,11 +666,54 @@ def optimize_kalshi_strategy(
             except Exception:
                 pass
         m["_days_to_end"] = days_left
+        if days_left != float("inf") and days_left > MAX_DAYS_TO_EXPIRY:
+            logger.info(
+                "[EXPIRY] Skipping %s: %.0f days to expiry > max %.0f",
+                m.get("ticker", m.get("id", "?")),
+                days_left,
+                MAX_DAYS_TO_EXPIRY,
+            )
+            continue
+        markets_filtered.append(m)
+    markets = markets_filtered
+    logger.info(
+        "[EXPIRY] Filtered %d -> %d markets (max_days=%.0f)",
+        before_expiry,
+        len(markets),
+        MAX_DAYS_TO_EXPIRY,
+    )
+
+    # Split premium into two volume-sorted buckets: short-term (<=7d) and long-term (>7d)
+    # Each bucket gets up to 10 markets; together they form the 20-market AI premium tier
+    SHORT_DAYS = 7
+    SHORT_MIN_VOL = 0
+    SHORT_MAX = 10
+    LONG_MAX = 10
+
+    short_bucket = []
+    long_bucket = []
+    for m in markets:
+        days_left = m.get("_days_to_end", float("inf"))
         vol = m.get("volume_24h", 0) or m.get("liquidity_usd", 0)
         if days_left <= SHORT_DAYS and vol > SHORT_MIN_VOL:
             short_bucket.append(m)
         else:
             long_bucket.append(m)
+
+    # Cap long-term bucket at MAX_LONG_TERM_DAYS
+    long_bucket_filtered = []
+    for m in long_bucket:
+        days_left = m.get("_days_to_end", float("inf"))
+        if days_left != float("inf") and days_left > MAX_LONG_TERM_DAYS:
+            logger.info(
+                "[EXPIRY] Skipping long-term %s: %.0f days > max_long_term %.0f",
+                m.get("ticker", m.get("id", "?")),
+                days_left,
+                MAX_LONG_TERM_DAYS,
+            )
+            continue
+        long_bucket_filtered.append(m)
+    long_bucket = long_bucket_filtered
 
     short_bucket.sort(key=lambda m: m.get("volume_24h", 0) or m.get("liquidity_usd", 0), reverse=True)
     long_bucket.sort(key=lambda m: m.get("volume_24h", 0) or m.get("liquidity_usd", 0), reverse=True)
@@ -870,17 +956,9 @@ def optimize_kalshi_strategy(
             
             logger.debug(f"Market {market_id}: Estimated fee: {estimated_fee_pct:.2f}% (${fee_cost:.4f})")
         
-        # Calculate expected edge after fees
-        if use_maker and yes_price == 0.50:
-            # Maker order at 50¢: no fee
-            edge_after_fees_pct = ((true_price - yes_price) / true_price) * 100
-        else:
-            # Maker order below 50¢: pay taker fee on fill
-            edge_before_fees_pct = ((true_price - yes_price) / yes_price) * 100
-            # Expected to pay taker fee 50% of time (when filled)
-            expected_taker_fee_pct = edge_before_fees_pct * 0.5
-            edge_after_fees_pct = edge_before_fees_pct - expected_taker_fee_pct
-            logger.debug(f"Market {market_id}: Edge before fees: {edge_before_fees_pct:.2f}%, expected taker fee: {expected_taker_fee_pct:.2f}%")
+        # Edge already computed by get_edge_after_fees above; do NOT recalculate
+        # The fee-adjusted edge from get_edge_after_fees is the authoritative value
+        logger.debug(f"Market {market_id}: Using edge_after_fees={edge_after_fees_pct:.2f}% from get_edge_after_fees")
         
         # Apply expiry penalty: >30d = 0.3x, >14d = 0.7x, <=7d = no penalty
         _days_to_exp = market.get("_days_to_end")
@@ -962,6 +1040,18 @@ def optimize_kalshi_strategy(
             if market_id in all_existing_tickers:
                 logger.info("%s SKIP %s — already have open order or position", prefix, market_id)
                 continue
+
+            # ── Cash balance guard ─────────────────────────────────────────
+            try:
+                from utils.kalshi import get_kalshi_balance
+                cash_balance = get_kalshi_balance()
+                if cash_balance < 1.0:
+                    logger.info(
+                        "%s Insufficient cash: $%.2f, skipping order cycle", prefix, cash_balance
+                    )
+                    break
+            except Exception as e:
+                logger.warning("%s Cash balance check failed: %s", prefix, e)
 
             # Safety countdown on first order of session
             if not optimize_kalshi_strategy._first_order_placed:
