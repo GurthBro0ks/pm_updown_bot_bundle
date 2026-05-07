@@ -1,5 +1,44 @@
 # Claude Progress — pm_updown_bot_bundle
 
+## 2026-05-07 (resume_readiness_gate — Final Resume Readiness Assessment)
+
+**Agent:** OpenCode (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Kalshi strategy
+**Type:** Read-Only Assessment — Final gate before micro-live trading resume
+
+### Summary
+Ran comprehensive read-only gate to verify all safety patches are present and working.
+All acceptance criteria pass. Account is clean. Shadow smoke shows only safe would-orders.
+
+### Assessment Results
+- **Resting orders**: 0 ✅
+- **Open positions**: 0 ✅
+- **Balance**: $17.84 (parses correctly) ✅
+- **Live cron**: paused ✅
+- **Tests**: 439/439 pass ✅
+- **Shadow safe would-orders**: 3 (all uncapped, all ≥5c, all index, all ≤14d) ✅
+- **Edge rejections**: 4 capped candidates properly rejected ✅
+- **Price skips**: 6 sub-5c rejected ✅
+- **Expiry skips**: 310 long-dated rejected ✅
+- **No live orders**: Only shadow mode executed ✅
+- **No secrets leaked**: SCAN_PASS=1 ✅
+
+### Commits Verified
+- `7475196`: Edge cap rejection patch
+- `0f4bb28`: Trade brakes patch  
+- `5785a3a`: Fee multiplier fix
+
+### Recommendation
+**PASS_RESUME_READY_TINY_LIMITS**
+
+Resume with probation settings: MAX_ORDERS_PER_RUN=1, MAX_DAILY_LOSS_USD=$1.00, 48h probation.
+**Do NOT set TRADING_PAUSED=false without human approval.**
+
+### Proof
+`/tmp/proof_resume_readiness_20260507T163004Z/RESULT.txt`
+
+---
+
 ## 2026-05-07 (edge_cap_reject — Reject Capped/Insane Edge Candidates)
 
 **Agent:** OpenCode (SlimyAI NUC1)
