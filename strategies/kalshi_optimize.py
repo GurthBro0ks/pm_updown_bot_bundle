@@ -94,6 +94,53 @@ MAX_ORDERS_PER_RUN = int(os.getenv("MAX_ORDERS_PER_RUN", "2") or "2")
 MAX_NOTIONAL_PER_RUN_USD = float(os.getenv("MAX_NOTIONAL_PER_RUN_USD", "1.00") or "1.00")
 
 
+def calculate_edge_pct_with_flag(ai_prob: float, market_price: float, market_id: str = "?") -> tuple[float, bool]:
+    """
+    Calculate edge percentage with validation and sanity caps.
+
+    Returns:
+        (edge_pct: float, was_capped: bool)
+        was_capped is True if raw edge exceeded MAX_EDGE_PCT.
+    """
+    # Validate inputs are not None
+    if ai_prob is None or market_price is None:
+        logger.debug("Edge calc skipped for %s: ai_prob=%s market_price=%s", market_id, ai_prob, market_price)
+        return 0.0, False
+
+    # Validate inputs are numeric
+    try:
+        ai_prob = float(ai_prob)
+        market_price = float(market_price)
+    except (TypeError, ValueError):
+        logger.debug("Edge calc skipped for %s: non-numeric ai_prob=%s market_price=%s", market_id, ai_prob, market_price)
+        return 0.0, False
+
+    # Validate inputs are in 0.0-1.0 range
+    if not (0.0 <= ai_prob <= 1.0):
+        logger.warning("Edge calc: ai_prob %.4f out of range [0,1] for %s — capping to [0,1]", ai_prob, market_id)
+        ai_prob = max(0.0, min(1.0, ai_prob))
+    if not (0.0 < market_price <= 1.0):
+        logger.debug("Edge calc skipped for %s: market_price %.4f out of range (0,1]", market_id, market_price)
+        return 0.0, False
+
+    # Calculate edge
+    edge = ((ai_prob - market_price) / market_price) * 100.0
+
+    # Sanity cap
+    was_capped = False
+    if edge > MAX_EDGE_PCT:
+        logger.warning("Edge capped for %s: raw=%.2f%% -> capped=%.2f%%", market_id, edge, MAX_EDGE_PCT)
+        was_capped = True
+        edge = MAX_EDGE_PCT
+
+    # Sanity floor: edge below -100% is nonsensical, skip
+    if edge < MIN_EDGE_PCT:
+        logger.warning("Edge rejected for %s: %.2f%% < %.2f%%", market_id, edge, MIN_EDGE_PCT)
+        return 0.0, False
+
+    return edge, was_capped
+
+
 def calculate_edge_pct(ai_prob: float, market_price: float, market_id: str = "?") -> float:
     """
     Calculate edge percentage with validation and sanity caps.
@@ -104,40 +151,7 @@ def calculate_edge_pct(ai_prob: float, market_price: float, market_id: str = "?"
     Returns 0.0 if inputs are invalid or edge is negative.
     Caps edge at MAX_EDGE_PCT (500%) with a warning.
     """
-    # Validate inputs are not None
-    if ai_prob is None or market_price is None:
-        logger.debug("Edge calc skipped for %s: ai_prob=%s market_price=%s", market_id, ai_prob, market_price)
-        return 0.0
-
-    # Validate inputs are numeric
-    try:
-        ai_prob = float(ai_prob)
-        market_price = float(market_price)
-    except (TypeError, ValueError):
-        logger.debug("Edge calc skipped for %s: non-numeric ai_prob=%s market_price=%s", market_id, ai_prob, market_price)
-        return 0.0
-
-    # Validate inputs are in 0.0-1.0 range
-    if not (0.0 <= ai_prob <= 1.0):
-        logger.warning("Edge calc: ai_prob %.4f out of range [0,1] for %s — capping to [0,1]", ai_prob, market_id)
-        ai_prob = max(0.0, min(1.0, ai_prob))
-    if not (0.0 < market_price <= 1.0):
-        logger.debug("Edge calc skipped for %s: market_price %.4f out of range (0,1]", market_id, market_price)
-        return 0.0
-
-    # Calculate edge
-    edge = ((ai_prob - market_price) / market_price) * 100.0
-
-    # Sanity cap
-    if edge > MAX_EDGE_PCT:
-        logger.warning("Edge capped for %s: raw=%.2f%% -> capped=%.2f%%", market_id, edge, MAX_EDGE_PCT)
-        edge = MAX_EDGE_PCT
-
-    # Sanity floor: edge below -100% is nonsensical, skip
-    if edge < MIN_EDGE_PCT:
-        logger.warning("Edge rejected for %s: %.2f%% < %.2f%%", market_id, edge, MIN_EDGE_PCT)
-        return 0.0
-
+    edge, _ = calculate_edge_pct_with_flag(ai_prob, market_price, market_id)
     return edge
 
 
@@ -1025,10 +1039,21 @@ def optimize_kalshi_strategy(
 
         # Calculate edge after fees
         edge_after_fees_pct = get_edge_after_fees(market, true_price=true_price)
-        
+
+        # ── Edge sanity: reject capped / insane raw edge ─────────────────
+        # A capped edge means the model/price comparison is too extreme or noisy.
+        # This is NOT a valid edge — reject the candidate entirely.
+        _, raw_edge_was_capped = calculate_edge_pct_with_flag(true_price, yes_price, market_id)
+        if raw_edge_was_capped:
+            logger.info(
+                "[EDGE] Rejecting %s: raw edge exceeds max sane edge %.2f%%",
+                market_id, MAX_EDGE_PCT,
+            )
+            continue
+
         # Check if this market is a best maker market
         is_best_maker = (best_maker_market and market_id == best_maker_market.get("id"))
-        
+
         # Only trade if edge after fees is sufficient
         if edge_after_fees_pct < risk_caps["edge_after_fees_pct"]:
             logger.debug(f"Market {market_id}: edge={edge_after_fees_pct:.2f}% < {risk_caps['edge_after_fees_pct']}%, too low")

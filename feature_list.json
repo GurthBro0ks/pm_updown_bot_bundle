@@ -51,5 +51,18 @@
     "file": "strategies/kalshi_optimize.py",
     "changes": ["AI_MAX_PRIORS_PER_RUN default: 10 → 20", "AI_PREMIUM_MAX default: 10 → 20", "Premium tier split: 10 short-term (<=7d expiry, vol>500) + 10 long-term (>7d expiry)", "Bulk tier absorbs remaining 0 markets (premium=20, ai_max=20, bulk=0)", "Log line: [PREMIUM] Short-term: N, Long-term: N, Total: N (max 10 each)", "KALSHI_BLOCKED_CATEGORIES: weather/economics NOT blocked (Entertainment/Mentions/Social/Exotics only)"],
     "description": "Premium tier expanded from 10 → 20 markets: 10 short-term (<=7d expiry) + 10 long-term (>7d expiry), each sorted by volume desc. Category blocklist confirmed clean — no weather/economics exclusions."
+  },
+  "edge_cap_rejection": {
+    "status": "fixed",
+    "file": "strategies/kalshi_optimize.py, tests/test_trade_brakes.py",
+    "changes": [
+      "calculate_edge_pct_with_flag() exposes was_capped bool when raw edge exceeds MAX_EDGE_PCT",
+      "Main loop rejects capped-edge candidates before any order (live or shadow)",
+      "Log line: [EDGE] Rejecting {ticker}: raw edge exceeds max sane edge {max}%",
+      "calculate_edge_pct() remains backward-compatible (returns float)",
+      "9 new tests: below cap, exactly at cap, above cap, backward compat, 13c/85%, 52c/65%, negative, zero, sub-5c"
+    ],
+    "description": "Capped edge candidates are now rejected instead of being allowed through. A capped edge indicates noisy/broken model/price comparison and is not a valid edge. Shadow no longer counts capped-edge markets as safe would-orders.",
+    "proof": "/tmp/proof_edge_cap_reject_final"
   }
 }

@@ -1,5 +1,52 @@
 # Claude Progress — pm_updown_bot_bundle
 
+## 2026-05-07 (edge_cap_reject — Reject Capped/Insane Edge Candidates)
+
+**Agent:** OpenCode (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Kalshi strategy
+**Type:** Bug Fix / Safety Hardening — Reject capped edge candidates before live trading
+
+### Summary
+Implemented rejection (not mere capping) for raw edge values exceeding MAX_EDGE_PCT (500%).
+A capped edge indicates a noisy or broken model/price comparison and must not become an order.
+
+### Problem
+Shadow runs were producing capped edge warnings (900%, 3233%, 9900%) and still simulating orders.
+The `calculate_edge_pct()` function capped the edge to 500% but returned it as a "valid" edge,
+allowing capped candidates to pass all downstream gates and become simulated/live orders.
+
+### Solution
+1. Added `calculate_edge_pct_with_flag()` returning `(edge: float, was_capped: bool)`
+2. Kept `calculate_edge_pct()` backward-compatible (delegates to new helper)
+3. In main loop (`optimize_kalshi_strategy`), after computing `edge_after_fees_pct`,
+   check `was_capped` on the raw edge. If True: log rejection and `continue`.
+4. This applies to both live and shadow paths — capped edges never reach order placement.
+
+### Files Changed
+- `strategies/kalshi_optimize.py`: +40 lines (new helper + rejection logic in main loop)
+- `tests/test_trade_brakes.py`: +67 lines (9 new edge-cap rejection tests)
+
+### Verification
+- Full test suite: 439/439 pass (430 existing + 9 new) ✅
+- Shadow smoke: 3 would-orders (all uncapped), 3 edge rejections (capped), 2 price skips, 344 expiry skips ✅
+- Resting orders: 0, Open positions: 0 ✅
+- Live cron: paused (micro-live line commented out) ✅
+- Secret scan: no secrets in patch ✅
+- No live/micro-live execution ✅
+
+### Proof Pack
+Location: `/tmp/proof_edge_cap_reject_final/`
+Files: repo_status.txt, edge_cap_flow_audit.txt, full_tests.txt, shadow_smoke_after_edge_cap_reject.txt,
+      resting_order_review_after_edge_patch.md, git_diff_stat.txt, git_diff_after.txt,
+      no_secret_scan.txt, RESULT.txt
+
+### Next Steps
+- Monitor shadow mode for continued correct rejection of capped-edge candidates
+- Consider reducing MAX_EDGE_PCT from 500% to a lower threshold if shadow still shows many capped edges
+- Only unpause live trading after full QA verification
+
+---
+
 ## 2026-04-13 (sr-notify fix-qa — Cents/Dollars Unit Audit + Fix)
 
 **Agent:** Claude Code (SlimyAI NUC1)

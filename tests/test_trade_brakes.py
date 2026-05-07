@@ -129,6 +129,67 @@ class TestBalanceParse:
         assert callable(get_kalshi_balance)
 
 
+class TestEdgeCapRejection:
+    """Test raw edge > MAX_EDGE_PCT is rejected, not merely capped."""
+
+    def test_calculate_edge_pct_with_flag_exists(self):
+        """calculate_edge_pct_with_flag should be defined."""
+        assert callable(ko.calculate_edge_pct_with_flag)
+
+    def test_edge_below_cap_passes(self):
+        """Raw edge below MAX_EDGE_PCT should not be flagged as capped."""
+        edge, was_capped = ko.calculate_edge_pct_with_flag(0.60, 0.50, "TEST")
+        assert edge == pytest.approx(20.0, abs=1e-6)
+        assert was_capped is False
+
+    def test_edge_exactly_at_cap_passes(self):
+        """Raw edge exactly at MAX_EDGE_PCT should not be flagged as capped."""
+        # Use values that yield exactly 500% with clean binary floating point
+        # (0.75 - 0.125) / 0.125 * 100 = 0.625 / 0.125 * 100 = 5 * 100 = 500.0 exactly
+        edge, was_capped = ko.calculate_edge_pct_with_flag(0.75, 0.125, "TEST")
+        assert edge == pytest.approx(ko.MAX_EDGE_PCT, abs=1e-6)
+        assert was_capped is False
+
+    def test_edge_above_cap_is_rejected(self):
+        """Raw edge above MAX_EDGE_PCT should be flagged as capped."""
+        edge, was_capped = ko.calculate_edge_pct_with_flag(0.48, 0.0022, "TEST")
+        assert edge == pytest.approx(ko.MAX_EDGE_PCT, abs=1e-6)
+        assert was_capped is True
+
+    def test_calculate_edge_pct_backward_compatible(self):
+        """calculate_edge_pct should still return float only."""
+        edge = ko.calculate_edge_pct(0.48, 0.0022, "TEST")
+        assert isinstance(edge, float)
+        assert edge == pytest.approx(ko.MAX_EDGE_PCT, abs=1e-6)
+
+    def test_13c_price_85pct_prior_is_capped(self):
+        """13c price with 85% AI prior: raw edge = (0.85-0.13)/0.13*100 = 553.8% > 500% cap."""
+        edge, was_capped = ko.calculate_edge_pct_with_flag(0.85, 0.13, "TEST")
+        assert was_capped is True
+
+    def test_52c_price_65pct_prior_is_not_capped(self):
+        """52c price with 65% AI prior: raw edge = (0.65-0.52)/0.52*100 = 25% < 500% cap."""
+        edge, was_capped = ko.calculate_edge_pct_with_flag(0.65, 0.52, "TEST")
+        assert was_capped is False
+        assert edge == pytest.approx(25.0, abs=1e-6)
+
+    def test_negative_edge_not_capped(self):
+        """Negative edge should not trigger was_capped flag."""
+        edge, was_capped = ko.calculate_edge_pct_with_flag(0.30, 0.50, "TEST")
+        assert edge == pytest.approx(-40.0, abs=1e-6)
+        assert was_capped is False
+
+    def test_zero_edge_not_capped(self):
+        """Zero edge should not trigger was_capped flag."""
+        edge, was_capped = ko.calculate_edge_pct_with_flag(0.50, 0.50, "TEST")
+        assert edge == pytest.approx(0.0, abs=1e-6)
+        assert was_capped is False
+
+    def test_sub_5c_rejected_by_price_floor(self):
+        """Sub-5c price should be rejected by price floor before edge check."""
+        assert ko.MIN_TRADE_PRICE_CENTS >= 5
+
+
 class TestIntegration:
     """Integration smoke tests."""
 
