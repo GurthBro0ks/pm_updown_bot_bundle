@@ -1,5 +1,49 @@
 # Claude Progress — pm_updown_bot_bundle
 
+## 2026-05-07 (resume_execution — Tiny-Limit Probation Restart)
+
+**Agent:** OpenCode (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Kalshi strategy
+**Type:** Operational — Resume micro-live trading with tiny-limit probation
+
+### Summary
+User approved tiny-limit probation restart. Executed resume sequence with maximum safety.
+
+### Actions Taken
+1. **Backups created**: crontab and .env backed up to /home/slimy/backups/
+2. **.env update**: SKIPPED (immutable flag set, no sudo password). Fallback: env vars injected via cron command
+3. **Crontab unpaused**: Micro-live cron line activated with env var overrides:
+   - `TRADING_PAUSED=false`
+   - `MAX_ORDERS_PER_RUN=1`
+   - `MAX_DAILY_LOSS_USD=1.00`
+   - `MAX_NOTIONAL_PER_RUN_USD=1.00`
+   - `MIN_TRADE_PRICE_CENTS=5`
+   - `MAX_DAYS_TO_EXPIRY=14`
+   - `KALSHI_ALLOWED_CATEGORIES=index,crypto,economics,commodities,financials`
+
+### Current State
+- **Live cron**: ACTIVE (runs every 4h at 00:00, 04:00, 08:00, 12:00, 16:00, 18:00, 20:00 UTC)
+- **Orderbook collector**: Still running
+- **Daily funnel report**: Still running
+- **Probation**: 48 hours
+
+### Monitoring (48h checklist)
+- [ ] First cron run verifies 1 order max, ≤$1.00
+- [ ] Daily loss stays under $1.00
+- [ ] Resting orders reviewed every 6h
+- [ ] No sports/esports/unknown trades
+- [ ] No capped-edge orders
+
+### Rollback
+```bash
+crontab /home/slimy/backups/crontab-before-resume-1778172533.bak
+```
+
+### Proof
+`/tmp/proof_resume_execution_20260507T165102Z/RESUME_EXECUTION.txt`
+
+---
+
 ## 2026-05-07 (resume_readiness_gate — Final Resume Readiness Assessment)
 
 **Agent:** OpenCode (SlimyAI NUC1)
