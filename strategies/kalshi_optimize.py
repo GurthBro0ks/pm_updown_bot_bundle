@@ -75,6 +75,24 @@ MIN_EDGE_PCT = -100.0
 MAX_DAYS_TO_EXPIRY = float(os.getenv("MAX_DAYS_TO_EXPIRY", "14") or "14")
 MAX_LONG_TERM_DAYS = float(os.getenv("MAX_LONG_TERM_DAYS", "30") or "30")
 
+# Category allowlist/blocklist (configurable via env)
+DEFAULT_ALLOWED_CATEGORIES = {"index", "crypto", "economics", "commodities", "financials", "politics"}
+_allowed_env = os.getenv("KALSHI_ALLOWED_CATEGORIES", "")
+if _allowed_env.strip():
+    ALLOWED_CATEGORIES = set(c.strip().lower() for c in _allowed_env.split(",") if c.strip())
+else:
+    ALLOWED_CATEGORIES = DEFAULT_ALLOWED_CATEGORIES
+
+# Price floor (configurable via env)
+MIN_TRADE_PRICE_CENTS = int(os.getenv("MIN_TRADE_PRICE_CENTS", "5") or "5")
+
+# Daily loss guard (configurable via env)
+MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", "1.00") or "1.00")
+
+# Run limits (configurable via env)
+MAX_ORDERS_PER_RUN = int(os.getenv("MAX_ORDERS_PER_RUN", "2") or "2")
+MAX_NOTIONAL_PER_RUN_USD = float(os.getenv("MAX_NOTIONAL_PER_RUN_USD", "1.00") or "1.00")
+
 
 def calculate_edge_pct(ai_prob: float, market_price: float, market_id: str = "?") -> float:
     """
@@ -123,7 +141,18 @@ def calculate_edge_pct(ai_prob: float, market_price: float, market_id: str = "?"
     return edge
 
 
-def _extract_market_category(ticker: str) -> str:
+def _extract_market_category(ticker: str, series_category: str = None) -> str:
+    """Extract market category from series metadata or ticker prefix."""
+    # Prefer series_category if available
+    if series_category:
+        cat = series_category.lower().strip()
+        if cat in ("sports", "esports", "entertainment", "social"):
+            return cat
+        if cat in ("index", "crypto", "economics", "commodities", "financials", "politics"):
+            return cat
+        if cat in ("other", "unknown", ""):
+            return "other"
+    # Fallback to ticker prefix
     prefix = ticker.split("-")[0] if "-" in ticker else ticker[:12]
     for key, cat in _TICKER_CATEGORY_MAP.items():
         if prefix.startswith(key):
@@ -135,6 +164,41 @@ def _extract_market_category(ticker: str) -> str:
     if "BTC" in ticker or "ETH" in ticker:
         return "crypto"
     return "other"
+
+
+def _is_category_allowed(category: str, mode: str) -> bool:
+    """Check if a category is allowed for trading in the given mode."""
+    cat = category.lower().strip()
+    # In shadow mode, allow everything but tag it
+    if mode == "shadow":
+        return True
+    # Live modes: only allowlisted categories
+    return cat in ALLOWED_CATEGORIES
+
+
+def _get_todays_realized_pnl(db_path: str = "/opt/slimy/pm_updown_bot_bundle/paper_trading/pnl.db") -> float:
+    """Query pnl.db for today's realized PnL from executed trades."""
+    try:
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        # Sum realized_pnl_usd for trades with status='executed' or 'settled' today
+        cursor.execute(
+            """SELECT COALESCE(SUM(realized_pnl_usd), 0.0) FROM trades 
+               WHERE date(timestamp) = ? AND status IN ('executed', 'settled')""",
+            (today,)
+        )
+        result = cursor.fetchone()[0]
+        conn.close()
+        return float(result) if result else 0.0
+    except Exception as e:
+        logger.warning("[DAILY_LOSS] Could not query today's PnL: %s", e)
+        # Fail closed: if we can't determine PnL, assume we've lost the max
+        # unless explicitly allowed
+        if os.getenv("ALLOW_UNKNOWN_DAILY_PNL", "false").lower() in ("true", "1", "yes"):
+            return 0.0
+        return -float("inf")
 
 # Stub for missing function
 def check_micro_live_gates(market, size, price, risk_caps, venue, computed_edge_pct=None):
@@ -655,7 +719,7 @@ def optimize_kalshi_strategy(
     markets_filtered = []
     for m in markets:
         end_time = m.get("close_time") or m.get("expiration_date")
-        days_left = float("inf")
+        days_left = None
         if end_time:
             try:
                 if isinstance(end_time, str):
@@ -664,9 +728,26 @@ def optimize_kalshi_strategy(
                     end_dt = end_time
                 days_left = (end_dt.timestamp() - now_ts) / 86400
             except Exception:
-                pass
-        m["_days_to_end"] = days_left
-        if days_left != float("inf") and days_left > MAX_DAYS_TO_EXPIRY:
+                days_left = None
+        m["_days_to_end"] = days_left if days_left is not None else float("inf")
+        
+        # In live modes, reject missing/unparseable expiry
+        is_live = mode in ("real-live", "micro-live")
+        if days_left is None:
+            if is_live:
+                logger.info(
+                    "[EXPIRY] Skipping %s: missing/unparseable expiry",
+                    m.get("ticker", m.get("id", "?")),
+                )
+                continue
+            else:
+                # Shadow mode: tag but don't skip
+                m["_expiry_unsafe"] = True
+                logger.debug(
+                    "[EXPIRY] Tagging %s: missing/unparseable expiry (shadow)",
+                    m.get("ticker", m.get("id", "?")),
+                )
+        elif days_left > MAX_DAYS_TO_EXPIRY:
             logger.info(
                 "[EXPIRY] Skipping %s: %.0f days to expiry > max %.0f",
                 m.get("ticker", m.get("id", "?")),
@@ -681,6 +762,30 @@ def optimize_kalshi_strategy(
         before_expiry,
         len(markets),
         MAX_DAYS_TO_EXPIRY,
+    )
+
+    # ── Category filter: reject disallowed categories in live modes ─────
+    before_cat = len(markets)
+    markets_filtered = []
+    for m in markets:
+        ticker = m.get("ticker", m.get("id", "?"))
+        series_cat = m.get("series_category") or m.get("category")
+        category = _extract_market_category(ticker, series_cat)
+        m["_category"] = category
+        if not _is_category_allowed(category, mode):
+            logger.info(
+                "[CATEGORY] Skipping %s: category=%s not in allowlist",
+                ticker,
+                category,
+            )
+            continue
+        markets_filtered.append(m)
+    markets = markets_filtered
+    logger.info(
+        "[CATEGORY] Filtered %d -> %d markets (allowed=%s)",
+        before_cat,
+        len(markets),
+        ",".join(sorted(ALLOWED_CATEGORIES)),
     )
 
     # Split premium into two volume-sorted buckets: short-term (<=7d) and long-term (>7d)
@@ -970,6 +1075,15 @@ def optimize_kalshi_strategy(
                 edge_after_fees_pct *= 0.7
                 logger.debug(f"Market {market_id}: {int(_days_to_exp)}d expiry — applied 0.7x mid-dated penalty")
         
+        # ── Price floor check (explicit, before gates) ──────────────────
+        price_cents = int(round(yes_price * 100))
+        if price_cents < MIN_TRADE_PRICE_CENTS:
+            logger.info(
+                "[PRICE] Skipping %s: price %dc < min %dc",
+                market_id, price_cents, MIN_TRADE_PRICE_CENTS,
+            )
+            continue
+
         # Check if order passes gates
         passed, violations = check_micro_live_gates(market, optimal_size, yes_price, risk_caps, "kalshi", computed_edge_pct=edge_after_fees_pct)
         
@@ -1053,6 +1167,35 @@ def optimize_kalshi_strategy(
             except Exception as e:
                 logger.warning("%s Cash balance check failed: %s", prefix, e)
 
+            # ── Daily loss guard ────────────────────────────────────────────
+            if is_live:
+                daily_pnl = _get_todays_realized_pnl()
+                if daily_pnl <= -MAX_DAILY_LOSS_USD:
+                    logger.warning(
+                        "[DAILY_LOSS] Skipping live order cycle: daily_pnl=%.2f max_loss=%.2f",
+                        daily_pnl, MAX_DAILY_LOSS_USD,
+                    )
+                    break
+
+            # ── Max orders per run ────────────────────────────────────────
+            orders_placed_this_run = getattr(optimize_kalshi_strategy, "_orders_placed_this_run", 0)
+            if orders_placed_this_run >= MAX_ORDERS_PER_RUN:
+                logger.info(
+                    "[RUN_LIMIT] Max orders per run reached: %d/%d",
+                    orders_placed_this_run, MAX_ORDERS_PER_RUN,
+                )
+                break
+
+            # ── Max notional per run ──────────────────────────────────────
+            notional_this_run = getattr(optimize_kalshi_strategy, "_notional_this_run", 0.0)
+            order_notional = order_price  # $ per contract
+            if notional_this_run + order_notional > MAX_NOTIONAL_PER_RUN_USD:
+                logger.info(
+                    "[RUN_LIMIT] Max notional per run reached: %.2f/%.2f (next=%.2f)",
+                    notional_this_run, MAX_NOTIONAL_PER_RUN_USD, order_notional,
+                )
+                break
+
             # Safety countdown on first order of session
             if not optimize_kalshi_strategy._first_order_placed:
                 logger.warning(
@@ -1088,6 +1231,11 @@ def optimize_kalshi_strategy(
                     "%s ORDER PLACED: %s %s @ %dc -> order_id=%s cost=$%.4f",
                     prefix, order_side, market_id, price_cents, order_id, cost_usd,
                 )
+
+                # Track orders and notional for run limits
+                optimize_kalshi_strategy._orders_placed_this_run = getattr(optimize_kalshi_strategy, "_orders_placed_this_run", 0) + 1
+                optimize_kalshi_strategy._notional_this_run = getattr(optimize_kalshi_strategy, "_notional_this_run", 0.0) + cost_usd
+
                 # Write to proof pack — price_cents is int (cents), size_usd and cost_usd are float (dollars)
                 proof_data.setdefault("orders_placed", []).append({
                     "market_id": market_id,

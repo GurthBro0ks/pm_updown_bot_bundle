@@ -611,12 +611,27 @@ def get_kalshi_balance():
 
     try:
         data = resp.json()
-        # Balance is returned in cents
-        balance = data.get("balance", 0)
-        # Kalshi API returns balance in cents — convert to dollars
-        balance_usd = float(balance) / 100.0
-        logger.info(f"[WALLET] Fetched balance: ${balance_usd:.2f}")
-        return balance_usd
+        # Try modern API field first (dollars/fp as string)
+        balance_dollars = data.get("balance_dollars") or data.get("balance_fp")
+        if balance_dollars is not None:
+            try:
+                balance_usd = float(balance_dollars)
+                logger.info(f"[WALLET] Fetched balance (modern): ${balance_usd:.2f}")
+                return balance_usd
+            except (ValueError, TypeError):
+                pass
+        # Fallback to legacy cents field
+        balance_cents = data.get("balance")
+        if balance_cents is not None:
+            try:
+                balance_usd = float(balance_cents) / 100.0
+                logger.info(f"[WALLET] Fetched balance (legacy cents): ${balance_usd:.2f}")
+                return balance_usd
+            except (ValueError, TypeError):
+                pass
+        # No recognizable balance field
+        logger.warning(f"[WALLET] No recognizable balance field in response: {list(data.keys())}")
+        return 0.0
     except Exception as e:
         logger.warning(f"[WALLET] Balance parse failed: {e} body={resp.text[:200]}")
         return 0.0

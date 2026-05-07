@@ -54,6 +54,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ── Emergency trading pause ───────────────────────────────────────────────
+TRADING_PAUSED = os.getenv("TRADING_PAUSED", "false").lower() in ("true", "1", "yes")
+
 CURRENT_PHASE = "shipping_mode"  # Phase 1 & 2 complete, Phase 3 in progress
 
 RISK_CAPS = {
@@ -319,6 +322,12 @@ def main():
     logger.info(f"STAGE BUDGETS: {stage_budgets}")
     logger.info(f"CRON RUN ID: {cron_run_id}")
     logger.info("=" * 60)
+
+    # ── Emergency trading pause ─────────────────────────────────────────
+    is_live_mode = args.mode in ("micro-live", "real-live")
+    if is_live_mode and TRADING_PAUSED:
+        logger.warning("[SAFETY] TRADING_PAUSED=true — live trading disabled")
+        sys.exit(0)
 
     results = {}
 
