@@ -77,7 +77,7 @@ def notify_order_placed(ticker: str, side: str, price_cents: float,
     if ai_probability is not None:
         fields.append({"name": "AI Prob", "value": f"{ai_probability:.1%}", "inline": True})
     if edge_pct is not None:
-        fields.append({"name": "Edge", "value": f"{edge_pct:.1%}", "inline": True})
+        fields.append({"name": "Edge", "value": f"{edge_pct:.1f}%", "inline": True})
     if kelly_fraction is not None:
         fields.append({"name": "Kelly", "value": f"{kelly_fraction:.3f}", "inline": True})
     if cascade_provider:
