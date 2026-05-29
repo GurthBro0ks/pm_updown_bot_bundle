@@ -1,0 +1,22 @@
+RESULT=PASS
+proof_dir=/tmp/proof_gh_tracker_phase7h_pm_updown_untrack_runtime_20260529T215831Z
+repo_path=/opt/slimy/pm_updown_bot_bundle
+branch=feat/ibkr-forecast-integration
+backup_created=yes
+runtime_files_deleted=no
+used_git_rm_cached_only=yes
+gitignore_changed=yes
+untracked_from_git=data/scratchpad.jsonl,paper_trading/airdrop.db,paper_trading/airdrops.db,paper_trading/paper_pnl.db,paper_trading/pnl.db,paper_trading/pnl.db-shm,paper_trading/pnl.db-wal,paper_trading/wallet.db
+files_still_on_disk=yes
+committed=yes
+commit=5078cd06f322f91393e6c2cd80e8e4d100418793
+pushed=yes
+force_push_used=no
+aggregate_validation=PASS
+runtime_validation=PASS
+github_validation=PASS
+service_active=yes
+public_gate_401=yes
+protected_api_401=yes
+final_queue_summary=dirty=6 (pm_updown_bot_bundle runtime resolved, remaining: shadow_resolution_cache.json + pre-existing untracked), unpushed=2 (operational hold+active dev)
+recommended_next_action=Continue with next Maintenance Queue item or resume feature work on pm_updown_bot_bundle
