@@ -25,6 +25,14 @@ config/*.env
 keys/
 kalshi_private_key.pem
 
+# Runtime database/state artifacts
+data/scratchpad.jsonl
+paper_trading/*.db
+paper_trading/*.db-shm
+paper_trading/*.db-wal
+paper_trading/orderbook_snapshots.db
+report*.json
+
 # Logs
 logs/
 *.log
