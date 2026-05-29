@@ -68,3 +68,7 @@ runtime/
 test_*.json
 test_output/
 ml/training_data.db
+
+# Runtime cache / accidental local run artifacts
+shadow_resolution_cache.json
+!
