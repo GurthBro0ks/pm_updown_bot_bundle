@@ -1230,7 +1230,7 @@ def optimize_kalshi_strategy(
                 optimize_kalshi_strategy._first_order_placed = True
 
             # Convert price to cents (Kalshi native unit)
-            price_cents = int(order_price * 100)
+            price_cents = int(round(order_price * 100))
             quantity = 1  # KalshiOrderClient enforces MAX_QUANTITY=1
 
             try:
@@ -1324,7 +1324,7 @@ def optimize_kalshi_strategy(
                 })
         elif dry_run:
             prefix = MICRO_LIVE_LOG if mode == "micro-live" else "SHADOW MODE"
-            price_cents_shadow = int(order_price * 100)
+            price_cents_shadow = int(round(order_price * 100))
             cost_usd_shadow = price_cents_shadow / 100.0  # estimated cost in dollars
             logger.info(f"{prefix}: Would place order on {market_id}: {order_side} ${optimal_size:.2f} @ {order_price:.4f} (%dc, ~$%.2f)", price_cents_shadow, cost_usd_shadow)
             proof_data.setdefault("orders_placed", []).append({
