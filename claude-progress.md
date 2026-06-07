@@ -1,5 +1,40 @@
 # Claude Progress — pm_updown_bot_bundle
 
+## 2026-06-07 (vol_model_provider — Volatility-Based Probability Prior)
+
+**Agent:** OpenCode (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Kalshi strategy
+**Type:** Feature — Post-cascade volatility model and shrinkage fallback
+
+### Summary
+Added a volatility-based probability model for Kalshi S&P/NDX index contracts. The LLM cascade remains unchanged; after it returns a raw AI probability, supported index tickers are parsed for strike/expiry and blended with a log-normal realized-vol model using `0.6 * vol_prob + 0.4 * ai_prob`. Markets without a usable vol model fall back to shrinkage: `0.5 + (ai_prob - 0.5) * 0.5`.
+
+### Changes
+1. Added `providers/vol_model.py` with ticker parsing, yfinance history fetch, 10-day annualized realized volatility, log-normal probability calculation, 5-minute cache, blending, and shrinkage helpers.
+2. Integrated the vol model in `strategies/kalshi_optimize.py` immediately after the cascade output and before edge/Kelly sizing.
+3. Preserved raw LLM probability in `_ai_raw_probability`; downstream `_ai_true_price` now receives the blended or shrunk probability.
+4. Added `[VOL_MODEL]` and `[SHRINKAGE]` logs for index blending and fallback paths.
+5. Updated Discord order notifications to keep raw `AI Prob` and add `Vol Model Prob` plus `Blended Prob`.
+6. Added `scipy==1.17.1` to `requirements.txt`.
+7. Added `tests/test_vol_model.py` covering probability behavior, parsing, blending, shrinkage, unknown tickers, and cache reuse.
+
+### Verified
+- `./venv/bin/python3 -c "import yfinance; import scipy.stats; print('OK')"` → `OK`
+- Baseline before edits: `./venv/bin/python3 -m pytest tests/ -x -q` → `439 passed, 2 warnings`
+- Baseline before edits: `./scripts/run_tests.sh` → pre-existing risk/micro-live failures, including `ML-08` runner timeout after 10s
+- `./venv/bin/python3 -m pytest tests/test_vol_model.py -q` → `10 passed`
+- `./venv/bin/python3 -m py_compile providers/vol_model.py strategies/kalshi_optimize.py utils/discord_notify.py` → PASS
+- `./venv/bin/python3 -m pytest tests/ -x -q` → `449 passed, 2 warnings`
+- Quick integration smoke parsed `KXINXU-26MAY08H1600-T7374.9999` and returned live yfinance S&P vol-model result
+- Post-change `./scripts/run_tests.sh` → same pre-existing risk/micro-live shell failure path persisted, including `ML-08` runner timeout
+
+### Unverified / Known Issues
+- `./scripts/run_tests.sh` is not green; it failed before and after this feature in the risk/micro-live shell suite.
+- No live/micro-live order was placed.
+- Existing dirty runtime state was left untouched: `data/shadow_resolution_cache.json` and untracked `!`.
+
+---
+
 ## 2026-05-07 (resume_execution — Tiny-Limit Probation Restart)
 
 **Agent:** OpenCode (SlimyAI NUC1)
@@ -345,4 +380,3 @@ pytest tests/test_contract_signals.py tests/test_fear_regime.py -v → 24 passed
 - Dedup callers in kalshi_optimize.py updated to use status="resting"
 - Validation: resting=0, canceled=18, all=18 — correct filtering confirmed
 - Committed and pushed: 675ab39
-

@@ -64,6 +64,8 @@ def _send_embed(title: str, description: str, color: int, fields: list = None,
 
 def notify_order_placed(ticker: str, side: str, price_cents: float,
                         quantity: int, ai_probability: float = None,
+                        vol_model_probability: float = None,
+                        blended_probability: float = None,
                         edge_pct: float = None, kelly_fraction: float = None,
                         cascade_provider: str = None,
                         days_to_expiry: float = None):
@@ -76,6 +78,10 @@ def notify_order_placed(ticker: str, side: str, price_cents: float,
     ]
     if ai_probability is not None:
         fields.append({"name": "AI Prob", "value": f"{ai_probability:.1%}", "inline": True})
+    if blended_probability is not None:
+        vol_value = "N/A" if vol_model_probability is None else f"{vol_model_probability:.1%}"
+        fields.append({"name": "Vol Model Prob", "value": vol_value, "inline": True})
+        fields.append({"name": "Blended Prob", "value": f"{blended_probability:.1%}", "inline": True})
     if edge_pct is not None:
         fields.append({"name": "Edge", "value": f"{edge_pct:.1f}%", "inline": True})
     if kelly_fraction is not None:

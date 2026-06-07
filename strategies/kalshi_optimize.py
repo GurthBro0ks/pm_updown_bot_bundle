@@ -33,6 +33,23 @@ except Exception:
     _was_last_prior_fallback = None
 
 try:
+    from providers.vol_model import (
+        apply_probability_shrinkage,
+        blend_probability,
+        compute_vol_probability,
+        parse_kalshi_index_ticker,
+    )
+except Exception:
+    compute_vol_probability = None
+    parse_kalshi_index_ticker = None
+
+    def blend_probability(ai_prob: float, vol_prob: float) -> float:
+        return max(0.0, min(1.0, (0.6 * float(vol_prob)) + (0.4 * float(ai_prob))))
+
+    def apply_probability_shrinkage(ai_prob: float) -> float:
+        return max(0.0, min(1.0, 0.5 + (float(ai_prob) - 0.5) * 0.5))
+
+try:
     from core.market_cursor import rotate_markets as _rotate_markets, compute_list_hash as _compute_list_hash
 except Exception:
     _rotate_markets = None
@@ -153,6 +170,53 @@ def calculate_edge_pct(ai_prob: float, market_price: float, market_id: str = "?"
     """
     edge, _ = calculate_edge_pct_with_flag(ai_prob, market_price, market_id)
     return edge
+
+
+def _get_vol_model_days_to_expiry(market: dict, parsed_ticker: dict) -> float:
+    days_to_end = market.get("_days_to_end")
+    if isinstance(days_to_end, (int, float)) and days_to_end > 0 and days_to_end != float("inf"):
+        return float(days_to_end)
+
+    expiry_date = parsed_ticker.get("expiry_date")
+    if expiry_date is None:
+        return 0.0
+    return float((expiry_date - datetime.now(timezone.utc).date()).days)
+
+
+def _apply_vol_model_or_shrinkage(market: dict, ai_prob: float) -> float:
+    ticker = market.get("ticker", market.get("id", "?"))
+    market["_ai_raw_probability"] = ai_prob
+    market["_vol_model"] = None
+    market["_vol_model_prob"] = None
+
+    parsed = parse_kalshi_index_ticker(ticker) if parse_kalshi_index_ticker is not None else None
+    if parsed is not None and compute_vol_probability is not None:
+        days_to_expiry = _get_vol_model_days_to_expiry(market, parsed)
+        vol_result = compute_vol_probability(
+            parsed["prefix"],
+            parsed["strike"],
+            days_to_expiry,
+            parsed.get("direction", "above"),
+        )
+        if vol_result is not None:
+            blended_prob = blend_probability(ai_prob, vol_result["vol_prob"])
+            market["_vol_model"] = vol_result
+            market["_vol_model_prob"] = vol_result["vol_prob"]
+            market["_blended_probability"] = blended_prob
+            logger.info(
+                "[VOL_MODEL] ticker=%s ai_prob=%.3f vol_prob=%.3f blended=%.3f",
+                ticker,
+                ai_prob,
+                vol_result["vol_prob"],
+                blended_prob,
+            )
+            return blended_prob
+
+    logger.info("[VOL_MODEL] Fallback to shrinkage for %s", ticker)
+    adjusted_prob = apply_probability_shrinkage(ai_prob)
+    market["_blended_probability"] = adjusted_prob
+    logger.info("[SHRINKAGE] ticker=%s raw=%.3f adjusted=%.3f", ticker, ai_prob, adjusted_prob)
+    return adjusted_prob
 
 
 def _extract_market_category(ticker: str, series_category: str = None) -> str:
@@ -896,16 +960,17 @@ def optimize_kalshi_strategy(
         per_call_timeout = stage_budget.remaining() if stage_budget else None
         if dry_run and per_call_timeout is not None:
             per_call_timeout = min(per_call_timeout, SHADOW_PER_CALL_TIMEOUT_CAP)
-        m["_ai_true_price"] = estimate_true_price(
+        ai_prob = estimate_true_price(
             m.get("title", m.get("question", "")),
             m.get("ticker", m.get("id", "?")),
             tier=m["_ai_tier"],
             timeout=per_call_timeout,
         )
+        m["_ai_true_price"] = _apply_vol_model_or_shrinkage(m, ai_prob)
         if _was_last_prior_fallback is not None:
             m["_ai_prior_is_fallback"] = _was_last_prior_fallback()
         else:
-            m["_ai_prior_is_fallback"] = (m["_ai_true_price"] == 0.5)
+            m["_ai_prior_is_fallback"] = (ai_prob == 0.5)
         cascade_attempted += 1
         if stage_budget is not None:
             stage_budget.mark_processed()
@@ -947,6 +1012,8 @@ def optimize_kalshi_strategy(
         market_id = market.get("id")
         yes_price = market.get("odds", {}).get("yes", 0.0)
         true_price = market.get("_ai_true_price", 0.5)
+        ai_raw_probability = market.get("_ai_raw_probability", true_price)
+        vol_model_probability = market.get("_vol_model_prob")
 
         # Skip markets with no AI signal (tier="skip" = no API call was made)
         if market.get("_ai_tier") == "skip":
@@ -1273,6 +1340,9 @@ def optimize_kalshi_strategy(
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                     "mode": mode,
                     "ai_probability": true_price,
+                    "ai_probability_raw": ai_raw_probability,
+                    "vol_model_probability": vol_model_probability,
+                    "blended_probability": true_price,
                     "edge_pct": edge_after_fees_pct,
                     "kelly_fraction": round(optimal_size / bankroll, 4) if bankroll > 0 else 0,
                     "expiration": market.get("close_time") or market.get("expiration_date"),
@@ -1307,7 +1377,9 @@ def optimize_kalshi_strategy(
                             side=order_side,
                             price_cents=price_cents,
                             quantity=quantity,
-                            ai_probability=true_price,
+                            ai_probability=ai_raw_probability,
+                            vol_model_probability=vol_model_probability,
+                            blended_probability=true_price,
                             edge_pct=edge_after_fees_pct,
                             kelly_fraction=round(optimal_size / bankroll, 4) if bankroll > 0 else 0,
                             cascade_provider=market.get("_ai_tier", "unknown"),
@@ -1338,6 +1410,9 @@ def optimize_kalshi_strategy(
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "mode": mode,
                 "ai_probability": true_price,
+                "ai_probability_raw": ai_raw_probability,
+                "vol_model_probability": vol_model_probability,
+                "blended_probability": true_price,
                 "edge_pct": edge_after_fees_pct,
                 "kelly_fraction": round(optimal_size / bankroll, 4) if bankroll > 0 else 0,
                 "expiration": market.get("close_time") or market.get("expiration_date"),
@@ -1372,7 +1447,9 @@ def optimize_kalshi_strategy(
                             side=order_side,
                             price_cents=price_cents_shadow,
                             quantity=1,
-                            ai_probability=true_price,
+                            ai_probability=ai_raw_probability,
+                            vol_model_probability=vol_model_probability,
+                            blended_probability=true_price,
                             edge_pct=edge_after_fees_pct,
                             kelly_fraction=round(optimal_size / bankroll, 4) if bankroll > 0 else 0,
                             cascade_provider=market.get("_ai_tier", "unknown"),
