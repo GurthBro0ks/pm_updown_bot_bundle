@@ -1,4 +1,31 @@
 {
+  "weather_activation_20260628": {
+    "status": "built_dry_run_cron_active_manual_qa_pending",
+    "file": "data/weather_markets.py, strategies/weather_signals.py, scripts/run_weather_strategy.py, scripts/cron_weather_trade.sh, tests/test_weather_strategy.py",
+    "passes": false,
+    "manual_qa_required": true,
+    "pushed": true,
+    "commit": "self_commit_final_sha_reported_in_closeout",
+    "proof_dir": "/tmp/proof_weather_activation_20260628T121012Z",
+    "description": "Migrated weather market discovery from removed legacy Kalshi fields to modern yes_bid_dollars/yes_ask_dollars/volume_fp/open_interest_fp, switched GFS signal edge to P(high > threshold), and activated a separate weather cron line in dry-run mode.",
+    "changes": [
+      "data/weather_markets.py reads modern Kalshi dollar/fixed-point fields and removed cents-to-dollars heuristic",
+      "strategies/weather_signals.py computes model probability as count(ensemble_members > threshold) / member_count, with edge = model_prob - market_price",
+      "scripts/run_weather_strategy.py enforces WEATHER_MAX_DAILY_TRADES=10, WEATHER_MAX_EXPOSURE_PER_CITY=$1.00, and WEATHER_MIN_EDGE_PCT=3.0 before order placement",
+      "scripts/cron_weather_trade.sh defaults to --dry-run via WEATHER_DRY_RUN=true",
+      "user crontab has separate weather line: 0 */2 * * * WEATHER_DRY_RUN=true /opt/slimy/pm_updown_bot_bundle/scripts/cron_weather_trade.sh"
+    ],
+    "validation": [
+      "./venv/bin/python3 -m pytest tests/ -x -q -> 459 passed, 2 warnings",
+      "weather market discovery smoke with cron-style env -> Found 20 weather markets; sample float bid/ask; Field migration PASS",
+      "scripts/run_weather_strategy.py --dry-run -> generated GFS ensemble signals and would-place logs only; no order client initialized in dry-run test",
+      "git diff --check -> PASS",
+      "./scripts/run_tests.sh -> FAIL on known ML-08 runner.py shadow timeout path; PIPESTATUS=1"
+    ],
+    "result": "WARN_MANUAL_QA_PENDING",
+    "notes": "Weather cron is active in dry-run only. Main bot cron line unchanged. No services restarted, no .env edits, no orders placed or canceled."
+  },
+
   "cents_dollars_fix": {
     "status": "fixed",
     "file": "strategies/kalshi_optimize.py, utils/kalshi_orders.py, tests/test_unit_conventions.py",

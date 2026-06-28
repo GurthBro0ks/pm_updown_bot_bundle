@@ -1,5 +1,44 @@
 # Claude Progress — pm_updown_bot_bundle
 
+## 2026-06-28 (weather_activation — Modern Kalshi Fields + Dry-Run Cron)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Kalshi weather scanner
+**Type:** Production strategy activation — dry-run only
+
+### Summary
+Migrated `data/weather_markets.py` off removed Kalshi legacy fields and activated the separate weather scanner cron in dry-run mode. The weather signal edge now uses the requested GFS ensemble threshold model: `count(ensemble_members > threshold) / member_count`, then `edge = model_prob - market_price`.
+
+### Changes
+1. `data/weather_markets.py` now reads `yes_bid_dollars`, `yes_ask_dollars`, `volume_fp`, and `open_interest_fp`, while preserving internal normalized keys.
+2. Removed the legacy cents-to-dollars heuristic from weather market discovery.
+3. `strategies/weather_signals.py` no longer uses a bin probability for KXHIGH; it uses the above-threshold GFS ensemble probability and does not call the LLM cascade.
+4. `scripts/run_weather_strategy.py` enforces runner-level safety limits: `WEATHER_MAX_DAILY_TRADES=10`, `WEATHER_MAX_EXPOSURE_PER_CITY=$1.00`, and `WEATHER_MIN_EDGE_PCT=3.0`.
+5. `scripts/cron_weather_trade.sh` defaults to `--dry-run` when `WEATHER_DRY_RUN` is unset/true.
+6. User crontab weather line is now separate and dry-run: `0 */2 * * * WEATHER_DRY_RUN=true /opt/slimy/pm_updown_bot_bundle/scripts/cron_weather_trade.sh`.
+7. Added `tests/test_weather_strategy.py` for modern market fields, GFS signal generation, dry-run order safety, and per-city exposure cap.
+
+### Verified
+- `./venv/bin/python3 -m py_compile data/weather_markets.py strategies/weather_signals.py scripts/run_weather_strategy.py tests/test_weather_strategy.py` — PASS.
+- `./venv/bin/python3 -m pytest tests/test_weather_strategy.py -q` — 4 passed.
+- `./venv/bin/python3 -m pytest tests/ -x -q` — 459 passed, 2 warnings.
+- Weather market discovery smoke with cron-style env — Found 20 weather markets; sample `KXHIGHMIA-26JUN28-B92.5 bid=0.56 ask=0.57 vol=15360.36`; field migration PASS.
+- `timeout 60 ./venv/bin/python3 scripts/run_weather_strategy.py --dry-run` — generated GFS ensemble signals and dry-run would-place logs only.
+- Crontab check — weather cron line has `WEATHER_DRY_RUN=true`; main `cron_micro_live.sh` line unchanged.
+- `git diff --check` — PASS.
+- Proof-dir secret scan — PASS.
+
+### Unverified / Known Issues
+- `./scripts/run_tests.sh` still fails on the known `ML-08` `runner.py --mode shadow --venue kalshi` 10-second timeout path (`PIPESTATUS=1`), unchanged from previous pm_updown sessions.
+- Manual QA remains pending: review dry-run weather logs/signals for 24-48h before switching to live.
+
+### Safety
+- No `.env` edits, services restarted, timers, tmux, Caddy, DNS, order placement, or order cancellation.
+- Main bot strategy `strategies/kalshi_optimize.py` was not modified.
+- Existing unrelated dirty state preserved: `data/shadow_resolution_cache.json` and untracked `!`.
+
+---
+
 ## 2026-06-28 (vol_gate_implementation — Scenario F MIN_VOL_PROB Gate)
 
 **Agent:** Codex (SlimyAI NUC1)

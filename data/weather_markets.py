@@ -50,6 +50,16 @@ CITY_NAMES = {
 KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
 
 
+def _as_float(value, default: float = 0.0) -> float:
+    """Parse Kalshi fixed-point string/numeric fields to float."""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _parse_kxhigh_ticker(ticker: str) -> Optional[Dict]:
     """
     Parse a KXHIGH ticker to extract metadata.
@@ -161,13 +171,10 @@ def fetch_markets_for_series(series_ticker: str, api_key: str, private_key) -> L
         if not parsed:
             continue
 
-        yes_bid = m.get("yes_bid", 0)
-        yes_ask = m.get("yes_ask", 0)
-
-        # Convert from cents to dollars if needed
-        if yes_ask > 1:
-            yes_bid = yes_bid / 100.0
-            yes_ask = yes_ask / 100.0
+        yes_bid = _as_float(m.get("yes_bid_dollars"))
+        yes_ask = _as_float(m.get("yes_ask_dollars"))
+        volume = _as_float(m.get("volume_fp"))
+        open_interest = _as_float(m.get("open_interest_fp"))
 
         mid_price = (yes_bid + yes_ask) / 2.0 if yes_bid and yes_ask else (yes_bid or yes_ask or 0.5)
 
@@ -193,8 +200,8 @@ def fetch_markets_for_series(series_ticker: str, api_key: str, private_key) -> L
             "yes_bid": yes_bid,
             "yes_ask": yes_ask,
             "mid_price": mid_price,
-            "volume": m.get("volume", 0),
-            "open_interest": m.get("open_interest", 0),
+            "volume": volume,
+            "open_interest": open_interest,
             "close_time": close_time,
             "hours_to_close": hours_to_close,
             "spread_cents": spread_cents,

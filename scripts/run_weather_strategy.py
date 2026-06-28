@@ -30,7 +30,7 @@ load_dotenv()
 
 from strategies.weather_signals import generate_weather_signals
 from utils.kalshi_orders import KalshiOrderClient, SafetyLimitError
-from utils.pnl_database import record_trade
+from utils.pnl_database import get_db, record_trade
 from utils.discord_notify import notify_order_placed
 from config import PROOF_DIR
 
@@ -39,6 +39,9 @@ logger = logging.getLogger(__name__)
 # Strategy config
 DEFAULT_BANKROLL = float(os.getenv("WEATHER_BANKROLL", "100.0"))
 MAX_OPEN_ORDERS = int(os.getenv("WEATHER_MAX_OPEN_ORDERS", "5"))
+WEATHER_MAX_DAILY_TRADES = int(os.getenv("WEATHER_MAX_DAILY_TRADES", "10"))
+WEATHER_MAX_EXPOSURE_PER_CITY = float(os.getenv("WEATHER_MAX_EXPOSURE_PER_CITY", "1.00"))
+WEATHER_MIN_EDGE_PCT = float(os.getenv("WEATHER_MIN_EDGE_PCT", "3.0"))
 DRY_RUN = False
 
 
@@ -78,6 +81,67 @@ def count_open_weather_orders(client: KalshiOrderClient) -> int:
     except Exception as e:
         logger.warning(f"[WEATHER_RUNNER] Failed to count open orders: {e}")
         return 0
+
+
+def count_weather_trades_today() -> int:
+    """Count live weather BUY trades recorded today in pnl.db."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        conn = get_db()
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS count
+            FROM trades
+            WHERE phase = 'weather'
+              AND action = 'BUY'
+              AND substr(timestamp, 1, 10) = ?
+            """,
+            (today,),
+        ).fetchone()
+        return int(row["count"] if row else 0)
+    except Exception as e:
+        logger.warning(f"[WEATHER_RUNNER] Failed to count daily weather trades: {e}")
+        return 0
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def apply_weather_risk_limits(signals: list, max_trades: int) -> list:
+    """Apply runner-level weather safety caps before any order call."""
+    selected = []
+    exposure_by_city = {}
+    min_edge_fraction = WEATHER_MIN_EDGE_PCT / 100.0
+
+    for signal in signals:
+        if len(selected) >= max_trades:
+            break
+
+        ticker = signal["ticker"]
+        edge_pct = signal["edge_pct"]
+        if edge_pct < min_edge_fraction:
+            logger.info(
+                f"[WEATHER_RUNNER] SKIP {ticker}: edge={edge_pct:.1%} < "
+                f"{WEATHER_MIN_EDGE_PCT:.1f}% runner minimum"
+            )
+            continue
+
+        city = signal.get("city_code") or signal.get("city") or "unknown"
+        current_exposure = exposure_by_city.get(city, 0.0)
+        next_exposure = current_exposure + signal["position_usd"]
+        if next_exposure > WEATHER_MAX_EXPOSURE_PER_CITY:
+            logger.info(
+                f"[WEATHER_RUNNER] SKIP {ticker}: city exposure ${next_exposure:.2f} "
+                f"> ${WEATHER_MAX_EXPOSURE_PER_CITY:.2f} cap for {city}"
+            )
+            continue
+
+        exposure_by_city[city] = next_exposure
+        selected.append(signal)
+
+    return selected
 
 
 def place_weather_order(
@@ -227,6 +291,7 @@ def main():
     # Step 2: Check risk gates
     logger.info("[2/3] Checking risk gates...")
     client = None
+    daily_trades = 0
     if not args.dry_run:
         client = get_order_client()
         if client is None:
@@ -241,12 +306,25 @@ def main():
             generate_proof(signals, 0, args.dry_run)
             return 0
 
+        daily_trades = count_weather_trades_today()
+        logger.info(f"[WEATHER_RUNNER] Daily weather trades: {daily_trades}/{WEATHER_MAX_DAILY_TRADES}")
+
+        if daily_trades >= WEATHER_MAX_DAILY_TRADES:
+            logger.warning(
+                f"[WEATHER_RUNNER] Max daily weather trades reached ({WEATHER_MAX_DAILY_TRADES}) — skipping"
+            )
+            generate_proof(signals, 0, args.dry_run)
+            return 0
+
     # Step 3: Place orders
     logger.info("[3/3] Placing orders...")
     trades_placed = 0
-    max_to_place = MAX_OPEN_ORDERS - (open_count if client else 0)
+    open_slots = MAX_OPEN_ORDERS - (open_count if client else 0)
+    daily_slots = WEATHER_MAX_DAILY_TRADES - daily_trades
+    max_to_place = max(0, min(open_slots, daily_slots))
+    selected_signals = apply_weather_risk_limits(signals, max_to_place)
 
-    for signal in signals[:max_to_place]:
+    for signal in selected_signals:
         success = place_weather_order(
             client=client,
             signal=signal,

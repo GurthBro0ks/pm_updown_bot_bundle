@@ -30,7 +30,6 @@ from datetime import datetime, timezone
 
 from data.weather_forecast import (
     get_ensemble_forecast_for_city_code,
-    get_ensemble_bin_probability,
 )
 from data.weather_markets import discover_weather_markets
 
@@ -153,12 +152,12 @@ def generate_weather_signals(
             logger.warning(f"[WEATHER_SIGNALS] SKIP {ticker}: insufficient ensemble data ({len(daily_highs)} members)")
             continue
 
-        # Step 4: Calculate ensemble probability
-        # KXHIGH markets are temperature BINS (e.g., "64-65°F")
-        # For B64.5, the bin is [64, 65] (1°F width)
-        bin_low = threshold - 0.5
-        bin_high = threshold + 0.5
-        ensemble_prob = get_ensemble_bin_probability(daily_highs, bin_low, bin_high)
+        # Step 4: Calculate ensemble probability.
+        # KXHIGH markets ask whether the daily high is above the threshold:
+        # P(high > threshold) = count(ensemble_members > threshold) / N.
+        members_above_threshold = sum(1 for t in daily_highs if t > threshold)
+        members_below_or_equal_threshold = len(daily_highs) - members_above_threshold
+        ensemble_prob = members_above_threshold / len(daily_highs)
 
         # Step 5: Calculate edge
         edge = ensemble_prob - market_price
@@ -173,9 +172,7 @@ def generate_weather_signals(
 
         # Step 6: Ensemble confidence
         # Confidence = fraction of members that agree with the majority direction
-        members_in_bin = sum(1 for t in daily_highs if bin_low <= t <= bin_high)
-        members_out_bin = len(daily_highs) - members_in_bin
-        confidence = max(members_in_bin, members_out_bin) / len(daily_highs)
+        confidence = max(members_above_threshold, members_below_or_equal_threshold) / len(daily_highs)
 
         # Filter: minimum confidence
         if confidence < MIN_ENSEMBLE_CONFIDENCE:
@@ -208,15 +205,15 @@ def generate_weather_signals(
             "city": market["city_name"],
             "city_code": city_code,
             "threshold": threshold,
-            "bin_low": bin_low,
-            "bin_high": bin_high,
             "ensemble_prob": ensemble_prob,
             "market_price": market_price,
             "edge": edge,
             "edge_pct": edge_pct,
             "confidence": confidence,
-            "members_in_bin": members_in_bin,
-            "members_out_bin": members_out_bin,
+            "members_above_threshold": members_above_threshold,
+            "members_below_or_equal_threshold": members_below_or_equal_threshold,
+            "members_in_bin": members_above_threshold,
+            "members_out_bin": members_below_or_equal_threshold,
             "total_members": len(daily_highs),
             "volume": volume,
             "spread_cents": spread_cents,
@@ -233,9 +230,9 @@ def generate_weather_signals(
         signals.append(signal)
 
         logger.info(
-            f"[WEATHER_SIGNALS] SIGNAL: {ticker} | {city_code} [{bin_low}-{bin_high}]°F | "
+            f"[WEATHER_SIGNALS] SIGNAL: {ticker} | {city_code} >{threshold}°F | "
             f"ensemble={ensemble_prob:.1%} market={market_price:.1%} edge={edge:+.1%} | "
-            f"confidence={confidence:.1%} ({members_in_bin}/{len(daily_highs)} in bin) | "
+            f"confidence={confidence:.1%} ({members_above_threshold}/{len(daily_highs)} above) | "
             f"side={side.upper()} size=${position_usd:.2f}"
         )
 
@@ -253,7 +250,7 @@ def get_signal_summary(signals: List[Dict]) -> str:
 
     for s in signals:
         lines.append(
-            f"  {s['ticker']}: {s['city']} [{s['bin_low']}-{s['bin_high']}]°F | "
+            f"  {s['ticker']}: {s['city']} >{s['threshold']}°F | "
             f"ensemble={s['ensemble_prob']:.1%} market={s['market_price']:.1%} "
             f"edge={s['edge']:+.1%} | {s['side'].upper()} ${s['position_usd']:.2f}"
         )
