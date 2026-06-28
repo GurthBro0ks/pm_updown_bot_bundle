@@ -110,6 +110,11 @@ MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", "1.00") or "1.00")
 MAX_ORDERS_PER_RUN = int(os.getenv("MAX_ORDERS_PER_RUN", "2") or "2")
 MAX_NOTIONAL_PER_RUN_USD = float(os.getenv("MAX_NOTIONAL_PER_RUN_USD", "1.00") or "1.00")
 
+# Minimum vol model probability for index markets. Trades where the vol model
+# says P(above strike) is below this value are rejected. Set to 0.0 to disable.
+# Default 0.30 is based on backtest scenario F: 46.4% WR, $5.78 PnL, 0.17 Sharpe.
+MIN_VOL_PROB = float(os.getenv("MIN_VOL_PROB", "0.30") or "0.30")
+
 
 def calculate_edge_pct_with_flag(ai_prob: float, market_price: float, market_id: str = "?") -> tuple[float, bool]:
     """
@@ -183,11 +188,28 @@ def _get_vol_model_days_to_expiry(market: dict, parsed_ticker: dict) -> float:
     return float((expiry_date - datetime.now(timezone.utc).date()).days)
 
 
+def _get_min_vol_prob() -> float:
+    try:
+        return float(os.getenv("MIN_VOL_PROB", str(MIN_VOL_PROB)) or "0.0")
+    except (TypeError, ValueError):
+        return MIN_VOL_PROB
+
+
+def _passes_vol_gate(vol_prob: float | None, min_vol_prob: float | None = None) -> bool:
+    """Return True when the vol gate should allow a market through."""
+    threshold = _get_min_vol_prob() if min_vol_prob is None else float(min_vol_prob)
+    if threshold <= 0.0 or vol_prob is None:
+        return True
+    return float(vol_prob) >= threshold
+
+
 def _apply_vol_model_or_shrinkage(market: dict, ai_prob: float) -> float:
     ticker = market.get("ticker", market.get("id", "?"))
     market["_ai_raw_probability"] = ai_prob
     market["_vol_model"] = None
     market["_vol_model_prob"] = None
+    market["_vol_gate_min"] = _get_min_vol_prob()
+    market["_vol_gate_rejected"] = False
 
     parsed = parse_kalshi_index_ticker(ticker) if parse_kalshi_index_ticker is not None else None
     if parsed is not None and compute_vol_probability is not None:
@@ -203,6 +225,7 @@ def _apply_vol_model_or_shrinkage(market: dict, ai_prob: float) -> float:
             market["_vol_model"] = vol_result
             market["_vol_model_prob"] = vol_result["vol_prob"]
             market["_blended_probability"] = blended_prob
+            min_vol_prob = market["_vol_gate_min"]
             logger.info(
                 "[VOL_MODEL] ticker=%s ai_prob=%.3f vol_prob=%.3f blended=%.3f",
                 ticker,
@@ -210,6 +233,15 @@ def _apply_vol_model_or_shrinkage(market: dict, ai_prob: float) -> float:
                 vol_result["vol_prob"],
                 blended_prob,
             )
+            if not _passes_vol_gate(vol_result["vol_prob"], min_vol_prob):
+                market["_vol_gate_rejected"] = True
+                logger.info(
+                    "[VOL_GATE] Rejecting %s: vol_prob %.3f < min %.3f",
+                    ticker,
+                    vol_result["vol_prob"],
+                    min_vol_prob,
+                )
+                return 0.5
             return blended_prob
 
     logger.info("[VOL_MODEL] Fallback to shrinkage for %s", ticker)
@@ -1014,6 +1046,7 @@ def optimize_kalshi_strategy(
         true_price = market.get("_ai_true_price", 0.5)
         ai_raw_probability = market.get("_ai_raw_probability", true_price)
         vol_model_probability = market.get("_vol_model_prob")
+        vol_gate_min = market.get("_vol_gate_min", _get_min_vol_prob())
 
         # Skip markets with no AI signal (tier="skip" = no API call was made)
         if market.get("_ai_tier") == "skip":
@@ -1342,6 +1375,7 @@ def optimize_kalshi_strategy(
                     "ai_probability": true_price,
                     "ai_probability_raw": ai_raw_probability,
                     "vol_model_probability": vol_model_probability,
+                    "vol_gate_min": vol_gate_min,
                     "blended_probability": true_price,
                     "edge_pct": edge_after_fees_pct,
                     "kelly_fraction": round(optimal_size / bankroll, 4) if bankroll > 0 else 0,
@@ -1380,6 +1414,7 @@ def optimize_kalshi_strategy(
                             ai_probability=ai_raw_probability,
                             vol_model_probability=vol_model_probability,
                             blended_probability=true_price,
+                            vol_gate_min=vol_gate_min,
                             edge_pct=edge_after_fees_pct,
                             kelly_fraction=round(optimal_size / bankroll, 4) if bankroll > 0 else 0,
                             cascade_provider=market.get("_ai_tier", "unknown"),
@@ -1412,6 +1447,7 @@ def optimize_kalshi_strategy(
                 "ai_probability": true_price,
                 "ai_probability_raw": ai_raw_probability,
                 "vol_model_probability": vol_model_probability,
+                "vol_gate_min": vol_gate_min,
                 "blended_probability": true_price,
                 "edge_pct": edge_after_fees_pct,
                 "kelly_fraction": round(optimal_size / bankroll, 4) if bankroll > 0 else 0,
@@ -1450,6 +1486,7 @@ def optimize_kalshi_strategy(
                             ai_probability=ai_raw_probability,
                             vol_model_probability=vol_model_probability,
                             blended_probability=true_price,
+                            vol_gate_min=vol_gate_min,
                             edge_pct=edge_after_fees_pct,
                             kelly_fraction=round(optimal_size / bankroll, 4) if bankroll > 0 else 0,
                             cascade_provider=market.get("_ai_tier", "unknown"),

@@ -1,5 +1,42 @@
 # Claude Progress — pm_updown_bot_bundle
 
+## 2026-06-28 (vol_gate_implementation — Scenario F MIN_VOL_PROB Gate)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Kalshi strategy
+**Type:** Production strategy filter — Vol-model gate
+
+### Summary
+Applied Scenario F from the vol-model backtest by adding a `MIN_VOL_PROB` gate to `strategies/kalshi_optimize.py`. Index markets with an available vol-model probability below the threshold are rejected after blending is computed; non-index markets and vol-model failures are not gated and still use the existing shrinkage fallback.
+
+### Changes
+1. Added `MIN_VOL_PROB = float(os.getenv("MIN_VOL_PROB", "0.30"))` with documentation that `0.0` disables the gate.
+2. Added `_passes_vol_gate()` and `_get_min_vol_prob()` helpers.
+3. Wired the gate after `blend_probability()`: if `vol_prob < MIN_VOL_PROB`, the market is logged with `[VOL_GATE]`, marked `_vol_gate_rejected=True`, and assigned neutral `0.5` so the existing order loop skips it.
+4. Added `vol_gate_min` to proof pack order records.
+5. Added `Vol Gate` to Discord order notification fields.
+6. Added `tests/test_vol_gate.py` with six focused tests: reject low probability, pass high probability, pass at threshold, skip non-index, disabled gate, and env override.
+
+### Verified
+- `./venv/bin/python3 -m py_compile strategies/kalshi_optimize.py utils/discord_notify.py tests/test_vol_gate.py` — PASS.
+- `./venv/bin/python3 -m pytest tests/test_vol_gate.py -q` — 6 passed, 1 warning.
+- `./venv/bin/python3 -m pytest tests/test_vol_gate.py tests/test_vol_model.py -q` — 16 passed, 1 warning.
+- `./venv/bin/python3 -m pytest tests/ -x -q` — 455 passed, 2 warnings.
+- `git diff --check` — PASS.
+- Synthetic shadow smoke with mocked vol probabilities — rejected=1, passed=2, `MIN_VOL_PROB=0.30`.
+- Proof-dir secret scan — no raw webhook URLs, private keys, signatures, or token-shaped secrets found.
+
+### Unverified / Known Issues
+- `./scripts/run_tests.sh` still fails on the known `ML-08` `runner.py --mode shadow --venue kalshi` 10-second timeout path (`PIPESTATUS=1 0`), unchanged from the prior vol-model/backtest sessions.
+- Manual QA remains pending. Cron was not unpaused and no live/shadow runner was executed because the existing shadow path writes trade rows and the shell gate already proves the runner timeout remains.
+
+### Safety
+- No `.env`, crontab, cron, service, systemd, timer, tmux, Caddy, or DNS changes.
+- No orders placed or canceled. No account state touched.
+- Existing unrelated dirty state preserved: `data/shadow_resolution_cache.json` and untracked `!`.
+
+---
+
 ## 2026-06-28 (vol_model_backtest — Historical Reconstruction + Scenario Backtest)
 
 **Agent:** Codex (SlimyAI NUC1)

@@ -105,5 +105,32 @@
     ],
     "result": "WARN",
     "notes": "Best retrospective scenario by net PnL was F Vol model only: 69 trades, 46.4% win rate, $5.78 net PnL, avg edge 66.9%, Sharpe-like 0.17. Actual settled PnL in processed DB rows was -$3.40, not the operator's rough -$31.20 profile figure; manual QA should reconcile against Kalshi account/profile totals before using recommendations."
+  },
+  "vol_gate_implementation_20260628": {
+    "status": "built_manual_qa_pending",
+    "file": "strategies/kalshi_optimize.py, utils/discord_notify.py, tests/test_vol_gate.py",
+    "passes": false,
+    "manual_qa_required": true,
+    "proof_dir": "/tmp/proof_vol_gate_20260628T113853Z",
+    "description": "Apply Scenario F from the vol-model backtest by adding a MIN_VOL_PROB gate. Index markets with a real vol_model probability below 0.30 are rejected; non-index or missing-vol-model markets continue through shrinkage fallback.",
+    "changes": [
+      "Added MIN_VOL_PROB env-backed threshold with default 0.30 and disable value 0.0",
+      "Added _passes_vol_gate helper and wired low-vol index rejection after blend_probability",
+      "Marked rejected index markets neutral at 0.5 so existing order loop skips them",
+      "Added vol_gate_min to proof pack order records",
+      "Added Vol Gate field to Discord order notification payload",
+      "Added six focused vol gate tests"
+    ],
+    "validation": [
+      "./venv/bin/python3 -m py_compile strategies/kalshi_optimize.py utils/discord_notify.py tests/test_vol_gate.py -> PASS",
+      "./venv/bin/python3 -m pytest tests/test_vol_gate.py -q -> 6 passed",
+      "./venv/bin/python3 -m pytest tests/test_vol_gate.py tests/test_vol_model.py -q -> 16 passed, 1 warning",
+      "./venv/bin/python3 -m pytest tests/ -x -q -> 455 passed, 2 warnings",
+      "synthetic shadow smoke -> rejected=1 passed=2 min_vol_prob=0.30",
+      "git diff --check -> PASS",
+      "./scripts/run_tests.sh -> FAIL on known ML-08 runner.py shadow timeout path; PIPESTATUS=1 0"
+    ],
+    "result": "WARN",
+    "notes": "No cron, service, crontab, .env, account state, order placement, or order cancellation changes. Ready for operator manual QA and manual cron resume decision."
   }
 }
