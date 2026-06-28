@@ -1,5 +1,46 @@
 # Claude Progress — pm_updown_bot_bundle
 
+## 2026-06-28 (vol_model_backtest — Historical Reconstruction + Scenario Backtest)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Kalshi backtesting
+**Type:** Feature — New offline backtest script
+
+### Summary
+Added `scripts/backtest_vol_model.py`, a read-only retrospective backtest that reconstructs settled Kalshi trades, optionally enriches with paginated Kalshi portfolio GETs, recomputes historical yfinance volatility probabilities as of each decision timestamp, and compares actual PnL against six scenario filters.
+
+### What Was Built
+1. Reads settled rows from `paper_trading/pnl.db` without modifying the database.
+2. Paginates read-only Kalshi portfolio history for `/portfolio/orders` and `/portfolio/fills` when env credentials are available.
+3. Parses index/crypto tickers including S&P, NDX/Nasdaq-100, BTC/ETH threshold contracts plus S&P/NDX range contracts.
+4. Fetches yfinance historical daily closes with `/tmp/pm_updown_yfinance_cache` caching, uses only data before the decision date, computes 10-day realized vol, then estimates threshold/range probabilities with a log-normal model.
+5. Applies production-style probability blending (`0.6 * vol_prob + 0.4 * ai_prob`) and shrinkage fallback for unparsed/non-index rows.
+6. Tests scenarios A-F for price floors, max DTE, mid-range focus, wider DTE, and vol-model-only filtering.
+7. Writes proof outputs under `/tmp/proof_backtest_build_20260628T112320Z/`.
+
+### Results
+- Settled DB trades processed: 271.
+- Kalshi API enrichment: 357 executed orders and 362 fills fetched through pagination.
+- Actual settled PnL in processed DB rows: `-$3.40`.
+- Vol-model rows: 249; unparsed rows: 22.
+- Best retrospective scenario: `F Vol model only` — 69 trades, 46.4% win rate, `$5.78` net PnL, 66.9% average edge, 0.17 Sharpe-like.
+
+### Verified
+- `./venv/bin/python3 -m py_compile scripts/backtest_vol_model.py` — PASS.
+- `./venv/bin/python3 scripts/backtest_vol_model.py --load-dotenv --output-dir /tmp/proof_backtest_build_20260628T112320Z` — PASS.
+- CSV validation — PASS, 271 rows.
+- `git diff --check` — PASS.
+- `./venv/bin/python3 -m pytest tests/test_vol_model.py -q` — 10 passed.
+- `./venv/bin/python3 -m pytest tests/ -q` — 449 passed, 2 warnings.
+- Proof-dir secret scan — no raw webhook URLs, private keys, signatures, or token-shaped secrets found.
+
+### Unverified / Known Issues
+- `./scripts/run_tests.sh` still fails on the known `ML-08` `runner.py --mode shadow --venue kalshi` 10-second timeout path (`PIPESTATUS=1 0`), consistent with the previous vol model session.
+- Manual QA remains pending. The processed DB settled PnL is `-$3.40`, which does not match the operator's rough `-$31.20` Kalshi profile figure; reconcile account/profile totals before applying any config recommendation.
+- No production trading config was changed. No orders placed or canceled. No cron, services, systemd, tmux, Caddy, or DNS changed.
+
+---
+
 ## 2026-06-07 (vol_model_provider — Volatility-Based Probability Prior)
 
 **Agent:** OpenCode (SlimyAI NUC1)

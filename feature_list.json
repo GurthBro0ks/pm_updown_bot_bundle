@@ -82,5 +82,28 @@
       "./scripts/run_tests.sh -> pre-existing risk/micro-live shell failures persisted, including ML-08 runner timeout"
     ],
     "description": "Volatility-based probability prior for S&P/NDX Kalshi index contracts. The LLM cascade remains unchanged; its raw probability is blended with realized-vol probability when index strike parsing and yfinance data succeed, otherwise a 0.5 shrinkage fallback is applied. Builder verified with pytest; shell truth gate had documented pre-existing failures before and after the change."
+  },
+  "vol_model_backtest_20260628": {
+    "status": "built_manual_qa_pending",
+    "file": "scripts/backtest_vol_model.py",
+    "passes": false,
+    "manual_qa_required": true,
+    "proof_dir": "/tmp/proof_backtest_build_20260628T112320Z",
+    "description": "Historical reconstruction and volatility-model scenario backtest for settled Kalshi trades. Reads settled pnl.db rows, paginates read-only Kalshi orders/fills when credentials are available, reconstructs historical yfinance vol probabilities as of trade time, and writes scenario comparison outputs.",
+    "outputs": [
+      "/tmp/proof_backtest_build_20260628T112320Z/backtest_results.csv",
+      "/tmp/proof_backtest_build_20260628T112320Z/backtest_summary.txt",
+      "/tmp/proof_backtest_build_20260628T112320Z/kalshi_api_snapshot.json"
+    ],
+    "validation": [
+      "./venv/bin/python3 -m py_compile scripts/backtest_vol_model.py -> PASS",
+      "./venv/bin/python3 scripts/backtest_vol_model.py --load-dotenv --output-dir /tmp/proof_backtest_build_20260628T112320Z -> PASS; orders=357, fills=362, settled_rows=271",
+      "./venv/bin/python3 -m pytest tests/test_vol_model.py -q -> 10 passed",
+      "./venv/bin/python3 -m pytest tests/ -q -> 449 passed, 2 warnings",
+      "git diff --check -> PASS",
+      "./scripts/run_tests.sh -> FAIL on known ML-08 runner.py shadow timeout path; PIPESTATUS=1 0"
+    ],
+    "result": "WARN",
+    "notes": "Best retrospective scenario by net PnL was F Vol model only: 69 trades, 46.4% win rate, $5.78 net PnL, avg edge 66.9%, Sharpe-like 0.17. Actual settled PnL in processed DB rows was -$3.40, not the operator's rough -$31.20 profile figure; manual QA should reconcile against Kalshi account/profile totals before using recommendations."
   }
 }
