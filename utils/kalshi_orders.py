@@ -7,7 +7,7 @@ Uses RSA-PSS signing per Kalshi trading API docs.
 
 AUTHENTICATION (per Kalshi docs):
   - Algorithm: RSA-PSS with SHA-256
-  - Signing string: timestamp + HTTP_method + path (path excludes /trade-api/v2 prefix)
+  - Signing string: timestamp + HTTP_method + path (path includes /trade-api/v2 prefix)
   - Timestamp: milliseconds (not seconds!)
   - Headers:
       KALSHI-ACCESS-KEY: API key ID (UUID)
@@ -21,7 +21,7 @@ Generate at: kalshi.com/account/profile → API Keys → Create New API Key
 The trading key will be a DIFFERENT UUID than the market data key.
 
 Safety limits:
-  - MAX_ORDER_CENTS = 10    (max $0.10 per order)
+  - MAX_ORDER_CENTS = 95    (max $0.95 per order)
   - MAX_QUANTITY = 1         (max 1 contract per order)
   - DAILY_LOSS_LIMIT_CENTS = 50  (max $0.50 daily loss)
 
@@ -40,6 +40,7 @@ import requests
 import base64
 from datetime import datetime, timezone
 from pathlib import Path
+import uuid
 from typing import Optional, Union
 
 # ---------------------------------------------------------------------------
@@ -95,7 +96,7 @@ class KalshiOrderClient:
     Kalshi order execution client with RSA-PSS authentication.
 
     Safety limits (hard caps):
-      MAX_ORDER_CENTS = 10       (max $0.10 per order)
+      MAX_ORDER_CENTS = 95       (max $0.95 per order)
       MAX_QUANTITY = 1           (max 1 contract per order)
       DAILY_LOSS_LIMIT_CENTS = 50  (max $0.50 daily loss)
 
@@ -108,7 +109,7 @@ class KalshiOrderClient:
     """
 
     # Hard safety caps
-    MAX_ORDER_CENTS = 50          # $0.10 max per order
+    MAX_ORDER_CENTS = int(os.getenv("MAX_ORDER_CENTS", "95"))  # $0.95 max per order
     MAX_QUANTITY = 1             # 1 contract max
     DAILY_LOSS_LIMIT_CENTS = 50  # $0.50 max daily loss
 
@@ -120,7 +121,7 @@ class KalshiOrderClient:
         self,
         api_key: Optional[str] = None,
         private_key_path: Optional[str] = None,
-        base_url: str = "https://api.elections.kalshi.com/trade-api/v2",
+        base_url: str = "https://api.elections.kalshi.com",
         log_path: str = "/opt/slimy/pm_updown_bot_bundle/logs/kalshi_orders.log",
     ):
         """
@@ -173,7 +174,7 @@ class KalshiOrderClient:
 
         Args:
             method: HTTP method (GET, POST, DELETE, etc.)
-            path: API path (e.g., /portfolio/balance — NOT the full URL)
+            path: API path (e.g., /trade-api/v2/portfolio/balance — NOT the full URL)
             body: Request body string (empty for GET requests)
 
         Returns:
@@ -181,8 +182,8 @@ class KalshiOrderClient:
         """
         ts = str(int(time.time() * 1000))  # milliseconds!
         # Signing string: timestamp + method + full_path (includes /trade-api/v2 prefix, no query params)
-        path_without_query = path.split('?')[0]
-        to_sign = f"{ts}{method}/trade-api/v2{path_without_query}"
+        path_without_query = self._normalize_api_path(path).split("?")[0]
+        to_sign = f"{ts}{method}{path_without_query}"
         sig = self._sign_pss(to_sign)
         return {
             "KALSHI-ACCESS-KEY": self.api_key,
@@ -190,6 +191,15 @@ class KalshiOrderClient:
             "KALSHI-ACCESS-SIGNATURE": sig,
             "Content-Type": "application/json",
         }
+
+    @staticmethod
+    def _normalize_api_path(path: str) -> str:
+        """Normalize paths to include the v2 API prefix."""
+        if not path.startswith("/"):
+            path = f"/{path}"
+        if path.startswith("/trade-api/v2"):
+            return path
+        return f"/trade-api/v2{path}"
 
     def _request(self, method: str, path: str, body: Optional[dict] = None, retries: int = 0, params: Optional[dict] = None) -> dict:
         """
@@ -202,7 +212,7 @@ class KalshiOrderClient:
 
         Args:
             method: HTTP method
-            path: API path (e.g., /portfolio/balance)
+            path: API path (e.g., /trade-api/v2/portfolio/balance)
             body: Request body dict (for POST/PUT)
             retries: Current retry count
             params: Query string params dict
@@ -215,8 +225,9 @@ class KalshiOrderClient:
             KalshiRateLimitError: On 429 rate limit after max retries
             Exception: On other HTTP errors
         """
-        # Serialize body FIRST so we can use it in the signing string
+        # Serialize body first for logging and signing compatibility.
         body_str = json.dumps(body) if body else ""
+        path = self._normalize_api_path(path)
         headers = self._get_auth_headers(method, path, body=body_str)
         url = f"{self.base_url}{path}"
 
@@ -286,7 +297,7 @@ class KalshiOrderClient:
                 self.MAX_ORDER_CENTS,
                 order_cents,
                 f"Order size {order_cents}c exceeds MAX_ORDER_CENTS={self.MAX_ORDER_CENTS}c "
-                f"(price_cents={price_cents} × quantity={quantity}). Max $0.10 per order."
+                f"(price_cents={price_cents} × quantity={quantity}). Max $0.95 per order."
             )
 
         # Check quantity
@@ -342,7 +353,7 @@ class KalshiOrderClient:
             client = KalshiOrderClient()
             print(client.get_balance())
         """
-        raw = self._request("GET", "/portfolio/balance")
+        raw = self._request("GET", "/trade-api/v2/portfolio/balance")
         available = raw.get("balance", 0)
         portfolio = raw.get("portfolio_value", 0)
         if isinstance(available, (int, float)) and available > 100:
@@ -365,7 +376,7 @@ class KalshiOrderClient:
         Raises:
             KalshiAuthError: If authentication fails
         """
-        data = self._request("GET", "/portfolio/positions")
+        data = self._request("GET", "/trade-api/v2/portfolio/positions")
         return data.get("positions", [])
 
     def get_orders(self, status: str = "resting") -> list:
@@ -379,7 +390,7 @@ class KalshiOrderClient:
             List of order dicts matching status
         """
         params = {} if status == "all" else {"status": status}
-        data = self._request("GET", "/portfolio/orders", params=params, retries=0)
+        data = self._request("GET", "/trade-api/v2/portfolio/orders", params=params, retries=0)
         orders = data.get("orders", [])
         if status != "all":
             orders = [o for o in orders if o.get("status") == status]
@@ -395,7 +406,7 @@ class KalshiOrderClient:
         Returns:
             Order dict with status, fills, remaining quantity
         """
-        return self._request("GET", f"/portfolio/orders/{order_id}")
+        return self._request("GET", f"/trade-api/v2/portfolio/orders/{order_id}")
 
     # -------------------------------------------------------------------------
     # Order execution
@@ -413,7 +424,7 @@ class KalshiOrderClient:
         Place a limit order on a Kalshi market.
 
         SAFETY: This method enforces hard caps BEFORE sending:
-          - MAX_ORDER_CENTS = 10  (max $0.10 per order)
+          - MAX_ORDER_CENTS = 95  (max $0.95 per order)
           - MAX_QUANTITY = 1      (max 1 contract)
           - DAILY_LOSS_LIMIT_CENTS = 50  (max $0.50 daily loss)
 
@@ -459,20 +470,32 @@ class KalshiOrderClient:
         if side == "yes":
             order_body = {
                 "ticker": ticker,
-                "action": "buy",
-                "side": "yes",
-                "count": quantity,
-                "type": order_type,
-                "yes_price": price_cents,
+                "side": "bid",
+                "count": f"{quantity:.2f}",
+                "price": f"{price_cents / 100:.4f}",
+                "time_in_force": "good_till_canceled",
+                "self_trade_prevention_type": "taker_at_cross",
+                "post_only": False,
+                "cancel_order_on_pause": False,
+                "reduce_only": False,
+                "subaccount": 0,
+                "exchange_index": 0,
+                "client_order_id": str(uuid.uuid4()),
             }
         else:
             order_body = {
                 "ticker": ticker,
-                "action": "buy",
-                "side": "no",
-                "count": quantity,
-                "type": order_type,
-                "no_price": price_cents,
+                "side": "ask",
+                "count": f"{quantity:.2f}",
+                "price": f"{(100 - price_cents) / 100:.4f}",
+                "time_in_force": "good_till_canceled",
+                "self_trade_prevention_type": "taker_at_cross",
+                "post_only": False,
+                "cancel_order_on_pause": False,
+                "reduce_only": False,
+                "subaccount": 0,
+                "exchange_index": 0,
+                "client_order_id": str(uuid.uuid4()),
             }
 
         self._log_order("ORDER_ATTEMPT", {
@@ -484,7 +507,8 @@ class KalshiOrderClient:
         })
 
         try:
-            result = self._request("POST", "/portfolio/orders", body=order_body)
+            # Use the current event-order create endpoint (V2)
+            result = self._request("POST", "/trade-api/v2/portfolio/events/orders", body=order_body)
 
             self._log_order("ORDER_PLACED", {
                 "ticker": ticker,
@@ -515,7 +539,7 @@ class KalshiOrderClient:
             Cancellation confirmation dict
         """
         self._log_order("CANCEL_ATTEMPT", {"order_id": order_id})
-        result = self._request("DELETE", f"/portfolio/orders/{order_id}")
+        result = self._request("DELETE", f"/trade-api/v2/portfolio/events/orders/{order_id}")
         self._log_order("CANCELLED", {"order_id": order_id, "result": result})
         return result
 

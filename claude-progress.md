@@ -1,5 +1,45 @@
 # Claude Progress — pm_updown_bot_bundle
 
+## 2026-07-01 (pm-updown-kalshi-order-api-fix — V2 Event-Order Endpoint + Cap Fix)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Kalshi order execution
+**Type:** Bug fix / live API compatibility
+
+### Summary
+Implemented the remaining production-order fix from the trade-drought diagnostic:
+1) switched live order placement to `POST /trade-api/v2/portfolio/events/orders` with Kalshi V2 request format, and
+2) made `MAX_ORDER_CENTS` configurable with default `95` cents.
+
+### Changes
+1. `utils/kalshi_orders.py` now normalizes all v2 API paths to `/trade-api/v2/...` via `base_url` and `_normalize_api_path`.
+2. `place_order()` now builds V2 event-order payloads (`side: bid/ask`, `count`/`price` strings, required order-control fields, generated `client_order_id`).
+3. `place_order()` now POSTs to `/trade-api/v2/portfolio/events/orders`.
+4. `cancel_order()` now DELETEs `/trade-api/v2/portfolio/events/orders/{order_id}`.
+5. `MAX_ORDER_CENTS` changed from hardcoded `50` to env-backed `int(os.getenv("MAX_ORDER_CENTS", "95"))`; stale comment updated.
+
+### Verified
+- `./venv/bin/python3 -m pytest tests/ -x -q` — 459 passed, 2 warnings.
+- Probe order (1¢ limit) executed on active market `KXETHY-27JAN0100-B2625`: `POST /trade-api/v2/portfolio/events/orders` returned `201`.
+- Probe cancellation succeeded immediately: `DELETE /trade-api/v2/portfolio/events/orders/{order_id}` returned success.
+- `scripts/review_resting_orders.py` run: `Resting orders: 0`, `Open positions: 0`.
+- Proof dir secret scan (`/tmp/proof_order_api_fix_20260701T223020Z/secret_scan.txt`) — no token-shaped data.
+- `git diff --check` (task-related files) — no whitespace issues.
+
+### Unverified / Known Issues
+- One existing root-cause diagnostic item remains: review whether old/duplicate strategy logic still emits stale order signals in live mode.
+- `/opt/slimy/pm_updown_bot_bundle/.env` remains unchanged.
+- `MAX_ORDER_CENTS` is now environment-driven but cron and strategy behavior are otherwise unchanged.
+
+### Safety
+COMMIT: `38eda0e`
+
+- No crontab/systemd/tmux/Caddy/DNS edits.
+- No service restarts.
+- No `.env` edits.
+- One live probe order was placed and immediately canceled (1¢, resting).
+- Existing unrelated dirty state preserved: `data/shadow_resolution_cache.json` and untracked `!`.
+
 ## 2026-06-28 (weather_activation — Modern Kalshi Fields + Dry-Run Cron)
 
 **Agent:** Codex (SlimyAI NUC1)
