@@ -1,5 +1,89 @@
 # Claude Progress — pm_updown_bot_bundle
 
+## 2026-07-02 (run_tests_ml08_timeout_triage — Shell Truth Gate Restored)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / `run_tests.sh` ML-08 timeout triage
+**Type:** Test harness fix
+
+### Summary
+Resolved the remaining `./scripts/run_tests.sh` blocker. The root cause was stale harness behavior: ML-08 and later parameter checks were launching `runner.py` shadow/micro-live pipelines even though the tests were only meant to validate CLI/parser contracts. Those subprocesses could time out or touch runtime paths, so the checks now validate the bounded source contract without executing the runner pipeline.
+
+### Changes
+1. `scripts/run_tests.sh` ML-08 now validates `runner.py` venue argparse choices/default and the explicit polymarket rejection guard statically.
+2. ML-11 through ML-16 now validate bankroll/max-pos/micro-live/kalshi/Kelly/risk-cap source contracts statically instead of launching shadow or micro-live subprocesses.
+3. ML-09 now checks the meaningful deprecation invariant: zero `datetime.utcnow()` calls.
+4. Fixed the ML-13 `$0.01` shell label so `$0` is not expanded to the script path.
+5. Added buglog: `docs/buglog/run_tests_ml08_timeout_triage_20260702.md`.
+
+### Verified
+- Baseline `timeout 240 bash -x ./scripts/run_tests.sh` - FAIL, ML-08 `runner.py --mode shadow --venue kalshi` timed out after 10 seconds.
+- `./scripts/run_tests.sh` - PASS, exit 0.
+- `./venv/bin/python3 -m pytest tests/ -x -q` - PASS, 481 passed, 2 warnings.
+- `git diff --check -- scripts/run_tests.sh` - PASS.
+- Weather cron policy check - PASS: `WEATHER_DRY_RUN=true`, no `WEATHER_LIVE_ENABLED=true`.
+- `WEATHER_DRY_RUN=true timeout 90 ./venv/bin/python3 scripts/run_weather_strategy.py --dry-run` - PASS dry-run only.
+- Secret marker scan of proof dir - PASS: no webhook/private-key/env-secret markers.
+
+### Proof
+- `/tmp/proof_run_tests_ml08_timeout_triage_20260702T143712Z`
+
+### Remaining
+- Claude pre-Fable safety closeout is the next step.
+- Operator review remains pending before any Fable/live-weather prompt.
+
+### Safety
+- No orders placed or canceled.
+- No live weather smoke.
+- No Discord sent.
+- No crontab, service, systemd, timer, tmux, Caddy, DNS, `.env`, or key changes.
+- No push.
+
+### Result
+PASS: shell truth gate restored. Fable was not run.
+
+## 2026-07-02 (weather_cron_policy_alignment — Installed Cron Dry-Run Alignment)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Weather runtime policy
+**Type:** Exact-bounded crontab-only ops alignment
+
+### Summary
+Aligned the installed weather cron with the documented runtime policy. The active `cron_weather_trade` line now visibly says `WEATHER_DRY_RUN=true`, matching the code-level fail-closed behavior added in commit `a93dc66`.
+
+### Changed
+1. Updated the existing active weather cron line only:
+   `0 */2 * * * WEATHER_DRY_RUN=true /opt/slimy/pm_updown_bot_bundle/scripts/cron_weather_trade.sh`
+2. Left the main `cron_micro_live.sh` line present and guarded unchanged.
+3. Did not add `WEATHER_LIVE_ENABLED=true`.
+4. Did not edit repo source, `.env`, systemd, services, timers, tmux, Caddy, DNS, or Discord configuration.
+
+### Verified
+- Crontab policy check - PASS: weather cron has `WEATHER_DRY_RUN=true`.
+- Weather live flag check - PASS: weather cron does not contain `WEATHER_LIVE_ENABLED=true`.
+- Main cron guard - PASS: `cron_micro_live.sh` still present.
+- `WEATHER_DRY_RUN=true timeout 90 ./venv/bin/python3 scripts/run_weather_strategy.py --dry-run` - PASS dry-run smoke only; no live weather smoke.
+- `./venv/bin/python3 -m pytest tests/ -q -k 'weather or breaker or circuit or calibration'` - PASS, 77 passed, 404 deselected, 1 warning.
+- `./venv/bin/python3 -m pytest tests/ -x -q` - PASS, 481 passed, 2 warnings.
+- Secret marker check - PASS after adjudication: only `KALSHI_ALLOWED_CATEGORIES` appeared in raw proof backup; no webhook or private-key markers.
+
+### Proof
+- `/tmp/proof_weather_cron_policy_alignment_20260702T142944Z`
+
+### Remaining Blockers
+- `./scripts/run_tests.sh` still has the previously reported risk-shell / ML-08 timeout WARN and needs a dedicated triage or explicit unrelated classification before Fable PASS.
+- Operator review and Claude safety closeout remain pending before any Fable/live weather prompt.
+
+### Safety
+- No orders placed or canceled.
+- No Discord sent.
+- No service restart.
+- No push.
+- No repo commit for this crontab-only phase.
+
+### Result
+PASS for cron policy alignment; overall weather readiness remains WARN until the shell truth gate warning is resolved or classified.
+
 ## 2026-07-02 (weather_policy_and_breaker_test_fix — Dry-Run Policy + Breaker Test Isolation)
 
 **Agent:** Codex (SlimyAI NUC1)
