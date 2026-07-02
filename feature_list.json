@@ -159,5 +159,31 @@
     ],
     "result": "WARN",
     "notes": "No cron, service, crontab, .env, account state, order placement, or order cancellation changes. Ready for operator manual QA and manual cron resume decision."
+  },
+  "ai_calibration_20260702": {
+    "status": "built_warn_known_env_test_failure",
+    "file": "providers/ai_calibration.py, strategies/kalshi_optimize.py, utils/discord_notify.py, tests/test_ai_calibration.py, tests/test_vol_gate.py",
+    "passes": false,
+    "manual_qa_required": true,
+    "proof_dir": "/tmp/proof_ai_calibration_20260702T091758Z",
+    "description": "Replace non-index flat probability shrinkage with a learned calibration table from settled pnl.db trades while preserving index vol-model blending and vol gate behavior.",
+    "changes": [
+      "Added providers/ai_calibration.py with 10% probability buckets, actual win rates, overall bias, 24h cache, insufficient-data fallback, and sparse-bucket nearest-neighbor fallback",
+      "Non-index/no-vol fallback in kalshi_optimize now uses calibrate_probability() instead of flat shrinkage when enough settled AI trades exist",
+      "Proof-pack order records now include calibrated_probability, calibration_bucket, and calibration_trades",
+      "Discord order embed adds Calibrated Prob only when calibration is used and no vol model blend exists",
+      "Added focused calibration tests for table building, overconfidence, underconfidence, insufficient data, sparse buckets, and cache rebuild"
+    ],
+    "validation": [
+      "./venv/bin/python3 -m py_compile providers/ai_calibration.py strategies/kalshi_optimize.py utils/discord_notify.py tests/test_ai_calibration.py -> PASS",
+      "./venv/bin/python3 -m pytest tests/test_ai_calibration.py tests/test_vol_gate.py -q -> 12 passed, 1 warning",
+      "./venv/bin/python3 -m pytest tests/ -x -q -> WARN known live breaker-state failure in test_daily_funnel_report.py::TestSectionAnomalies::test_no_anomalies",
+      "./venv/bin/python3 -m pytest tests/ -q -k 'not test_no_anomalies' -> 476 passed, 1 deselected, 2 warnings",
+      "Live calibration table -> 219 settled AI-prob trades, average AI prob 58.6%, actual win rate 29.2%, overall bias +29.4 percentage points",
+      "git diff --check on task files -> PASS",
+      "proof secret scan -> PASS"
+    ],
+    "result": "WARN",
+    "notes": "passes=false until the known Gemini breaker-state test is resolved or formally excluded from the truth gate. No cron/service/config changes and no orders placed."
   }
 }

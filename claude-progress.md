@@ -1,5 +1,45 @@
 # Claude Progress — pm_updown_bot_bundle
 
+## 2026-07-02 (ai_calibration — Historical AI Probability Calibration)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Kalshi AI calibration
+**Type:** Strategy calibration feature
+
+### Summary
+Added a historical calibration provider that bins settled `pnl.db` trades by raw AI probability and replaces the non-index flat shrinkage fallback with learned bucket win rates. Index vol-model blending and the `MIN_VOL_PROB` gate remain unchanged.
+
+### Changes
+1. Added `providers/ai_calibration.py` with 10% buckets, actual win-rate computation, 24h file-path cache, minimum-data fallback (`<50` trades), sparse-bucket nearest-neighbor fallback (`<5` trades), and flat shrinkage fallback.
+2. Wired `strategies/kalshi_optimize.py` so non-index / no-vol-model markets use calibration instead of flat shrinkage when enough settled AI trades exist.
+3. Added calibration metadata to proof-pack orders: `calibrated_probability`, `calibration_bucket`, and `calibration_trades`.
+4. Added Discord `Calibrated Prob` field only when calibration was used and no vol-model probability exists.
+5. Added `tests/test_ai_calibration.py` and adjusted the existing non-index vol-gate test to isolate vol-gate behavior from the new calibration provider.
+
+### Live Calibration Table
+- Settled AI-probability trades: 219 (enough data; threshold 50).
+- Overall actual rate: 29.2%.
+- Average AI probability: 58.6%.
+- Overall bias: +29.4 percentage points.
+- High-confidence buckets show material overconfidence: `0.7-0.8` bucket had 55 trades, 34.5% actual win rate, average AI probability 73.9%.
+
+### Verified
+- `./venv/bin/python3 -m py_compile providers/ai_calibration.py strategies/kalshi_optimize.py utils/discord_notify.py tests/test_ai_calibration.py` — PASS.
+- `./venv/bin/python3 -m pytest tests/test_ai_calibration.py tests/test_vol_gate.py -q` — 12 passed, 1 warning.
+- `./venv/bin/python3 -m pytest tests/ -x -q` — WARN: stopped on known live-environment failure `test_daily_funnel_report.py::TestSectionAnomalies::test_no_anomalies` because Gemini breaker is OPEN (`total_opens=6`); this same issue was documented in the prior weather session.
+- `./venv/bin/python3 -m pytest tests/ -q -k 'not test_no_anomalies'` — 476 passed, 1 deselected, 2 warnings.
+- Calibration dump written to `/tmp/proof_ai_calibration_20260702T091758Z/calibration_table.txt`.
+- Secret scan of proof dir — PASS.
+- `git diff --check` on task files — PASS.
+
+### Result
+WARN: implementation and focused/broad validation passed, live `pnl.db` has enough data for calibration, but the full truth gate remains blocked by the pre-existing live breaker-state test.
+
+### Safety
+- No crontab, systemd, service, Caddy, DNS, `.env`, or runtime config changes.
+- No orders placed or canceled.
+- Existing unrelated dirty state preserved: `data/shadow_resolution_cache.json` and untracked `!`.
+
 ## 2026-07-01 (pm-updown-kalshi-order-api-fix — V2 Event-Order Endpoint + Cap Fix)
 
 **Agent:** Codex (SlimyAI NUC1)

@@ -50,6 +50,19 @@ except Exception:
         return max(0.0, min(1.0, 0.5 + (float(ai_prob) - 0.5) * 0.5))
 
 try:
+    from providers.ai_calibration import (
+        build_calibration_table,
+        calibrate_probability,
+        bucket_name as calibration_bucket_name,
+        nearest_bucket_name,
+    )
+except Exception:
+    build_calibration_table = None
+    calibrate_probability = None
+    calibration_bucket_name = None
+    nearest_bucket_name = None
+
+try:
     from core.market_cursor import rotate_markets as _rotate_markets, compute_list_hash as _compute_list_hash
 except Exception:
     _rotate_markets = None
@@ -210,6 +223,10 @@ def _apply_vol_model_or_shrinkage(market: dict, ai_prob: float) -> float:
     market["_vol_model_prob"] = None
     market["_vol_gate_min"] = _get_min_vol_prob()
     market["_vol_gate_rejected"] = False
+    market["_calibration_used"] = False
+    market["_calibrated_probability"] = None
+    market["_calibration_bucket"] = None
+    market["_calibration_trades"] = 0
 
     parsed = parse_kalshi_index_ticker(ticker) if parse_kalshi_index_ticker is not None else None
     if parsed is not None and compute_vol_probability is not None:
@@ -244,10 +261,46 @@ def _apply_vol_model_or_shrinkage(market: dict, ai_prob: float) -> float:
                 return 0.5
             return blended_prob
 
-    logger.info("[VOL_MODEL] Fallback to shrinkage for %s", ticker)
+    logger.info("[VOL_MODEL] Fallback to calibration for %s", ticker)
     adjusted_prob = apply_probability_shrinkage(ai_prob)
+    bucket = None
+    try:
+        if build_calibration_table is not None and calibrate_probability is not None:
+            table = build_calibration_table()
+            bucket = (
+                nearest_bucket_name(ai_prob, table)
+                if nearest_bucket_name is not None
+                else None
+            )
+            if bucket is None and calibration_bucket_name is not None:
+                bucket = calibration_bucket_name(ai_prob)
+            adjusted_prob = calibrate_probability(ai_prob, table)
+            total = int(table.get("total_calibration_trades") or 0)
+            enough_data = bool(table.get("enough_data"))
+            market["_calibration_trades"] = total
+            market["_calibration_bucket"] = bucket
+            market["_calibration_used"] = enough_data and bucket is not None
+            if market["_calibration_used"]:
+                market["_calibrated_probability"] = adjusted_prob
+            logger.info(
+                "[CALIBRATION] ticker=%s raw=%.3f calibrated=%.3f bucket=%s trades=%d used=%s",
+                ticker,
+                ai_prob,
+                adjusted_prob,
+                bucket or "fallback",
+                total,
+                "yes" if market["_calibration_used"] else "fallback",
+            )
+            if not enough_data:
+                logger.warning(
+                    "[CALIBRATION] WARN insufficient settled AI trades: %d < 50; using flat shrinkage",
+                    total,
+                )
+        else:
+            logger.info("[CALIBRATION] provider unavailable for %s; using flat shrinkage", ticker)
+    except Exception as exc:
+        logger.warning("[CALIBRATION] failed for %s: %s; using flat shrinkage", ticker, exc)
     market["_blended_probability"] = adjusted_prob
-    logger.info("[SHRINKAGE] ticker=%s raw=%.3f adjusted=%.3f", ticker, ai_prob, adjusted_prob)
     return adjusted_prob
 
 
@@ -1047,6 +1100,9 @@ def optimize_kalshi_strategy(
         ai_raw_probability = market.get("_ai_raw_probability", true_price)
         vol_model_probability = market.get("_vol_model_prob")
         vol_gate_min = market.get("_vol_gate_min", _get_min_vol_prob())
+        calibrated_probability = market.get("_calibrated_probability")
+        calibration_bucket = market.get("_calibration_bucket")
+        calibration_trades = market.get("_calibration_trades")
 
         # Skip markets with no AI signal (tier="skip" = no API call was made)
         if market.get("_ai_tier") == "skip":
@@ -1375,6 +1431,9 @@ def optimize_kalshi_strategy(
                     "ai_probability": true_price,
                     "ai_probability_raw": ai_raw_probability,
                     "vol_model_probability": vol_model_probability,
+                    "calibrated_probability": calibrated_probability,
+                    "calibration_bucket": calibration_bucket,
+                    "calibration_trades": calibration_trades,
                     "vol_gate_min": vol_gate_min,
                     "blended_probability": true_price,
                     "edge_pct": edge_after_fees_pct,
@@ -1413,6 +1472,7 @@ def optimize_kalshi_strategy(
                             quantity=quantity,
                             ai_probability=ai_raw_probability,
                             vol_model_probability=vol_model_probability,
+                            calibrated_probability=calibrated_probability,
                             blended_probability=true_price,
                             vol_gate_min=vol_gate_min,
                             edge_pct=edge_after_fees_pct,
@@ -1447,6 +1507,9 @@ def optimize_kalshi_strategy(
                 "ai_probability": true_price,
                 "ai_probability_raw": ai_raw_probability,
                 "vol_model_probability": vol_model_probability,
+                "calibrated_probability": calibrated_probability,
+                "calibration_bucket": calibration_bucket,
+                "calibration_trades": calibration_trades,
                 "vol_gate_min": vol_gate_min,
                 "blended_probability": true_price,
                 "edge_pct": edge_after_fees_pct,
@@ -1485,6 +1548,7 @@ def optimize_kalshi_strategy(
                             quantity=1,
                             ai_probability=ai_raw_probability,
                             vol_model_probability=vol_model_probability,
+                            calibrated_probability=calibrated_probability,
                             blended_probability=true_price,
                             vol_gate_min=vol_gate_min,
                             edge_pct=edge_after_fees_pct,

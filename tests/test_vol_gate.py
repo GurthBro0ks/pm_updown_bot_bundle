@@ -65,6 +65,8 @@ def test_vol_gate_passes_at_threshold(monkeypatch):
 def test_vol_gate_skipped_non_index(monkeypatch):
     monkeypatch.setenv("MIN_VOL_PROB", "0.30")
     monkeypatch.setattr(kalshi_optimize, "parse_kalshi_index_ticker", lambda ticker: None)
+    monkeypatch.setattr(kalshi_optimize, "build_calibration_table", None)
+    monkeypatch.setattr(kalshi_optimize, "calibrate_probability", None)
     market = {"ticker": "KXHIGHNY-26JUN29-T85", "_days_to_end": 1.0}
 
     adjusted = kalshi_optimize._apply_vol_model_or_shrinkage(market, 0.80)
