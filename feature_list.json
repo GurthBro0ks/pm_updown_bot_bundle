@@ -291,5 +291,33 @@
     ],
     "result": "PASS",
     "notes": "Root cause was stale harness behavior, not production code: parser/parameter tests were launching the actual runner pipeline and timing out. The fix preserves the gates as source-contract checks without shadow/live execution. Weather live remains blocked pending operator QA and Claude safety closeout."
+  },
+  "proof_snapshot_diff_template_fix_20260702": {
+    "status": "pass_secret_safe_helper_added",
+    "file": "scripts/proof_compare.py, tests/test_proof_compare.py, docs/ops/proof_snapshot_diff_policy.md, docs/buglog/proof_snapshot_diff_template_fix_20260702.md, claude-progress.md, feature_list.json",
+    "passes": true,
+    "manual_qa_required": false,
+    "pushed": false,
+    "commit": "committed_this_phase",
+    "proof_dir": "/tmp/proof_snapshot_diff_template_fix_20260702T173043Z",
+    "description": "Fix mission-template false failures caused by comparing full before/after proof files with intentionally different decorative headers.",
+    "changes": [
+      "Added scripts/proof_compare.py for normalized proof comparison that ignores decorative === headers by default.",
+      "Default helper output is secret-safe: result, normalized SHA256 values, and row counts only.",
+      "Added focused tests for header-only differences, real content differences, secret-safe default output, and no-header matching files.",
+      "Documented the safe proof snapshot diff policy and examples for cron hashes and unrelated dirty file hashes."
+    ],
+    "validation": [
+      "helper self-check -> PASS: before/after decorative cron headers normalize to matching rows",
+      "./venv/bin/python3 -m pytest tests/test_proof_compare.py -q -> PASS, 4 passed",
+      "./scripts/run_tests.sh -> PASS, STATUS: ALL GATES PASS",
+      "./venv/bin/python3 -m pytest tests/ -x -q -> PASS, 488 passed, 2 warnings",
+      "WEATHER_DRY_RUN=true timeout 90 ./venv/bin/python3 scripts/run_weather_strategy.py --dry-run -> PASS dry-run only",
+      "cron before/after SHA compare -> PASS; WEATHER_DRY_RUN=true preserved; WEATHER_LIVE_ENABLED=true absent; cron_micro_live present",
+      "unrelated dirty file hash compare -> PASS for data/shadow_resolution_cache.json, scripts/run_hourly_shadow.sh, and !",
+      "diff secret check -> clean"
+    ],
+    "result": "PASS",
+    "notes": "No trading logic or production behavior changed. Existing unrelated dirty files were preserved byte-identical. No push was performed."
   }
 }

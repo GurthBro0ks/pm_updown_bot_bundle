@@ -1,5 +1,53 @@
 # Claude Progress — pm_updown_bot_bundle
 
+## 2026-07-02 (proof_snapshot_diff_template_fix — Secret-Safe Proof Comparison)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / proof snapshot tooling
+**Type:** Test/tooling fix
+
+### Summary
+Fixed the mission-template false-fail pattern where before/after proof files
+were compared as whole files even though decorative headers intentionally differ.
+The new helper compares normalized rows and ignores `===` proof headers by
+default while keeping output secret-safe.
+
+### Changes
+1. Added `scripts/proof_compare.py`, which prints only pass/fail, normalized
+   SHA256 values, and row counts by default.
+2. Added `tests/test_proof_compare.py` covering header-only differences, real
+   content differences, secret-safe default output, and no-header matches.
+3. Added `docs/ops/proof_snapshot_diff_policy.md` with safe patterns for cron
+   hashes and unrelated dirty file hashes.
+4. Added buglog: `docs/buglog/proof_snapshot_diff_template_fix_20260702.md`.
+
+### Verified
+- Helper self-check - PASS: `=== BEFORE/AFTER ===` cron proof headers normalize
+  to matching content rows.
+- `./venv/bin/python3 -m pytest tests/test_proof_compare.py -q` - PASS,
+  4 passed.
+- `./scripts/run_tests.sh` - PASS, `STATUS: ALL GATES PASS`.
+- `./venv/bin/python3 -m pytest tests/ -x -q` - PASS, 488 passed, 2 warnings.
+- `WEATHER_DRY_RUN=true timeout 90 ./venv/bin/python3 scripts/run_weather_strategy.py --dry-run` - PASS dry-run only.
+- Cron hash compare - PASS, cron unchanged; weather cron still has
+  `WEATHER_DRY_RUN=true`, no `WEATHER_LIVE_ENABLED=true`, and `cron_micro_live`
+  remains present.
+- Unrelated dirty file hashes - PASS byte-identical for
+  `data/shadow_resolution_cache.json`, `scripts/run_hourly_shadow.sh`, and `!`.
+- Diff secret check - clean.
+
+### Proof
+- `/tmp/proof_snapshot_diff_template_fix_20260702T173043Z`
+
+### Safety
+- No trading logic changed.
+- No live orders, no Discord, no push, no cron/service/systemd/timer/tmux/Caddy/DNS changes.
+- Existing unrelated dirty state was preserved.
+
+### Result
+PASS: proof snapshot comparisons now have a reusable secret-safe normalized
+comparison path.
+
 ## 2026-07-02 (run_tests_ml08_timeout_triage — Shell Truth Gate Restored)
 
 **Agent:** Codex (SlimyAI NUC1)
