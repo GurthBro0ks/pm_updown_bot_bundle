@@ -11,7 +11,7 @@ Runs the GFS ensemble weather trading strategy:
 
 Usage:
     ./venv/bin/python3 scripts/run_weather_strategy.py --dry-run
-    ./venv/bin/python3 scripts/run_weather_strategy.py
+    WEATHER_DRY_RUN=false WEATHER_LIVE_ENABLED=true ./venv/bin/python3 scripts/run_weather_strategy.py
 """
 
 import argparse
@@ -387,9 +387,13 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="Verbose logging")
     args = parser.parse_args()
 
-    # WEATHER_DRY_RUN env is a second layer on top of --dry-run: either forces dry-run
-    env_dry_run = os.getenv("WEATHER_DRY_RUN", "").strip().lower() in ("true", "1", "yes")
-    dry_run = args.dry_run or env_dry_run
+    # Weather is fail-closed: unset WEATHER_DRY_RUN means dry-run. Live mode
+    # requires explicit WEATHER_DRY_RUN=false, WEATHER_LIVE_ENABLED=true, and
+    # no --dry-run flag.
+    env_value = os.getenv("WEATHER_DRY_RUN", "true").strip().lower()
+    live_enabled = os.getenv("WEATHER_LIVE_ENABLED", "").strip().lower() == "true"
+    env_allows_live = env_value == "false" and live_enabled
+    dry_run = args.dry_run or not env_allows_live
 
     log_file = setup_logging()
     if args.verbose:

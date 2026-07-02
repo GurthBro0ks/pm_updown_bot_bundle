@@ -481,8 +481,15 @@ def build_section_anomalies(scratchpad_dir, cron_log_path, pnl_db_path,
         ts_fmt = _fmt_ts(ts) if isinstance(ts, datetime) else str(ts)
         anomalies.append(f"{ts_fmt} — **CURSOR RESET**: hash changed")
 
-    breaker_state_path = global_config.CIRCUIT_BREAKER_PATH
-    if Path(breaker_state_path).exists():
+    local_breaker_path = Path(scratchpad_dir) / "circuit_breakers.json"
+    if local_breaker_path.exists():
+        breaker_state_path = local_breaker_path
+    elif Path(scratchpad_dir).resolve() == (global_config.LOGS_DIR / "scratchpad").resolve():
+        breaker_state_path = global_config.CIRCUIT_BREAKER_PATH
+    else:
+        breaker_state_path = None
+
+    if breaker_state_path and Path(breaker_state_path).exists():
         try:
             with open(breaker_state_path, "r") as f:
                 breaker_data = json.load(f)

@@ -111,6 +111,51 @@ class TestWeatherDryRun:
         assert runner.main() == 0
         get_client.assert_not_called()
 
+    def test_weather_env_unset_defaults_to_dry_run(self, monkeypatch, no_side_effects):
+        """Unset WEATHER_DRY_RUN fails closed to dry-run."""
+        monkeypatch.delenv("WEATHER_DRY_RUN", raising=False)
+        monkeypatch.setattr(runner, "setup_logging", lambda: "/tmp/test.log")
+        monkeypatch.setattr(runner, "generate_proof", MagicMock())
+        monkeypatch.setattr(runner, "generate_weather_signals", lambda **kw: [_signal()])
+        get_client = MagicMock()
+        monkeypatch.setattr(runner, "get_order_client", get_client)
+        monkeypatch.setattr("sys.argv", ["run_weather_strategy.py"])
+
+        assert runner.main() == 0
+        get_client.assert_not_called()
+
+    def test_weather_env_false_without_live_enabled_stays_dry_run(self, monkeypatch, no_side_effects):
+        """WEATHER_DRY_RUN=false alone is not enough to go live."""
+        monkeypatch.setenv("WEATHER_DRY_RUN", "false")
+        monkeypatch.delenv("WEATHER_LIVE_ENABLED", raising=False)
+        monkeypatch.setattr(runner, "setup_logging", lambda: "/tmp/test.log")
+        monkeypatch.setattr(runner, "generate_proof", MagicMock())
+        monkeypatch.setattr(runner, "generate_weather_signals", lambda **kw: [_signal()])
+        get_client = MagicMock()
+        monkeypatch.setattr(runner, "get_order_client", get_client)
+        monkeypatch.setattr("sys.argv", ["run_weather_strategy.py"])
+
+        assert runner.main() == 0
+        get_client.assert_not_called()
+
+    def test_weather_live_requires_false_and_live_enabled(self, monkeypatch, no_side_effects):
+        """Live mode requires WEATHER_DRY_RUN=false plus WEATHER_LIVE_ENABLED=true."""
+        client = _mock_client()
+        execute = MagicMock(return_value=1)
+        monkeypatch.setenv("WEATHER_DRY_RUN", "false")
+        monkeypatch.setenv("WEATHER_LIVE_ENABLED", "true")
+        monkeypatch.setattr(runner, "setup_logging", lambda: "/tmp/test.log")
+        monkeypatch.setattr(runner, "generate_proof", MagicMock())
+        monkeypatch.setattr(runner, "generate_weather_signals", lambda **kw: [_signal()])
+        monkeypatch.setattr(runner, "get_order_client", MagicMock(return_value=client))
+        monkeypatch.setattr(runner, "count_open_weather_orders", lambda _client: 0)
+        monkeypatch.setattr(runner, "count_weather_trades_today", lambda: 0)
+        monkeypatch.setattr(runner, "execute_weather_orders", execute)
+        monkeypatch.setattr("sys.argv", ["run_weather_strategy.py"])
+
+        assert runner.main() == 0
+        assert execute.call_args.kwargs["dry_run"] is False
+
 
 class TestWeatherSafetyLimits:
     def test_weather_max_orders_per_run(self, monkeypatch, no_side_effects):

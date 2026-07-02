@@ -353,6 +353,17 @@ class TestSectionAnomalies:
             now - timedelta(hours=24), now, {"ai_cascade": 300})
         assert "No anomalies detected" in result
 
+    def test_uses_local_breaker_state_when_supplied(self, tmp_dir, now):
+        breaker = tmp_dir / "circuit_breakers.json"
+        breaker.write_text(json.dumps({
+            "gemini": {"state": "OPEN", "total_calls": 10, "total_failures": 7, "total_opens": 2},
+        }))
+        result = build_section_anomalies(
+            str(tmp_dir), str(tmp_dir / "cron.log"), str(tmp_dir / "pnl.db"),
+            now - timedelta(hours=24), now, {"ai_cascade": 300})
+        assert "BREAKER OPEN" in result
+        assert "gemini is OPEN" in result
+
     def test_canary_failure(self, tmp_dir, now):
         ts = now.isoformat()
         _write_jsonl(tmp_dir / "canary_failure.jsonl", [
@@ -366,26 +377,15 @@ class TestSectionAnomalies:
         assert "CANARY FAILURE" in result
 
     def test_breaker_open(self, tmp_dir, now):
-        import config as cfg
-        breaker = cfg.CIRCUIT_BREAKER_PATH
-        breaker_backup = None
-        if breaker.exists():
-            breaker_backup = breaker.read_text()
-        try:
-            breaker.parent.mkdir(parents=True, exist_ok=True)
-            breaker.write_text(json.dumps({
-                "grok_420": {"state": "OPEN", "total_calls": 25, "total_failures": 15, "total_opens": 1},
-                "gemini": {"state": "CLOSED", "total_calls": 10, "total_failures": 0, "total_opens": 0},
-            }))
-            result = build_section_anomalies(
-                str(tmp_dir), str(tmp_dir / "cron.log"), str(tmp_dir / "pnl.db"),
-                now - timedelta(hours=24), now, {"ai_cascade": 300})
-            assert "BREAKER OPEN" in result
-        finally:
-            if breaker_backup:
-                breaker.write_text(breaker_backup)
-            elif breaker.exists():
-                breaker.unlink()
+        breaker = tmp_dir / "circuit_breakers.json"
+        breaker.write_text(json.dumps({
+            "grok_420": {"state": "OPEN", "total_calls": 25, "total_failures": 15, "total_opens": 1},
+            "gemini": {"state": "CLOSED", "total_calls": 10, "total_failures": 0, "total_opens": 0},
+        }))
+        result = build_section_anomalies(
+            str(tmp_dir), str(tmp_dir / "cron.log"), str(tmp_dir / "pnl.db"),
+            now - timedelta(hours=24), now, {"ai_cascade": 300})
+        assert "BREAKER OPEN" in result
 
     def test_budget_exhaustion(self, tmp_dir, now):
         ts = now.isoformat()

@@ -25,7 +25,6 @@
     "result": "WARN_MANUAL_QA_PENDING",
     "notes": "Weather cron is active in dry-run only. Main bot cron line unchanged. No services restarted, no .env edits, no orders placed or canceled."
   },
-
   "cents_dollars_fix": {
     "status": "fixed",
     "file": "strategies/kalshi_optimize.py, utils/kalshi_orders.py, tests/test_unit_conventions.py",
@@ -37,15 +36,19 @@
       "Added 15-unit test suite tests/test_unit_conventions.py verifying cents/dollars separation",
       "Logger: order placed line now shows @ Nc -> cost=$X.XXXX"
     ],
-    "classification": "cosmetic — decision logic NOT affected. Budget guards, Kelly sizer, risk caps all use correct dollar floats.",
+    "classification": "cosmetic \u2014 decision logic NOT affected. Budget guards, Kelly sizer, risk caps all use correct dollar floats.",
     "audit_report": "/tmp/cents_audit.md"
   },
-
   "backtest_kalshi": {
     "status": "built",
     "file": "backtest_kalshi.py",
-    "metrics": ["sharpe", "drawdown", "win_rate", "profit_factor"],
-    "description": "Kalshi vectorized backtesting harness — synthetic mode from prior_validation records + proof packs",
+    "metrics": [
+      "sharpe",
+      "drawdown",
+      "win_rate",
+      "profit_factor"
+    ],
+    "description": "Kalshi vectorized backtesting harness \u2014 synthetic mode from prior_validation records + proof packs",
     "outputs": [
       "proofs/backtest_report_YYYYMMDD.json",
       "proofs/backtest_equity_curve_YYYYMMDD.png"
@@ -55,29 +58,52 @@
   "multi_model_debate": {
     "status": "built",
     "file": "strategies/sentiment_scorer.py",
-    "roles": ["forecaster", "critic", "synthesizer"],
+    "roles": [
+      "forecaster",
+      "critic",
+      "synthesizer"
+    ],
     "gate_type": "soft",
     "env_flag": "DEBATE_MODE",
     "description": "3-role adversarial debate: Forecaster (Grok), Critic (Gemini native API), Synthesizer (local). Weighted average with consensus/disagreement flag. Opt-in via DEBATE_MODE=true",
-    "notes": ["2026-04-09: Gemini 2.5 Flash replaces dead GLM as primary critic. Uses native google.generativeai API (OpenAI compat truncates). Cascade: Gemini → GLM (dead) → Grok adversarial. Debate example: Grok 0.75 vs Gemini 0.45, critique_strength=0.85, consensus=disagree"]
+    "notes": [
+      "2026-04-09: Gemini 2.5 Flash replaces dead GLM as primary critic. Uses native google.generativeai API (OpenAI compat truncates). Cascade: Gemini \u2192 GLM (dead) \u2192 Grok adversarial. Debate example: Grok 0.75 vs Gemini 0.45, critique_strength=0.85, consensus=disagree"
+    ]
   },
   "ai_provider_config": {
     "status": "fixed",
     "file": "strategies/sentiment_scorer.py",
-    "changes": ["GLM URL: api.z.ai/api/coding/paas/v4 → api.z.ai/api/paas/v4", "GLM model: glm-5.1 → glm-4-plus", "Grok timeout: 10s → 30s", "AI bulk tier: ai_max_priors default 50 → 10 (bulk=0, premium-only)"],
-    "description": "AI provider configuration fixes — GLM URL, model, Grok timeout, premium-only tier"
+    "changes": [
+      "GLM URL: api.z.ai/api/coding/paas/v4 \u2192 api.z.ai/api/paas/v4",
+      "GLM model: glm-5.1 \u2192 glm-4-plus",
+      "Grok timeout: 10s \u2192 30s",
+      "AI bulk tier: ai_max_priors default 50 \u2192 10 (bulk=0, premium-only)"
+    ],
+    "description": "AI provider configuration fixes \u2014 GLM URL, model, Grok timeout, premium-only tier"
   },
   "kelly_market_count_fix": {
     "status": "fixed",
     "file": "strategies/kalshi_optimize.py",
-    "changes": ["Kelly num_markets: count of _ai_tier!=skip markets (7-10) not all markets (400+)", "check_micro_live_gates: pass computed edge_after_fees_pct directly instead of re-reading stale market.get(edge_pct)", "Maker search demoted from blocker to bonus optimization", "Skip tier=skip markets before validation loop"],
-    "description": "Kelly was dividing bankroll by 400+ markets → $0.07/market. Now divides by 7-10 AI-priced markets → $2.50-$3.57/market. Also fixed edge gate bug where market.get(edge_pct) returned None causing all orders to fail."
+    "changes": [
+      "Kelly num_markets: count of _ai_tier!=skip markets (7-10) not all markets (400+)",
+      "check_micro_live_gates: pass computed edge_after_fees_pct directly instead of re-reading stale market.get(edge_pct)",
+      "Maker search demoted from blocker to bonus optimization",
+      "Skip tier=skip markets before validation loop"
+    ],
+    "description": "Kelly was dividing bankroll by 400+ markets \u2192 $0.07/market. Now divides by 7-10 AI-priced markets \u2192 $2.50-$3.57/market. Also fixed edge gate bug where market.get(edge_pct) returned None causing all orders to fail."
   },
   "premium_10_10_split": {
     "status": "built",
     "file": "strategies/kalshi_optimize.py",
-    "changes": ["AI_MAX_PRIORS_PER_RUN default: 10 → 20", "AI_PREMIUM_MAX default: 10 → 20", "Premium tier split: 10 short-term (<=7d expiry, vol>500) + 10 long-term (>7d expiry)", "Bulk tier absorbs remaining 0 markets (premium=20, ai_max=20, bulk=0)", "Log line: [PREMIUM] Short-term: N, Long-term: N, Total: N (max 10 each)", "KALSHI_BLOCKED_CATEGORIES: weather/economics NOT blocked (Entertainment/Mentions/Social/Exotics only)"],
-    "description": "Premium tier expanded from 10 → 20 markets: 10 short-term (<=7d expiry) + 10 long-term (>7d expiry), each sorted by volume desc. Category blocklist confirmed clean — no weather/economics exclusions."
+    "changes": [
+      "AI_MAX_PRIORS_PER_RUN default: 10 \u2192 20",
+      "AI_PREMIUM_MAX default: 10 \u2192 20",
+      "Premium tier split: 10 short-term (<=7d expiry, vol>500) + 10 long-term (>7d expiry)",
+      "Bulk tier absorbs remaining 0 markets (premium=20, ai_max=20, bulk=0)",
+      "Log line: [PREMIUM] Short-term: N, Long-term: N, Total: N (max 10 each)",
+      "KALSHI_BLOCKED_CATEGORIES: weather/economics NOT blocked (Entertainment/Mentions/Social/Exotics only)"
+    ],
+    "description": "Premium tier expanded from 10 \u2192 20 markets: 10 short-term (<=7d expiry) + 10 long-term (>7d expiry), each sorted by volume desc. Category blocklist confirmed clean \u2014 no weather/economics exclusions."
   },
   "edge_cap_rejection": {
     "status": "fixed",
@@ -185,5 +211,30 @@
     ],
     "result": "WARN",
     "notes": "passes=false until the known Gemini breaker-state test is resolved or formally excluded from the truth gate. No cron/service/config changes and no orders placed."
+  },
+  "weather_policy_and_breaker_test_fix_20260702": {
+    "status": "implemented_warn_shell_truth_gate_and_crontab_nonce_blocked",
+    "file": "scripts/cron_weather_trade.sh, scripts/run_weather_strategy.py, scripts/daily_funnel_report.py, docs/ops/weather_runtime_policy.md, tests/test_weather_live.py, tests/test_daily_funnel_report.py",
+    "passes": false,
+    "manual_qa_required": true,
+    "pushed": false,
+    "commit": "this_commit",
+    "proof_dir": "/tmp/proof_weather_policy_breaker_20260702T140038Z",
+    "description": "Weather remains dry-run by policy; breaker-state anomaly tests no longer read live runtime breaker state when using temp scratchpads.",
+    "changes": [
+      "Added docs/ops/weather_runtime_policy.md with dry-run-only gates before Fable/live weather activation.",
+      "Weather runner and cron wrapper now fail closed: live requires WEATHER_DRY_RUN=false plus WEATHER_LIVE_ENABLED=true; --dry-run still wins.",
+      "Daily funnel anomaly tests use temp circuit_breakers.json and no longer depend on live runtime circuit_breakers.json.",
+      "Crontab was not installed/edited because a fresh exact-bounded nonce approval block was not provided for cron mutation."
+    ],
+    "validation": [
+      "pytest targeted breaker/weather/calibration -> PASS",
+      "pytest tests/ -x -q -> PASS, 481 passed, 2 warnings",
+      "WEATHER_DRY_RUN=true run_weather_strategy.py --dry-run smoke -> PASS dry-run only",
+      "./scripts/run_tests.sh -> FAIL on existing risk-shell violations and ML-08 shadow venue timeout",
+      "fallback proof-dir secret scan -> clean after redacted-category false-positive adjudication"
+    ],
+    "result": "WARN",
+    "notes": "Do not promote weather live until security cleanup PASS, full shell truth gate PASS, operator QA PASS, Claude safety closeout PASS, and a separate nonce-approved live activation."
   }
 }

@@ -1,5 +1,41 @@
 # Claude Progress — pm_updown_bot_bundle
 
+## 2026-07-02 (weather_policy_and_breaker_test_fix — Dry-Run Policy + Breaker Test Isolation)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Weather runtime safety and daily funnel tests
+**Type:** Safety policy + test fix
+
+### Summary
+Documented that weather trading stays dry-run until security cleanup, full tests, operator QA, and Claude safety closeout pass. Fixed the known breaker-state pytest failure by isolating `build_section_anomalies()` tests from the live runtime breaker file.
+
+### Changes
+1. Added `docs/ops/weather_runtime_policy.md`.
+2. Updated `scripts/cron_weather_trade.sh` and `scripts/run_weather_strategy.py` so live weather requires both `WEATHER_DRY_RUN=false` and `WEATHER_LIVE_ENABLED=true`; unset or false-only cron invocation still dry-runs.
+3. Updated daily funnel anomaly logic to use a temp `circuit_breakers.json` from the supplied scratchpad during tests, and only use the runtime breaker file for the real scratchpad path.
+4. Added tests for unset/default dry-run, false-only dry-run, explicit two-key live opt-in, and local breaker-state anomaly reporting.
+
+### Verified
+- `./venv/bin/python3 -m pytest tests/ -q -k 'breaker or circuit or weather or calibration'` - PASS, 76 passed.
+- `./venv/bin/python3 -m pytest tests/test_weather_live.py tests/test_weather_strategy.py tests/test_daily_funnel_report.py::TestSectionAnomalies -q` - PASS, 27 passed.
+- `./venv/bin/python3 -m pytest tests/ -x -q` - PASS, 481 passed, 2 warnings.
+- `WEATHER_DRY_RUN=true timeout 90 ./venv/bin/python3 scripts/run_weather_strategy.py --dry-run` - PASS dry-run smoke only; no live orders.
+- `./venv/bin/python3 -m py_compile ...` and `git diff --check` on task files - PASS.
+
+### Known Blockers
+- `./scripts/run_tests.sh` still FAILS on the existing risk-shell suite and ML-08 `runner.py --mode shadow --venue ibkr` timeout. This was recorded honestly and keeps the session at WARN.
+- Installed crontab still contains `WEATHER_DRY_RUN=false` for weather. It was not edited because `/home/slimy/AGENTS.md` requires a fresh exact-bounded nonce approval block for cron mutation, and none was provided. The repo code now forces that cron invocation to dry-run unless a future activation also sets `WEATHER_LIVE_ENABLED=true`.
+
+### Safety
+- No live weather smoke.
+- No orders placed or canceled.
+- No Discord sent.
+- No services, systemd, timers, tmux, Caddy, DNS, or main bot cron changed.
+- Existing unrelated dirty files were preserved: `data/shadow_resolution_cache.json`, `scripts/run_hourly_shadow.sh`, `!`, and `.env.bak.20260702T134909Z`.
+
+### Result
+WARN: breaker-state pytest blocker fixed and full pytest passes, but project shell truth gate and nonce-approved crontab cleanup remain unresolved.
+
 ## 2026-07-02 (ai_calibration — Historical AI Probability Calibration)
 
 **Agent:** Codex (SlimyAI NUC1)

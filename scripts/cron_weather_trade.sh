@@ -1,8 +1,17 @@
 #!/usr/bin/env bash
-# Weather market scanner — runs every 2 hours
-# Cron line sets WEATHER_DRY_RUN and the weather safety limits inline:
-#   0 */2 * * * WEATHER_DRY_RUN=false WEATHER_MAX_ORDERS_PER_RUN=2 WEATHER_MAX_DAILY_LOSS_USD=1.00 WEATHER_MAX_NOTIONAL_PER_RUN_USD=1.00 WEATHER_MIN_TRADE_PRICE_CENTS=25 /opt/slimy/pm_updown_bot_bundle/scripts/cron_weather_trade.sh
-# WEATHER_DRY_RUN=true → pass --dry-run; false → run live.
+# Weather market scanner — runs every 2 hours.
+# Current policy: weather cron must stay dry-run until security cleanup, full
+# tests, operator QA, and Claude safety closeout all pass.
+#
+# Dry-run cron line:
+#   0 */2 * * * WEATHER_DRY_RUN=true /opt/slimy/pm_updown_bot_bundle/scripts/cron_weather_trade.sh
+#
+# Future live cron line requires a separate activation prompt:
+#   0 */2 * * * WEATHER_DRY_RUN=false WEATHER_LIVE_ENABLED=true WEATHER_MAX_ORDERS_PER_RUN=2 WEATHER_MAX_DAILY_LOSS_USD=1.00 WEATHER_MAX_NOTIONAL_PER_RUN_USD=1.00 WEATHER_MIN_TRADE_PRICE_CENTS=25 /opt/slimy/pm_updown_bot_bundle/scripts/cron_weather_trade.sh
+#
+# WEATHER_DRY_RUN=true/unset → pass --dry-run.
+# WEATHER_DRY_RUN=false without WEATHER_LIVE_ENABLED=true still dry-runs.
+# Live mode requires both WEATHER_DRY_RUN=false and WEATHER_LIVE_ENABLED=true.
 # More frequent than the main bot because weather markets are time-sensitive
 set -euo pipefail
 
@@ -22,7 +31,7 @@ export WEATHER_MAX_EXPOSURE_PER_CITY="${WEATHER_MAX_EXPOSURE_PER_CITY:-1.00}"
 LOG="logs/weather_trade_$(date +%Y%m%d_%H%M%S).log"
 
 ARGS=()
-if [[ "${WEATHER_DRY_RUN,,}" == "true" || "$WEATHER_DRY_RUN" == "1" || "${WEATHER_DRY_RUN,,}" == "yes" ]]; then
+if [[ "${WEATHER_DRY_RUN,,}" != "false" || "${WEATHER_LIVE_ENABLED:-}" != "true" ]]; then
   ARGS+=(--dry-run)
 fi
 
