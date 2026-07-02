@@ -31,7 +31,7 @@ load_dotenv()
 from strategies.weather_signals import generate_weather_signals
 from utils.kalshi_orders import KalshiOrderClient, SafetyLimitError
 from utils.pnl_database import get_db, record_trade
-from utils.discord_notify import notify_order_placed
+from utils.discord_notify import notify_weather_order_placed
 from config import PROOF_DIR
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,13 @@ MAX_OPEN_ORDERS = int(os.getenv("WEATHER_MAX_OPEN_ORDERS", "5"))
 WEATHER_MAX_DAILY_TRADES = int(os.getenv("WEATHER_MAX_DAILY_TRADES", "10"))
 WEATHER_MAX_EXPOSURE_PER_CITY = float(os.getenv("WEATHER_MAX_EXPOSURE_PER_CITY", "1.00"))
 WEATHER_MIN_EDGE_PCT = float(os.getenv("WEATHER_MIN_EDGE_PCT", "3.0"))
-DRY_RUN = False
+
+# Live-trading safety limits — independent from the main bot's limits.
+# Set inline on the weather cron line, NOT in .env.
+WEATHER_MAX_ORDERS_PER_RUN = int(os.getenv("WEATHER_MAX_ORDERS_PER_RUN", "2"))
+WEATHER_MAX_DAILY_LOSS_USD = float(os.getenv("WEATHER_MAX_DAILY_LOSS_USD", "1.00"))
+WEATHER_MAX_NOTIONAL_PER_RUN_USD = float(os.getenv("WEATHER_MAX_NOTIONAL_PER_RUN_USD", "1.00"))
+WEATHER_MIN_TRADE_PRICE_CENTS = int(os.getenv("WEATHER_MIN_TRADE_PRICE_CENTS", "25"))
 
 
 def setup_logging():
@@ -109,6 +115,57 @@ def count_weather_trades_today() -> int:
             pass
 
 
+def weather_daily_risk_usd() -> float:
+    """
+    Today's weather capital at risk: BUY notional placed today plus realized
+    losses today, keyed by phase='weather' in pnl.db. Conservative on purpose
+    (an unsettled buy counts as fully at risk) — independent from the main
+    bot's daily-loss counter.
+    """
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    try:
+        conn = get_db()
+        row = conn.execute(
+            """
+            SELECT COALESCE(SUM(CASE WHEN action = 'BUY' THEN size_usd ELSE 0 END), 0) AS at_risk,
+                   COALESCE(SUM(CASE WHEN pnl_usd < 0 THEN -pnl_usd ELSE 0 END), 0) AS losses
+            FROM trades
+            WHERE phase = 'weather'
+              AND substr(timestamp, 1, 10) = ?
+            """,
+            (today,),
+        ).fetchone()
+        return float(row["at_risk"]) + float(row["losses"]) if row else 0.0
+    except Exception as e:
+        logger.warning(f"[WEATHER_RUNNER] Failed to compute daily weather risk: {e}")
+        return 0.0
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def compute_order_params(signal: dict) -> tuple:
+    """
+    Derive order parameters from a signal.
+
+    Returns (price_cents, cost_cents, quantity, cost_usd) where price_cents is
+    the YES price sent to place_order, and cost_cents is what we actually pay
+    per contract (YES price for yes-side, 100 - YES price for no-side).
+    """
+    price_cents = int(round(signal["market_price"] * 100))
+    price_cents = max(1, min(99, price_cents))
+    cost_cents = price_cents if signal["side"] == "yes" else 100 - price_cents
+
+    quantity = max(1, int(signal["position_usd"] / (cost_cents / 100.0)))
+    # Client hard-caps contracts per order; clamp so live orders aren't rejected
+    quantity = min(quantity, KalshiOrderClient.MAX_QUANTITY)
+
+    cost_usd = quantity * cost_cents / 100.0
+    return price_cents, cost_cents, quantity, cost_usd
+
+
 def apply_weather_risk_limits(signals: list, max_trades: int) -> list:
     """Apply runner-level weather safety caps before any order call."""
     selected = []
@@ -162,16 +219,10 @@ def place_weather_order(
     """
     ticker = signal["ticker"]
     side = signal["side"]
-    position_usd = signal["position_usd"]
     ensemble_prob = signal["ensemble_prob"]
     edge_pct = signal["edge_pct"] * 100  # Convert to percentage points
 
-    # Convert USD to cents for order
-    price_cents = int(round(signal["market_price"] * 100))
-    price_cents = max(1, min(99, price_cents))
-
-    # Quantity: how many contracts at this price = position_usd
-    quantity = max(1, int(position_usd / (price_cents / 100.0)))
+    price_cents, cost_cents, quantity, cost_usd = compute_order_params(signal)
 
     if dry_run:
         logger.info(
@@ -192,8 +243,8 @@ def place_weather_order(
         status = result.get("status", "unknown")
 
         logger.info(
-            f"[WEATHER_RUNNER] ORDER PLACED: {side.upper()} {ticker} "
-            f"qty={quantity} @ {price_cents}¢ → {status} (id: {order_id})"
+            f"[WEATHER_LIVE] Placed {side.upper()} {ticker} @ {price_cents}c "
+            f"qty={quantity} → {status} (id: {order_id})"
         )
 
         # Record to pnl.db
@@ -202,9 +253,11 @@ def place_weather_order(
             ticker=ticker,
             action="BUY",
             price=signal["market_price"],
-            size_usd=position_usd,
+            size_usd=cost_usd,
             pnl_usd=0,
             pnl_pct=0,
+            signal_type="gfs_ensemble",
+            market_category="weather",
             ai_probability=ensemble_prob,
             edge_pct=edge_pct,
             kelly_fraction=signal["kelly_fraction"],
@@ -212,17 +265,17 @@ def place_weather_order(
             cascade_provider="gfs_ensemble",
         )
 
-        # Discord notification
-        notify_order_placed(
+        # Discord notification (WEATHER-prefixed embed)
+        notify_weather_order_placed(
             ticker=ticker,
             side=side,
-            price_cents=price_cents / 100.0,  # notify_order_placed expects dollars
+            price_cents=price_cents,
             quantity=quantity,
-            ai_probability=ensemble_prob,
+            city=signal.get("city") or signal.get("city_code") or "unknown",
+            ensemble_prob=ensemble_prob,
+            market_price=signal["market_price"],
             edge_pct=edge_pct,
-            kelly_fraction=signal["kelly_fraction"],
-            cascade_provider="gfs_ensemble",
-            days_to_expiry=1,
+            threshold=signal.get("threshold"),
         )
 
         return True
@@ -233,6 +286,76 @@ def place_weather_order(
     except Exception as e:
         logger.error(f"[WEATHER_RUNNER] ORDER FAILED: {ticker} — {e}")
         return False
+
+
+def execute_weather_orders(
+    client: KalshiOrderClient,
+    signals: list,
+    dry_run: bool = False,
+) -> int:
+    """
+    Place orders for selected signals, enforcing per-run and daily-loss caps.
+
+    Gates (applied in dry-run too, so dry-run mirrors live):
+      - WEATHER_MAX_ORDERS_PER_RUN: max orders per invocation
+      - WEATHER_MIN_TRADE_PRICE_CENTS: min cost per contract (skips lottery tickets)
+      - WEATHER_MAX_NOTIONAL_PER_RUN_USD: max total cost per invocation
+      - WEATHER_MAX_DAILY_LOSS_USD: max daily weather capital at risk (live only,
+        via pnl.db counter — independent from the main bot's daily limit)
+
+    Returns:
+        Number of orders placed (or that would be placed in dry-run)
+    """
+    trades_placed = 0
+    run_notional_usd = 0.0
+    daily_risk_usd = 0.0 if dry_run else weather_daily_risk_usd()
+
+    if not dry_run and daily_risk_usd >= WEATHER_MAX_DAILY_LOSS_USD:
+        logger.warning(
+            f"[WEATHER_RUNNER] Daily weather risk ${daily_risk_usd:.2f} >= "
+            f"${WEATHER_MAX_DAILY_LOSS_USD:.2f} cap — no orders this run"
+        )
+        return 0
+
+    for signal in signals:
+        if trades_placed >= WEATHER_MAX_ORDERS_PER_RUN:
+            logger.info(
+                f"[WEATHER_RUNNER] Per-run order cap reached "
+                f"({WEATHER_MAX_ORDERS_PER_RUN}) — stopping"
+            )
+            break
+
+        ticker = signal["ticker"]
+        price_cents, cost_cents, quantity, cost_usd = compute_order_params(signal)
+
+        if cost_cents < WEATHER_MIN_TRADE_PRICE_CENTS:
+            logger.info(
+                f"[WEATHER_RUNNER] SKIP {ticker}: cost {cost_cents}c < "
+                f"{WEATHER_MIN_TRADE_PRICE_CENTS}c minimum trade price"
+            )
+            continue
+
+        if run_notional_usd + cost_usd > WEATHER_MAX_NOTIONAL_PER_RUN_USD:
+            logger.info(
+                f"[WEATHER_RUNNER] SKIP {ticker}: run notional "
+                f"${run_notional_usd + cost_usd:.2f} > "
+                f"${WEATHER_MAX_NOTIONAL_PER_RUN_USD:.2f} per-run cap"
+            )
+            continue
+
+        if not dry_run and daily_risk_usd + run_notional_usd + cost_usd > WEATHER_MAX_DAILY_LOSS_USD:
+            logger.info(
+                f"[WEATHER_RUNNER] SKIP {ticker}: daily weather risk "
+                f"${daily_risk_usd + run_notional_usd + cost_usd:.2f} > "
+                f"${WEATHER_MAX_DAILY_LOSS_USD:.2f} cap"
+            )
+            continue
+
+        if place_weather_order(client=client, signal=signal, dry_run=dry_run):
+            trades_placed += 1
+            run_notional_usd += cost_usd
+
+    return trades_placed
 
 
 def generate_proof(signals: list, trades_placed: int, dry_run: bool):
@@ -264,26 +387,37 @@ def main():
     parser.add_argument("--verbose", action="store_true", help="Verbose logging")
     args = parser.parse_args()
 
+    # WEATHER_DRY_RUN env is a second layer on top of --dry-run: either forces dry-run
+    env_dry_run = os.getenv("WEATHER_DRY_RUN", "").strip().lower() in ("true", "1", "yes")
+    dry_run = args.dry_run or env_dry_run
+
     log_file = setup_logging()
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
     logger.info("=" * 70)
     logger.info("WEATHER STRATEGY — GFS Ensemble Signals")
-    logger.info(f"Mode: {'DRY-RUN' if args.dry_run else 'LIVE'}")
+    logger.info(f"Mode: {'DRY-RUN' if dry_run else 'LIVE'}")
     logger.info(f"Bankroll: ${args.bankroll:.2f}")
+    if not dry_run:
+        logger.info(
+            f"Limits: {WEATHER_MAX_ORDERS_PER_RUN} orders/run, "
+            f"${WEATHER_MAX_NOTIONAL_PER_RUN_USD:.2f} notional/run, "
+            f"${WEATHER_MAX_DAILY_LOSS_USD:.2f} daily loss, "
+            f"min {WEATHER_MIN_TRADE_PRICE_CENTS}c/contract"
+        )
     logger.info("=" * 70)
 
     # Step 1: Generate signals
     logger.info("[1/3] Generating weather signals...")
     signals = generate_weather_signals(
         bankroll=args.bankroll,
-        dry_run=args.dry_run,
+        dry_run=dry_run,
     )
 
     if not signals:
         logger.info("[WEATHER_RUNNER] No signals generated — nothing to trade")
-        generate_proof(signals, 0, args.dry_run)
+        generate_proof(signals, 0, dry_run)
         return 0
 
     logger.info(f"[WEATHER_RUNNER] {len(signals)} signals generated")
@@ -292,7 +426,7 @@ def main():
     logger.info("[2/3] Checking risk gates...")
     client = None
     daily_trades = 0
-    if not args.dry_run:
+    if not dry_run:
         client = get_order_client()
         if client is None:
             logger.error("[WEATHER_RUNNER] Cannot place orders: client init failed")
@@ -303,7 +437,7 @@ def main():
 
         if open_count >= MAX_OPEN_ORDERS:
             logger.warning(f"[WEATHER_RUNNER] Max open orders reached ({MAX_OPEN_ORDERS}) — skipping")
-            generate_proof(signals, 0, args.dry_run)
+            generate_proof(signals, 0, dry_run)
             return 0
 
         daily_trades = count_weather_trades_today()
@@ -313,25 +447,21 @@ def main():
             logger.warning(
                 f"[WEATHER_RUNNER] Max daily weather trades reached ({WEATHER_MAX_DAILY_TRADES}) — skipping"
             )
-            generate_proof(signals, 0, args.dry_run)
+            generate_proof(signals, 0, dry_run)
             return 0
 
     # Step 3: Place orders
     logger.info("[3/3] Placing orders...")
-    trades_placed = 0
     open_slots = MAX_OPEN_ORDERS - (open_count if client else 0)
     daily_slots = WEATHER_MAX_DAILY_TRADES - daily_trades
     max_to_place = max(0, min(open_slots, daily_slots))
     selected_signals = apply_weather_risk_limits(signals, max_to_place)
 
-    for signal in selected_signals:
-        success = place_weather_order(
-            client=client,
-            signal=signal,
-            dry_run=args.dry_run,
-        )
-        if success:
-            trades_placed += 1
+    trades_placed = execute_weather_orders(
+        client=client,
+        signals=selected_signals,
+        dry_run=dry_run,
+    )
 
     # Summary
     logger.info("=" * 70)
@@ -342,7 +472,7 @@ def main():
     logger.info("=" * 70)
 
     # Generate proof
-    generate_proof(signals, trades_placed, args.dry_run)
+    generate_proof(signals, trades_placed, dry_run)
 
     return 0
 

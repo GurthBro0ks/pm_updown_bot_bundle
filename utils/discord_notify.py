@@ -103,6 +103,34 @@ def notify_order_placed(ticker: str, side: str, price_cents: float,
     )
 
 
+def notify_weather_order_placed(ticker: str, side: str, price_cents: int,
+                                quantity: int, city: str,
+                                ensemble_prob: float, market_price: float,
+                                edge_pct: float, threshold: float = None):
+    """Notify Discord that a weather-strategy order was placed (WEATHER-prefixed)."""
+    fields = [
+        {"name": "Ticker", "value": f"`{ticker}`", "inline": True},
+        {"name": "City", "value": city, "inline": True},
+        {"name": "Side", "value": side.upper(), "inline": True},
+        {"name": "Price", "value": f"{price_cents}¢", "inline": True},
+        {"name": "Qty", "value": str(quantity), "inline": True},
+        {"name": "GFS Ensemble", "value": f"{ensemble_prob:.1%}", "inline": True},
+        {"name": "Market", "value": f"{market_price:.1%}", "inline": True},
+        {"name": "Edge", "value": f"{edge_pct:.1f}%", "inline": True},
+    ]
+    if threshold is not None:
+        fields.append({"name": "Threshold", "value": f">{threshold}°F", "inline": True})
+
+    _send_embed(
+        title="🌤️ WEATHER Order Placed",
+        description=f"**{side.upper()}** `{ticker}` @ {price_cents}¢ — {city}",
+        color=COLOR_ORDER_PLACED,
+        fields=fields,
+        footer="GFS ensemble weather strategy",
+        webhook_url=DISCORD_TRADE_WEBHOOK_URL,
+    )
+
+
 def notify_order_won(ticker: str, side: str, price_cents: float,
                      pnl_usd: float = None, settled_price: float = None):
     """Notify Discord that an order settled in our favor."""
