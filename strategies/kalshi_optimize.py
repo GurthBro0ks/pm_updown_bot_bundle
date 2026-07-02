@@ -1455,8 +1455,8 @@ def optimize_kalshi_strategy(
                         liquidity_usd=market.get("liquidity_usd"),
                         cascade_provider=market.get("_ai_tier", "unknown"),
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("%s record_trade failed after live order %s: %s", prefix, market_id, exc)
                 # Discord notification for order placed
                 if notify_order_placed:
                     try:
@@ -1531,28 +1531,9 @@ def optimize_kalshi_strategy(
                     liquidity_usd=market.get("liquidity_usd"),
                     cascade_provider=market.get("_ai_tier", "unknown"),
                 )
-            except Exception:
-                pass
-                # Discord notification for order placed (dry-run)
-                if notify_order_placed:
-                    try:
-                        notify_order_placed(
-                            ticker=market_id,
-                            side=order_side,
-                            price_cents=price_cents_shadow,
-                            quantity=1,
-                            ai_probability=ai_raw_probability,
-                            vol_model_probability=vol_model_probability,
-                            calibrated_probability=calibrated_probability,
-                            blended_probability=true_price,
-                            vol_gate_min=vol_gate_min,
-                            edge_pct=edge_after_fees_pct,
-                            kelly_fraction=round(optimal_size / bankroll, 4) if bankroll > 0 else 0,
-                            cascade_provider=market.get("_ai_tier", "unknown"),
-                            days_to_expiry=market.get("_days_to_end"),
-                        )
-                    except Exception:
-                        pass
+            except Exception as exc:
+                logger.warning("%s record_trade failed for dry-run simulated order %s: %s", prefix, market_id, exc)
+            logger.info("%s: Discord notification skipped for dry-run simulated order %s", prefix, market_id)
 
         # Update metrics
         total_trades += 1

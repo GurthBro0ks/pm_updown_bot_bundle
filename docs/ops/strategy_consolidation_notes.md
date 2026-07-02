@@ -34,12 +34,13 @@ No changes to order placement, Kelly sizing, edge thresholds, calibration math,
 vol gate, price-floor gates, weather logic, Discord send behavior, pnl.db
 writes, or runner phase-all behavior.
 
-## Observed anomaly — deliberately NOT changed
+## Follow-up: dry-run Discord notification policy
 
 In the dry-run branch of `optimize_kalshi_strategy`, the Discord
 `notify_order_placed` block is indented inside the `except Exception:` handler
 of the dry-run `record_trade` call, so it only executes if `record_trade`
-raises. This looks unintentional, but "fixing" it would change Discord send
-behavior (dry-run runs would start emitting notifications), which is forbidden
-in this phase. Left byte-for-byte as found; flagged for a separate reviewed
-change if the operator wants dry-run notifications.
+raises. The follow-up fix keeps the safety-first policy explicit: dry-run
+simulated orders write proof/record-trade state and log `record_trade` failures,
+but do not call real Discord `notify_order_placed`. Live successful order
+notifications remain on the existing live order path. Any future dry-run Discord
+preview or opt-in send behavior should be reviewed as its own phase.
