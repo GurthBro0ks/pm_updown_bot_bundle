@@ -5,18 +5,15 @@ Maker order logic, probability-weighted edge detection, trade frequency optimiza
 """
 
 import argparse
-import json
 import logging
 import os
 import sys
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 
 # Add to path
 sys.path.insert(0, '/opt/slimy/pm_updown_bot_bundle')
 
-# Import runner module
 # Local imports (avoid circular import)
 from utils.proof import generate_proof
 from utils.kalshi import fetch_kalshi_markets
@@ -363,7 +360,6 @@ def _get_todays_realized_pnl(db_path: str = "/opt/slimy/pm_updown_bot_bundle/pap
             return 0.0
         return -float("inf")
 
-# Stub for missing function
 def check_micro_live_gates(market, size, price, risk_caps, venue, computed_edge_pct=None):
     """
     Micro-live risk gates - must pass ALL to execute real trades
@@ -414,7 +410,6 @@ def check_micro_live_gates(market, size, price, risk_caps, venue, computed_edge_
     end_time = market.get("close_time") or market.get("expiration_date")
     if end_time:
         try:
-            from datetime import datetime
             if isinstance(end_time, str):
                 end_dt = datetime.fromisoformat(end_time.replace("Z", "+00:00"))
             else:
@@ -1614,7 +1609,6 @@ def optimize_kalshi_strategy(
         "risk_caps": risk_caps
     })
 
-    from utils.proof import generate_proof
     generate_proof(proof_id, proof_data)
     
     logger.info(f"Proof: {proof_id}")
