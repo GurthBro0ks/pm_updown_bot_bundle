@@ -401,5 +401,26 @@
     },
     "notes": "Live activation was not armed because installed crontab mutation and a live trading/order cycle require a fresh exact-bounded nonce approval block under the host policy. Existing weather cron remains dry-run locked.",
     "result": "WARN_LIVE_ACTIVATION_NOT_ARMED"
+  },
+  "kalshi_default_client_mapping_align_20260703": {
+    "status": "source_mapping_pass_env_legacy_cleanup_blocked",
+    "file": "utils/kalshi_orders.py, strategies/kalshi_weather.py, scripts/shadow_resolver.py, tests/test_kalshi_client_mapping.py",
+    "passes": false,
+    "manual_qa_required": true,
+    "manual_qa_status": "pending_operator_old_key_revocation_and_env_cleanup",
+    "pushed": false,
+    "commit": "ba98e2b409b6e8ff3e9971e802c8c54312743431",
+    "proof_dir": "/tmp/proof_pm_kalshi_default_client_mapping_align_20260703T192516Z",
+    "result": "WARN",
+    "description": "Default Kalshi client source mapping now prefers rotated read-only-auth-passing fields. Immutable .env prevented removal/replacement of stale legacy fields; operator revocation confirmation still pending.",
+    "validation": [
+      "default client selected KALSHI_API_KEY_ID and balance returned 2xx",
+      "portfolio balance and resting orders returned 2xx; resting order count 0",
+      "./scripts/run_tests.sh -> PASS",
+      "./venv/bin/python3 -m pytest tests/ -q -> PASS 508 passed, 2 warnings",
+      "WEATHER_DRY_RUN=true weather smoke -> PASS trades placed 0",
+      "cron policy -> PASS weather dry-run true and WEATHER_LIVE_ENABLED absent"
+    ],
+    "notes": "No orders, cancellations, live weather, cron/service changes, push, or Discord. A removed hardcoded legacy key-id literal was printed once during diff review and is not repeated; old key revocation remains required."
   }
 }

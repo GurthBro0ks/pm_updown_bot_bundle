@@ -1,3 +1,63 @@
+# 2026-07-03 (pm_kalshi_default_client_mapping_align — Rotated Default Client Mapping, Env Blocked)
+
+**Agent:** Codex (SlimyAI NUC1)  
+**Project:** pm_updown_bot_bundle / Kalshi credential mapping  
+**Type:** Auth/config safety fix
+
+### Summary
+Aligned the source-level default Kalshi client mapping to prefer the rotated
+credential fields that passed read-only portfolio/order auth:
+`KALSHI_API_KEY_ID` / `KALSHI_PRIVATE_KEY_PATH`, with
+`KALSHI_KEY_ID` / `KALSHI_PRIVATE_KEY_FILE` aliases.
+
+### Changes
+1. `utils/kalshi_orders.py` now prefers the proven rotated key/path fields
+   before stale trading and legacy fields.
+2. `strategies/kalshi_weather.py` uses the same rotated-first priority for its
+   lazy order-client helper. Weather remains dry-run locked.
+3. `scripts/shadow_resolver.py` no longer has a hardcoded legacy key-id or
+   bundled key-file fallback; it fails closed if required env fields are absent.
+4. Added `tests/test_kalshi_client_mapping.py` for rotated-field priority,
+   alias support, and no hardcoded resolver fallback.
+
+### Verified
+- Read-only default client auth: PASS, default client selected
+  `KALSHI_API_KEY_ID` and balance endpoint returned 2xx.
+- Read-only portfolio/open-orders: PASS, balance and resting orders returned
+  2xx; resting order count was 0.
+- `bash -n scripts/cron_weather_trade.sh`: PASS.
+- Py compile touched files: PASS.
+- Focused mapping/weather tests: PASS.
+- Weather slice tests: PASS.
+- `./scripts/run_tests.sh`: PASS, `STATUS: ALL GATES PASS`.
+- Full pytest: PASS, 508 passed, 2 warnings.
+- Weather dry-run smoke: PASS, `Trades placed: 0`.
+- Sanitized cron policy: weather dry-run true, `WEATHER_LIVE_ENABLED=true`
+  absent; main cron posture unchanged.
+- Proof: `/tmp/proof_pm_kalshi_default_client_mapping_align_20260703T192516Z`.
+
+### Blockers / Warnings
+- `.env` is immutable and non-interactive sudo is unavailable, so legacy active
+  `.env` fields could not be rewritten or removed in this session. Stale
+  `KALSHI_KEY`/`KALSHI_SECRET` remain present until an operator updates the file
+  with owner/sudo access.
+- Operator has not yet confirmed the old exposed Kalshi key was revoked in the
+  Kalshi UI.
+- During scoped diff review, the removed hardcoded legacy key-id literal was
+  printed once by `git diff`; it is not repeated here. Treat old-key revocation
+  as still required.
+
+### Safety
+- No order placement, cancellation, live weather run, weather live arm, cron
+  change, service restart, Caddy/DNS/systemd/timer/tmux change, or push.
+- Preserved expected dirty weather hardening files:
+  `scripts/run_weather_strategy.py` and `tests/test_weather_live.py`.
+
+### Result
+WARN: default client read-only auth is healthy with rotated fields, but active
+immutable `.env` still contains stale legacy fields and operator revocation
+confirmation is pending.
+
 # 2026-07-03 (pm_weather_live_activation_guarded — Tiny Live Gate Added, Live Arm Blocked)
 
 **Agent:** Codex (SlimyAI NUC1)
