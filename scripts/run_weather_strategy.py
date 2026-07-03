@@ -17,6 +17,7 @@ Usage:
 import argparse
 import json
 import logging
+import math
 import os
 import sys
 from datetime import datetime, timezone
@@ -45,10 +46,86 @@ WEATHER_MIN_EDGE_PCT = float(os.getenv("WEATHER_MIN_EDGE_PCT", "3.0"))
 
 # Live-trading safety limits — independent from the main bot's limits.
 # Set inline on the weather cron line, NOT in .env.
-WEATHER_MAX_ORDERS_PER_RUN = int(os.getenv("WEATHER_MAX_ORDERS_PER_RUN", "2"))
+WEATHER_MAX_ORDERS_PER_RUN = int(os.getenv("WEATHER_MAX_ORDERS_PER_RUN", "1"))
 WEATHER_MAX_DAILY_LOSS_USD = float(os.getenv("WEATHER_MAX_DAILY_LOSS_USD", "1.00"))
-WEATHER_MAX_NOTIONAL_PER_RUN_USD = float(os.getenv("WEATHER_MAX_NOTIONAL_PER_RUN_USD", "1.00"))
+WEATHER_MAX_ORDER_USD = float(os.getenv("WEATHER_MAX_ORDER_USD", "0.25"))
+WEATHER_MAX_RUN_EXPOSURE_USD = float(
+    os.getenv("WEATHER_MAX_RUN_EXPOSURE_USD", os.getenv("WEATHER_MAX_NOTIONAL_PER_RUN_USD", "1.00"))
+)
+WEATHER_MAX_OPEN_EXPOSURE_USD = float(os.getenv("WEATHER_MAX_OPEN_EXPOSURE_USD", "2.00"))
 WEATHER_MIN_TRADE_PRICE_CENTS = int(os.getenv("WEATHER_MIN_TRADE_PRICE_CENTS", "25"))
+
+SAFE_WEATHER_MAX_ORDER_USD = 0.25
+SAFE_WEATHER_MAX_RUN_EXPOSURE_USD = 1.00
+SAFE_WEATHER_MAX_OPEN_EXPOSURE_USD = 2.00
+SAFE_WEATHER_MAX_ORDERS_PER_RUN = 1
+
+
+class WeatherLiveLimitError(ValueError):
+    """Raised when weather live-mode tiny limits are absent or unsafe."""
+
+
+def _parse_required_live_int(name: str, hard_cap: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        raise WeatherLiveLimitError(f"{name} is required for live weather mode")
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise WeatherLiveLimitError(f"{name} must be an integer") from exc
+    if value <= 0 or value > hard_cap:
+        raise WeatherLiveLimitError(f"{name}={value} exceeds live hard cap {hard_cap}")
+    return value
+
+
+def _parse_required_live_float(name: str, hard_cap: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        raise WeatherLiveLimitError(f"{name} is required for live weather mode")
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise WeatherLiveLimitError(f"{name} must be numeric") from exc
+    if not math.isfinite(value) or value <= 0 or value > hard_cap:
+        raise WeatherLiveLimitError(f"{name}={value} exceeds live hard cap ${hard_cap:.2f}")
+    return value
+
+
+def get_weather_live_limits(require_env: bool) -> dict:
+    """
+    Return weather-only live limits.
+
+    Live mode is intentionally fail-closed: cron must provide every tiny-limit
+    variable explicitly and each value must be within the hard-coded safe cap.
+    Dry-runs use safe defaults so validation can mirror live gates without
+    requiring cron env.
+    """
+    if require_env:
+        return {
+            "max_orders_per_run": _parse_required_live_int(
+                "WEATHER_MAX_ORDERS_PER_RUN",
+                SAFE_WEATHER_MAX_ORDERS_PER_RUN,
+            ),
+            "max_order_usd": _parse_required_live_float(
+                "WEATHER_MAX_ORDER_USD",
+                SAFE_WEATHER_MAX_ORDER_USD,
+            ),
+            "max_run_exposure_usd": _parse_required_live_float(
+                "WEATHER_MAX_RUN_EXPOSURE_USD",
+                SAFE_WEATHER_MAX_RUN_EXPOSURE_USD,
+            ),
+            "max_open_exposure_usd": _parse_required_live_float(
+                "WEATHER_MAX_OPEN_EXPOSURE_USD",
+                SAFE_WEATHER_MAX_OPEN_EXPOSURE_USD,
+            ),
+        }
+
+    return {
+        "max_orders_per_run": min(WEATHER_MAX_ORDERS_PER_RUN, SAFE_WEATHER_MAX_ORDERS_PER_RUN),
+        "max_order_usd": min(WEATHER_MAX_ORDER_USD, SAFE_WEATHER_MAX_ORDER_USD),
+        "max_run_exposure_usd": min(WEATHER_MAX_RUN_EXPOSURE_USD, SAFE_WEATHER_MAX_RUN_EXPOSURE_USD),
+        "max_open_exposure_usd": min(WEATHER_MAX_OPEN_EXPOSURE_USD, SAFE_WEATHER_MAX_OPEN_EXPOSURE_USD),
+    }
 
 
 def setup_logging():
@@ -77,16 +154,88 @@ def get_order_client() -> KalshiOrderClient:
         return None
 
 
+def _weather_order_ticker(order: dict) -> str:
+    return str(
+        order.get("market_ticker")
+        or order.get("ticker")
+        or order.get("market_id")
+        or ""
+    )
+
+
 def count_open_weather_orders(client: KalshiOrderClient) -> int:
     """Count current open weather orders to respect MAX_OPEN_ORDERS."""
     try:
         orders = client.get_orders(status="resting")
         # Filter to weather-related tickers (KXHIGH*)
-        weather_orders = [o for o in orders if o.get("market_ticker", "").startswith("KXHIGH")]
+        weather_orders = [o for o in orders if _weather_order_ticker(o).startswith("KXHIGH")]
         return len(weather_orders)
     except Exception as e:
         logger.warning(f"[WEATHER_RUNNER] Failed to count open orders: {e}")
         return 0
+
+
+def _extract_order_quantity(order: dict) -> int:
+    for key in ("remaining_count", "remaining_quantity", "quantity", "count"):
+        raw = order.get(key)
+        if raw is None:
+            continue
+        try:
+            quantity = int(raw)
+        except (TypeError, ValueError) as exc:
+            raise WeatherLiveLimitError(f"open weather order has malformed {key}") from exc
+        if quantity > 0:
+            return quantity
+    raise WeatherLiveLimitError("open weather order is missing remaining quantity")
+
+
+def _extract_price_cents(order: dict) -> int:
+    for key in ("price_cents", "yes_price_cents", "yes_price"):
+        raw = order.get(key)
+        if raw is None:
+            continue
+        try:
+            price = int(round(float(raw)))
+        except (TypeError, ValueError) as exc:
+            raise WeatherLiveLimitError(f"open weather order has malformed {key}") from exc
+        if 1 <= price <= 99:
+            return price
+
+    for key in ("price", "yes_price_dollars", "price_dollars"):
+        raw = order.get(key)
+        if raw is None:
+            continue
+        try:
+            price = int(round(float(raw) * 100))
+        except (TypeError, ValueError) as exc:
+            raise WeatherLiveLimitError(f"open weather order has malformed {key}") from exc
+        if 1 <= price <= 99:
+            return price
+
+    raise WeatherLiveLimitError("open weather order is missing price")
+
+
+def estimate_weather_open_order_cost_usd(order: dict) -> float:
+    """Estimate remaining capital at risk for one resting weather order."""
+    side = str(order.get("side") or order.get("contract_side") or "yes").lower()
+    price_cents = _extract_price_cents(order)
+    cost_cents = 100 - price_cents if side == "no" else price_cents
+    return _extract_order_quantity(order) * cost_cents / 100.0
+
+
+def weather_open_exposure_usd(client: KalshiOrderClient) -> float:
+    """Return current resting weather order exposure, failing closed if unclear."""
+    try:
+        orders = client.get_orders(status="resting")
+    except Exception as exc:
+        raise WeatherLiveLimitError("failed to fetch resting orders for weather exposure") from exc
+
+    total = 0.0
+    for order in orders or []:
+        if not _weather_order_ticker(order).startswith("KXHIGH"):
+            continue
+        total += estimate_weather_open_order_cost_usd(order)
+    return total
 
 
 def count_weather_trades_today() -> int:
@@ -309,6 +458,7 @@ def execute_weather_orders(
     trades_placed = 0
     run_notional_usd = 0.0
     daily_risk_usd = 0.0 if dry_run else weather_daily_risk_usd()
+    limits = get_weather_live_limits(require_env=not dry_run)
 
     if not dry_run and daily_risk_usd >= WEATHER_MAX_DAILY_LOSS_USD:
         logger.warning(
@@ -318,10 +468,10 @@ def execute_weather_orders(
         return 0
 
     for signal in signals:
-        if trades_placed >= WEATHER_MAX_ORDERS_PER_RUN:
+        if trades_placed >= limits["max_orders_per_run"]:
             logger.info(
                 f"[WEATHER_RUNNER] Per-run order cap reached "
-                f"({WEATHER_MAX_ORDERS_PER_RUN}) — stopping"
+                f"({limits['max_orders_per_run']}) — stopping"
             )
             break
 
@@ -335,11 +485,18 @@ def execute_weather_orders(
             )
             continue
 
-        if run_notional_usd + cost_usd > WEATHER_MAX_NOTIONAL_PER_RUN_USD:
+        if cost_usd > limits["max_order_usd"]:
+            logger.info(
+                f"[WEATHER_RUNNER] SKIP {ticker}: order cost ${cost_usd:.2f} > "
+                f"${limits['max_order_usd']:.2f} max/order"
+            )
+            continue
+
+        if run_notional_usd + cost_usd > limits["max_run_exposure_usd"]:
             logger.info(
                 f"[WEATHER_RUNNER] SKIP {ticker}: run notional "
                 f"${run_notional_usd + cost_usd:.2f} > "
-                f"${WEATHER_MAX_NOTIONAL_PER_RUN_USD:.2f} per-run cap"
+                f"${limits['max_run_exposure_usd']:.2f} per-run cap"
             )
             continue
 
@@ -404,9 +561,17 @@ def main():
     logger.info(f"Mode: {'DRY-RUN' if dry_run else 'LIVE'}")
     logger.info(f"Bankroll: ${args.bankroll:.2f}")
     if not dry_run:
+        try:
+            limits = get_weather_live_limits(require_env=True)
+        except WeatherLiveLimitError as exc:
+            logger.error(f"[WEATHER_RUNNER] Live weather limits invalid: {exc}")
+            return 1
+
         logger.info(
-            f"Limits: {WEATHER_MAX_ORDERS_PER_RUN} orders/run, "
-            f"${WEATHER_MAX_NOTIONAL_PER_RUN_USD:.2f} notional/run, "
+            f"Limits: {limits['max_orders_per_run']} orders/run, "
+            f"${limits['max_order_usd']:.2f} max/order, "
+            f"${limits['max_run_exposure_usd']:.2f} notional/run, "
+            f"${limits['max_open_exposure_usd']:.2f} open exposure, "
             f"${WEATHER_MAX_DAILY_LOSS_USD:.2f} daily loss, "
             f"min {WEATHER_MIN_TRADE_PRICE_CENTS}c/contract"
         )
@@ -436,8 +601,26 @@ def main():
             logger.error("[WEATHER_RUNNER] Cannot place orders: client init failed")
             return 1
 
+        try:
+            open_exposure_usd = weather_open_exposure_usd(client)
+        except WeatherLiveLimitError as exc:
+            logger.error(f"[WEATHER_RUNNER] Open weather exposure check failed: {exc}")
+            return 1
+
+        if open_exposure_usd >= limits["max_open_exposure_usd"]:
+            logger.warning(
+                f"[WEATHER_RUNNER] Open weather exposure ${open_exposure_usd:.2f} >= "
+                f"${limits['max_open_exposure_usd']:.2f} cap — skipping"
+            )
+            generate_proof(signals, 0, dry_run)
+            return 0
+
         open_count = count_open_weather_orders(client)
         logger.info(f"[WEATHER_RUNNER] Open weather orders: {open_count}/{MAX_OPEN_ORDERS}")
+        logger.info(
+            f"[WEATHER_RUNNER] Open weather exposure: "
+            f"${open_exposure_usd:.2f}/${limits['max_open_exposure_usd']:.2f}"
+        )
 
         if open_count >= MAX_OPEN_ORDERS:
             logger.warning(f"[WEATHER_RUNNER] Max open orders reached ({MAX_OPEN_ORDERS}) — skipping")

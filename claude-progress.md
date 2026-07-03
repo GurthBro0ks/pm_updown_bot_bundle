@@ -1,3 +1,54 @@
+# 2026-07-03 (pm_weather_live_activation_guarded — Tiny Live Gate Added, Live Arm Blocked)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / weather live activation guard
+**Type:** Trading safety gate
+
+### Summary
+Added a weather-only, fail-closed tiny-limit gate for future live weather
+activation. Live weather now requires explicit safe limit variables before the
+order client path can proceed: max 1 order/run, max $0.25/order, max $1.00/run
+exposure, and max $2.00 open weather exposure.
+
+### Changes
+1. `scripts/run_weather_strategy.py` now validates required live tiny-limit env
+   vars and rejects missing, malformed, non-finite, non-positive, or above-cap
+   values.
+2. `scripts/run_weather_strategy.py` enforces max order cost, run exposure, and
+   open weather exposure before any live weather order placement.
+3. `scripts/cron_weather_trade.sh` documents the tiny-limit live cron form and
+   requires explicit tiny-limit vars for live mode while preserving dry-run
+   defaults.
+4. `tests/test_weather_live.py` covers missing, malformed, oversized, per-order,
+   and open-exposure gate behavior.
+5. Added buglog:
+   `docs/buglog/pm_weather_live_activation_guarded_20260703.md`.
+
+### Verified
+- `bash -n scripts/cron_weather_trade.sh`: PASS.
+- `./venv/bin/python3 -m pytest tests/test_weather_live.py -q`: PASS,
+  20 passed.
+- `./venv/bin/python3 -m pytest tests/ -q -k 'weather or breaker or circuit or calibration'`:
+  PASS, 82 passed, 415 deselected, 1 warning.
+- `./scripts/run_tests.sh`: PASS, `STATUS: ALL GATES PASS`.
+- `./venv/bin/python3 -m pytest tests/ -q`: PASS, 497 passed, 2 warnings.
+- Weather dry-run smoke with tiny limits: PASS dry-run only, 0 trades placed.
+- Proof: `/tmp/proof_pm_weather_live_activation_guarded_20260703T155131Z`.
+
+### Safety
+- Installed cron was not changed.
+- Live weather was not armed and no live weather cycle was executed because cron
+  mutation and trading/order actions require a fresh exact-bounded nonce
+  approval block under the host policy.
+- Main micro-live cron was not changed.
+- No service restart, Caddy/DNS/systemd/tmux/timer change, push, raw webhook, or
+  secret print.
+
+### Result
+WARN: source-level tiny live gate passed validation, but live activation remains
+blocked pending explicit nonce approval for cron mutation and any live
+trading/order cycle.
+
 # 2026-07-03 (hourly_shadow_env_loading_rewrite — Fail-Closed Env Loading)
 
 **Agent:** Codex (SlimyAI NUC1)

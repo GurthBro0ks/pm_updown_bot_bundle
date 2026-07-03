@@ -359,5 +359,47 @@
     },
     "notes": "An unsanitized local diff printed the old tracked inline Kalshi private-key value from HEAD. Rotate/regenerate the affected Kalshi key material before relying on it. passes remains false pending operator review/QA.",
     "result": "WARN_SECRET_ROTATION_REQUIRED"
+  },
+  "pm_weather_live_activation_guarded_20260703": {
+    "id": "pm_weather_live_activation_guarded_20260703",
+    "status": "source_gate_pass_live_activation_blocked_by_nonce_policy",
+    "file": "scripts/run_weather_strategy.py, scripts/cron_weather_trade.sh, tests/test_weather_live.py",
+    "passes": false,
+    "accepted": false,
+    "manual_qa_required": true,
+    "manual_qa_completed": false,
+    "manual_qa_status": "pending_operator_qa",
+    "pushed": false,
+    "commit": "none",
+    "proof_dir": "/tmp/proof_pm_weather_live_activation_guarded_20260703T155131Z",
+    "description": "Added a weather-only fail-closed tiny-limit live gate. Live weather now requires explicit safe limit variables before order-client use: max 1 order/run, max $0.25/order, max $1.00/run exposure, and max $2.00 open weather exposure.",
+    "changes": [
+      "scripts/run_weather_strategy.py validates required live tiny-limit env vars and rejects missing, malformed, non-finite, non-positive, or above-cap values.",
+      "scripts/run_weather_strategy.py enforces max order cost, run exposure, and open weather exposure before any live weather order placement.",
+      "scripts/cron_weather_trade.sh documents the tiny-limit live cron form and requires explicit tiny-limit vars for live mode while preserving dry-run defaults.",
+      "tests/test_weather_live.py covers missing, malformed, and oversized limit fail-closed behavior plus $0.25 order and $2.00 open-exposure gates."
+    ],
+    "validation": [
+      "bash -n scripts/cron_weather_trade.sh: PASS",
+      "./venv/bin/python3 -m pytest tests/test_weather_live.py -q: PASS, 20 passed",
+      "./venv/bin/python3 -m pytest tests/ -q -k 'weather or breaker or circuit or calibration': PASS, 82 passed, 415 deselected, 1 warning",
+      "./scripts/run_tests.sh: PASS, STATUS ALL GATES PASS",
+      "./venv/bin/python3 -m pytest tests/ -q: PASS, 497 passed, 2 warnings",
+      "WEATHER_DRY_RUN=true WEATHER_MAX_ORDERS_PER_RUN=1 WEATHER_MAX_ORDER_USD=0.25 WEATHER_MAX_RUN_EXPOSURE_USD=1.00 WEATHER_MAX_OPEN_EXPOSURE_USD=2.00 timeout 90 ./venv/bin/python3 scripts/run_weather_strategy.py --dry-run: PASS dry-run only, 0 trades placed"
+    ],
+    "safety": {
+      "orders_placed": false,
+      "live_trading_smoke_run": false,
+      "discord_sent": false,
+      "services_restarted": false,
+      "cron_changed": false,
+      "timer_changed": false,
+      "tmux_changed": false,
+      "caddy_changed": false,
+      "dns_changed": false,
+      "secrets_printed": false
+    },
+    "notes": "Live activation was not armed because installed crontab mutation and a live trading/order cycle require a fresh exact-bounded nonce approval block under the host policy. Existing weather cron remains dry-run locked.",
+    "result": "WARN_LIVE_ACTIVATION_NOT_ARMED"
   }
 }
