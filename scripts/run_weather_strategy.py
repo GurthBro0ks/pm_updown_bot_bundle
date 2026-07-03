@@ -163,16 +163,33 @@ def _weather_order_ticker(order: dict) -> str:
     )
 
 
-def count_open_weather_orders(client: KalshiOrderClient) -> int:
-    """Count current open weather orders to respect MAX_OPEN_ORDERS."""
+def fetch_resting_weather_orders(client: KalshiOrderClient) -> list[dict]:
+    """Fetch resting weather orders, failing closed on ambiguous data."""
     try:
         orders = client.get_orders(status="resting")
-        # Filter to weather-related tickers (KXHIGH*)
-        weather_orders = [o for o in orders if _weather_order_ticker(o).startswith("KXHIGH")]
-        return len(weather_orders)
-    except Exception as e:
-        logger.warning(f"[WEATHER_RUNNER] Failed to count open orders: {e}")
-        return 0
+    except Exception as exc:
+        raise WeatherLiveLimitError("failed to fetch resting orders for weather exposure") from exc
+
+    if not isinstance(orders, list):
+        raise WeatherLiveLimitError("resting orders response is not a list")
+
+    weather_orders = []
+    for order in orders:
+        if not isinstance(order, dict):
+            raise WeatherLiveLimitError("resting orders response contains a non-object order")
+
+        ticker = _weather_order_ticker(order)
+        if not ticker:
+            raise WeatherLiveLimitError("resting order is missing market ticker")
+        if ticker.startswith("KXHIGH"):
+            weather_orders.append(order)
+
+    return weather_orders
+
+
+def count_open_weather_orders(client: KalshiOrderClient) -> int:
+    """Count current open weather orders to respect MAX_OPEN_ORDERS."""
+    return len(fetch_resting_weather_orders(client))
 
 
 def _extract_order_quantity(order: dict) -> int:
@@ -217,25 +234,29 @@ def _extract_price_cents(order: dict) -> int:
 
 def estimate_weather_open_order_cost_usd(order: dict) -> float:
     """Estimate remaining capital at risk for one resting weather order."""
-    side = str(order.get("side") or order.get("contract_side") or "yes").lower()
+    side = str(order.get("contract_side") or order.get("side") or "yes").lower()
     price_cents = _extract_price_cents(order)
+    # V2 event orders use bid/ask with price already equal to the resting
+    # order's dollar cost. Older YES/NO-shaped records may carry a YES price,
+    # where NO exposure is 100 - yes_price.
     cost_cents = 100 - price_cents if side == "no" else price_cents
     return _extract_order_quantity(order) * cost_cents / 100.0
 
 
 def weather_open_exposure_usd(client: KalshiOrderClient) -> float:
     """Return current resting weather order exposure, failing closed if unclear."""
-    try:
-        orders = client.get_orders(status="resting")
-    except Exception as exc:
-        raise WeatherLiveLimitError("failed to fetch resting orders for weather exposure") from exc
-
+    orders = fetch_resting_weather_orders(client)
     total = 0.0
-    for order in orders or []:
-        if not _weather_order_ticker(order).startswith("KXHIGH"):
-            continue
+    for order in orders:
         total += estimate_weather_open_order_cost_usd(order)
     return total
+
+
+def weather_open_order_state(client: KalshiOrderClient) -> tuple[int, float]:
+    """Return (open_weather_order_count, open_weather_exposure_usd)."""
+    orders = fetch_resting_weather_orders(client)
+    exposure_usd = sum(estimate_weather_open_order_cost_usd(order) for order in orders)
+    return len(orders), exposure_usd
 
 
 def count_weather_trades_today() -> int:
@@ -602,7 +623,7 @@ def main():
             return 1
 
         try:
-            open_exposure_usd = weather_open_exposure_usd(client)
+            open_count, open_exposure_usd = weather_open_order_state(client)
         except WeatherLiveLimitError as exc:
             logger.error(f"[WEATHER_RUNNER] Open weather exposure check failed: {exc}")
             return 1
@@ -615,7 +636,6 @@ def main():
             generate_proof(signals, 0, dry_run)
             return 0
 
-        open_count = count_open_weather_orders(client)
         logger.info(f"[WEATHER_RUNNER] Open weather orders: {open_count}/{MAX_OPEN_ORDERS}")
         logger.info(
             f"[WEATHER_RUNNER] Open weather exposure: "

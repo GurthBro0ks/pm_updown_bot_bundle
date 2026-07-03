@@ -50,6 +50,7 @@ def no_side_effects(monkeypatch):
 
 def _mock_client():
     client = MagicMock()
+    client.get_orders.return_value = []
     client.place_order.return_value = {"order_id": "test-123", "status": "resting"}
     return client
 
@@ -290,6 +291,110 @@ class TestWeatherSafetyLimits:
         monkeypatch.setattr("sys.argv", ["run_weather_strategy.py"])
 
         assert runner.main() == 0
+        client.place_order.assert_not_called()
+
+    def test_weather_open_order_fetch_zero_orders_allows_zero_exposure(self, no_side_effects):
+        """A successful empty resting-order fetch proves zero weather exposure."""
+        client = _mock_client()
+        client.get_orders.return_value = []
+
+        count, exposure = runner.weather_open_order_state(client)
+
+        assert count == 0
+        assert exposure == pytest.approx(0.0)
+        client.get_orders.assert_called_once_with(status="resting")
+
+    def test_weather_open_order_fetch_computes_weather_exposure(self, no_side_effects):
+        """Weather resting exposure is deterministic and dollar-unit safe."""
+        client = _mock_client()
+        client.get_orders.return_value = [
+            {
+                "market_ticker": "KXHIGHNY-26JUL02-B99.5",
+                "side": "bid",
+                "remaining_count": 1,
+                "price": "0.2500",
+            },
+            {
+                "market_ticker": "KXHIGHCHI-26JUL02-B90.5",
+                "contract_side": "no",
+                "remaining_count": 2,
+                "yes_price_cents": 90,
+            },
+        ]
+
+        count, exposure = runner.weather_open_order_state(client)
+
+        assert count == 2
+        assert exposure == pytest.approx(0.45)
+
+    def test_weather_open_order_fetch_ignores_non_weather_orders(self, no_side_effects):
+        """Only KXHIGH weather orders count toward weather exposure."""
+        client = _mock_client()
+        client.get_orders.return_value = [
+            {
+                "market_ticker": "KXBTC-26JUL02-T100000",
+                "side": "bid",
+                "remaining_count": 10,
+                "price": "0.9900",
+            },
+            {
+                "market_ticker": "KXHIGHNY-26JUL02-B99.5",
+                "side": "bid",
+                "remaining_count": 1,
+                "price": "0.2500",
+            },
+        ]
+
+        count, exposure = runner.weather_open_order_state(client)
+
+        assert count == 1
+        assert exposure == pytest.approx(0.25)
+
+    def test_weather_open_order_fetch_failure_fails_closed(self, no_side_effects):
+        """API/read errors cannot be treated as zero exposure."""
+        client = _mock_client()
+        client.get_orders.side_effect = RuntimeError("network unavailable")
+
+        with pytest.raises(runner.WeatherLiveLimitError):
+            runner.weather_open_order_state(client)
+
+    def test_weather_open_order_malformed_response_fails_closed(self, no_side_effects):
+        """Malformed order-list responses are ambiguous and fail closed."""
+        client = _mock_client()
+        client.get_orders.return_value = {"orders": []}
+
+        with pytest.raises(runner.WeatherLiveLimitError):
+            runner.weather_open_order_state(client)
+
+    def test_weather_open_order_missing_ticker_fails_closed(self, no_side_effects):
+        """A resting order without a ticker could be weather exposure."""
+        client = _mock_client()
+        client.get_orders.return_value = [{"remaining_count": 1, "price": "0.2500"}]
+
+        with pytest.raises(runner.WeatherLiveLimitError):
+            runner.weather_open_order_state(client)
+
+    def test_weather_open_order_malformed_weather_order_fails_closed(self, no_side_effects):
+        """Weather orders with missing cost fields are not ignored."""
+        client = _mock_client()
+        client.get_orders.return_value = [{"market_ticker": "KXHIGHNY-26JUL02-B99.5"}]
+
+        with pytest.raises(runner.WeatherLiveLimitError):
+            runner.weather_open_order_state(client)
+
+    def test_weather_live_refuses_order_when_exposure_unproven(self, monkeypatch, no_side_effects):
+        """Live mode stops before placement when open exposure cannot be proven."""
+        client = _mock_client()
+        client.get_orders.side_effect = RuntimeError("portfolio read failed")
+        monkeypatch.setenv("WEATHER_DRY_RUN", "false")
+        monkeypatch.setenv("WEATHER_LIVE_ENABLED", "true")
+        monkeypatch.setattr(runner, "setup_logging", lambda: "/tmp/test.log")
+        monkeypatch.setattr(runner, "generate_proof", MagicMock())
+        monkeypatch.setattr(runner, "generate_weather_signals", lambda **kw: [_signal()])
+        monkeypatch.setattr(runner, "get_order_client", MagicMock(return_value=client))
+        monkeypatch.setattr("sys.argv", ["run_weather_strategy.py"])
+
+        assert runner.main() == 1
         client.place_order.assert_not_called()
 
 
