@@ -625,10 +625,20 @@ def check_weather_gates(opportunity: dict, risk_caps: dict) -> tuple:
 def get_order_client() -> Optional[KalshiOrderClient]:
     """Initialize Kalshi order client lazily."""
     try:
-        key_id = os.getenv("KALSHI_TRADING_KEY_ID")
-        key_file = os.getenv("KALSHI_TRADING_KEY_FILE")
+        key_id = (
+            os.getenv("KALSHI_API_KEY_ID")
+            or os.getenv("KALSHI_KEY_ID")
+            or os.getenv("KALSHI_TRADING_KEY_ID")
+            or os.getenv("KALSHI_TRADING_KEY")
+        )
+        key_file = (
+            os.getenv("KALSHI_PRIVATE_KEY_PATH")
+            or os.getenv("KALSHI_PRIVATE_KEY_FILE")
+            or os.getenv("KALSHI_TRADING_KEY_FILE")
+            or os.getenv("KALSHI_TRADING_SECRET_FILE")
+        )
         if not key_id or not key_file:
-            logging.warning("KALSHI_TRADING_KEY_ID or KALSHI_TRADING_KEY_FILE not set")
+            logging.warning("Kalshi key id or private key file env not set")
             return None
         return KalshiOrderClient(
             api_key=key_id,

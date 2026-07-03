@@ -103,8 +103,9 @@ class KalshiOrderClient:
     To use for real trading:
       1. Generate a trading API key at kalshi.com/account/profile
          (different from the market-data key in .env)
-      2. Set KALSHI_TRADING_KEY and KALSHI_TRADING_SECRET_FILE env vars
-         (or pass api_key and private_key_path directly)
+      2. Set KALSHI_API_KEY_ID and KALSHI_PRIVATE_KEY_PATH env vars
+         (KALSHI_KEY_ID / KALSHI_PRIVATE_KEY_FILE are accepted aliases)
+         or pass api_key and private_key_path directly
       3. Verify: client.get_balance() returns a valid balance
     """
 
@@ -134,11 +135,26 @@ class KalshiOrderClient:
             base_url: Kalshi API base URL.
             log_path: Path to order log file.
         """
-        self.api_key = api_key or os.getenv("KALSHI_TRADING_KEY") or os.getenv("KALSHI_KEY")
+        self.api_key = (
+            api_key
+            or os.getenv("KALSHI_API_KEY_ID")
+            or os.getenv("KALSHI_KEY_ID")
+            or os.getenv("KALSHI_TRADING_KEY")
+            or os.getenv("KALSHI_TRADING_KEY_ID")
+            or os.getenv("KALSHI_KEY")
+        )
         if not self.api_key:
-            raise ValueError("No API key provided and KALSHI_KEY / KALSHI_TRADING_KEY not set in env")
+            raise ValueError("No API key provided and no supported Kalshi key-id env var is set")
 
-        key_path = private_key_path or os.getenv("KALSHI_TRADING_SECRET_FILE") or os.getenv("KALSHI_SECRET_FILE") or "/opt/slimy/pm_updown_bot_bundle/keys/kalshi-prod.key"
+        key_path = (
+            private_key_path
+            or os.getenv("KALSHI_PRIVATE_KEY_PATH")
+            or os.getenv("KALSHI_PRIVATE_KEY_FILE")
+            or os.getenv("KALSHI_TRADING_SECRET_FILE")
+            or os.getenv("KALSHI_TRADING_KEY_FILE")
+            or os.getenv("KALSHI_SECRET_FILE")
+            or "/opt/slimy/pm_updown_bot_bundle/keys/kalshi-prod.key"
+        )
         self.base_url = base_url.rstrip("/")
         self.log_path = log_path
 

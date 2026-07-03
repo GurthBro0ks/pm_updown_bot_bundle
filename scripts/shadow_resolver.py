@@ -33,8 +33,8 @@ PROOFS_DIR = BUNDLE_DIR / "proofs"
 CACHE_FILE = BUNDLE_DIR / "data" / "shadow_resolution_cache.json"
 
 # Kalshi API
-KALSHI_API_KEY = os.getenv("KALSHI_KEY", "d1ac170e-5bb1-4d6a-b483-a2f76e072c7a")
-KALSHI_SECRET_FILE = os.getenv("KALSHI_SECRET_FILE", str(BUNDLE_DIR / "keys" / "kalshi-prod.key"))
+KALSHI_API_KEY = os.getenv("KALSHI_KEY")
+KALSHI_SECRET_FILE = os.getenv("KALSHI_SECRET_FILE")
 KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
 
 # Fees
@@ -110,6 +110,11 @@ def _get_kalshi_headers(method: str, path: str) -> dict:
     from cryptography.hazmat.primitives import hashes
     import base64
     import time as _time
+
+    if not KALSHI_API_KEY:
+        raise RuntimeError("KALSHI_KEY is required for Kalshi resolution")
+    if not KALSHI_SECRET_FILE:
+        raise RuntimeError("KALSHI_SECRET_FILE is required for Kalshi resolution")
 
     with open(KALSHI_SECRET_FILE, "rb") as f:
         private_key = serialization.load_pem_private_key(f.read(), password=None)
