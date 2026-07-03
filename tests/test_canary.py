@@ -17,6 +17,7 @@ from core.canary import (
     _check_provider_health,
     _check_kalshi_auth_and_fetch,
     _check_pipeline_dry_run,
+    _select_canary_market,
 )
 from core.stage_budget import StageBudget
 from datetime import datetime, timezone
@@ -287,16 +288,48 @@ class TestPipelineDryRun:
         assert result.details["prior_source"] == "pipeline_call"
         mock_est.assert_called_once()
 
-    def test_ticker_not_found(self):
-        """Canary ticker not in fetched markets → fail."""
+    def test_ticker_not_found_uses_current_market_fallback(self):
+        """A stale configured ticker should not make the dry-run canary fail."""
         with patch("config.CANARY_TICKER", "NOTFOUND-TICKER"):
             with patch("utils.kalshi.fetch_kalshi_markets",
                        return_value=[{"id": "KXINXU-26DEC31", "question": "S&P?", "ticker": "KXINXU-26DEC31"}]):
+                with patch("strategies.kalshi_optimize.calculate_optimal_order_size", return_value=5.0):
+                    with patch("utils.proof.generate_proof", return_value=None):
+                        budget = make_budget(seconds=10.0)
+                        result = _check_pipeline_dry_run(budget, provider_prior=0.65)
+
+        assert result.passed is True
+        assert result.details["selected_ticker"] == "KXINXU-26DEC31"
+        assert result.details["ticker_source"] == "current_fallback"
+
+    def test_no_usable_canary_market_still_fails(self):
+        """No fetched market shape means the pipeline cannot run."""
+        with patch("config.CANARY_TICKER", "NOTFOUND-TICKER"):
+            with patch("utils.kalshi.fetch_kalshi_markets", return_value=[{"bad": "shape"}]):
                 budget = make_budget(seconds=10.0)
-                result = _check_pipeline_dry_run(budget, provider_prior=None)
+                result = _check_pipeline_dry_run(budget, provider_prior=0.65)
 
         assert result.passed is False
-        assert "not found" in result.error.lower()
+        assert "no usable canary market" in result.error.lower()
+
+    def test_select_canary_market_prefers_configured_ticker(self):
+        markets = [
+            {"id": "CURRENT", "question": "Current?"},
+            {"id": "CONFIGURED", "question": "Configured?"},
+        ]
+
+        market, source = _select_canary_market(markets, "CONFIGURED")
+
+        assert market == markets[1]
+        assert source == "configured"
+
+    def test_select_canary_market_falls_back_to_current_market(self):
+        markets = [{"id": "CURRENT", "question": "Current?"}]
+
+        market, source = _select_canary_market(markets, "STALE")
+
+        assert market == markets[0]
+        assert source == "current_fallback"
 
     def test_kelly_returns_nan_fails(self):
         """Kelly sizing returns NaN → check fails."""

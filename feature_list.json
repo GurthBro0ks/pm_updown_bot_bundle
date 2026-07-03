@@ -422,5 +422,34 @@
       "cron policy -> PASS weather dry-run true and WEATHER_LIVE_ENABLED absent"
     ],
     "notes": "No orders, cancellations, live weather, cron/service changes, push, or Discord. A removed hardcoded legacy key-id literal was printed once during diff review and is not repeated; old key revocation remains required."
+  },
+  "pm_kalshi_redacted_health_canary_refresh_20260703": {
+    "status": "built_validated_manual_qa_pending",
+    "file": "scripts/kalshi_redacted_health_check.py, core/canary.py, tests/test_kalshi_redacted_health_check.py, tests/test_canary.py",
+    "passes": true,
+    "manual_qa_required": true,
+    "pushed": true,
+    "commit": "self_commit_final_sha_reported_in_closeout",
+    "proof_dir": "/tmp/proof_pm_add_redacted_kalshi_health_and_canary_refresh_20260703T202952Z",
+    "description": "Adds a redacted readonly Kalshi health command for auth, portfolio, and open-orders checks, and makes the canary fall back to a current fetched market when the configured ticker is stale.",
+    "changes": [
+      "New redacted health command prints only PASS/WARN/FAIL labels, HTTP status class, and VALUES_PRINTED=no",
+      "Readonly signed GET checks cover markets auth/fetch, portfolio balance, and resting open orders",
+      "Canary pipeline dry-run prefers configured ticker but falls back to a current usable market when stale",
+      "Focused tests cover redaction, no key/path/header/body leakage, 2xx PASS, 401/404/timeout handling, and stale canary fallback"
+    ],
+    "validation": [
+      "bash -n scripts/cron_weather_trade.sh -> PASS",
+      "python3 -m py_compile touched Python files -> PASS",
+      "PYTHONPATH=. pytest tests/test_kalshi_redacted_health_check.py tests/test_canary.py -q -> 37 passed",
+      "PYTHONPATH=. pytest tests -> 519 passed, 1 warning",
+      "./scripts/run_tests.sh -> PASS, STATUS: ALL GATES PASS",
+      "redacted health command -> KALSHI_AUTH=PASS, PORTFOLIO_READONLY=PASS, OPEN_ORDERS_READONLY=PASS, HTTP_STATUS_CLASS=2xx, VALUES_PRINTED=no",
+      "sanitized canary run -> provider_health PASS, kalshi_auth_and_fetch PASS, pipeline_dry_run PASS",
+      "weather dry-run smoke -> PASS, Trades placed: 0",
+      "sanitized cron check -> WEATHER_DRY_RUN=true, WEATHER_LIVE_ENABLED=absent"
+    ],
+    "result": "PASS",
+    "notes": "No live order placement/cancellation, weather live arm, cron change, service restart, secret print, or Discord notification. Expected dirty weather files preserved."
   }
 }

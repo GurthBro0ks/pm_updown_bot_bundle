@@ -1,3 +1,54 @@
+# 2026-07-03 (pm_add_redacted_kalshi_health_and_canary_refresh — Redacted Health + Canary Fallback)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Kalshi redacted verification
+**Type:** Readonly health check and canary reliability fix
+
+### Summary
+Added a purpose-built redacted Kalshi readonly health command and removed the
+canary's dependency on a single stale configured ticker. The health command
+uses existing runtime configuration, signs readonly GET requests, and prints
+only PASS/WARN/FAIL labels, a coarse HTTP status class, and
+`VALUES_PRINTED=no`.
+
+### Changes
+1. Added `scripts/kalshi_redacted_health_check.py`.
+2. Added `tests/test_kalshi_redacted_health_check.py`.
+3. Updated `core/canary.py` to select the configured canary ticker when present
+   and otherwise fall back to a current fetched market with a usable identifier
+   and question.
+4. Updated `tests/test_canary.py` for stale ticker fallback behavior.
+5. Added buglog:
+   `docs/buglog/pm_kalshi_redacted_health_canary_refresh_20260703.md`.
+
+### Verified
+- Redacted health command: PASS for auth, portfolio, and open-orders; HTTP
+  status class 2xx; values printed no.
+- Sanitized canary run: PASS for provider health, Kalshi auth/fetch, and
+  pipeline dry-run.
+- `bash -n scripts/cron_weather_trade.sh`: PASS.
+- Py compile touched Python files: PASS.
+- Focused tests: PASS, 37 passed.
+- `PYTHONPATH=. pytest tests`: PASS, 519 passed, 1 warning.
+- `./scripts/run_tests.sh`: PASS, `STATUS: ALL GATES PASS`.
+- Weather dry-run smoke: PASS, `Trades placed: 0`.
+- Sanitized cron posture: weather dry-run true, `WEATHER_LIVE_ENABLED` absent.
+- Proof: `/tmp/proof_pm_add_redacted_kalshi_health_and_canary_refresh_20260703T202952Z`.
+
+### Safety
+- No `.env`, key, PEM, shell history, auth header, webhook config, or secret
+  output was read or printed by the agent.
+- No order placement/cancellation, live weather arm, cron change, service
+  restart, Caddy/DNS/systemd/timer/tmux change, raw webhook, Discord
+  notification, force push, reset, or clean.
+- Preserved expected dirty weather hardening files:
+  `scripts/run_weather_strategy.py` and `tests/test_weather_live.py`.
+
+### Result
+PASS: redacted Kalshi credential verification now has a readonly health command
+and the canary no longer fails solely because the configured market ticker is
+stale.
+
 # 2026-07-03 (pm_kalshi_default_client_mapping_align — Rotated Default Client Mapping, Env Blocked)
 
 **Agent:** Codex (SlimyAI NUC1)  

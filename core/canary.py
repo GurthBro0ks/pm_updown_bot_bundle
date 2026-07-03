@@ -54,6 +54,26 @@ class CanaryFailure(Exception):
         super().__init__(f"[canary] CRITICAL FAILURE in '{check_name}': {message}")
 
 
+def _market_identifier(market: dict) -> Optional[str]:
+    """Return a stable market identifier from a normalized Kalshi market dict."""
+    return market.get("id") or market.get("ticker") or market.get("market_ticker")
+
+
+def _select_canary_market(markets: list[dict], preferred_ticker: str) -> tuple[Optional[dict], str]:
+    """Pick the configured canary market, or a current fetched market if stale."""
+    for market in markets:
+        if _market_identifier(market) == preferred_ticker:
+            return market, "configured"
+
+    for market in markets:
+        identifier = _market_identifier(market)
+        question = market.get("question") or market.get("title")
+        if identifier and question:
+            return market, "current_fallback"
+
+    return None, "missing"
+
+
 # ─── Scratchpad helpers ───────────────────────────────────────────────────────
 
 def _scratchpad_path() -> Path:
@@ -370,20 +390,18 @@ def _check_pipeline_dry_run(budget: StageBudget, provider_prior: float = None) -
 
         # Step 1: Fetch the canary market
         markets = fetch_kalshi_markets()
-        canary_market = None
-        for m in markets:
-            if m.get("id") == ticker or m.get("ticker") == ticker:
-                canary_market = m
-                break
+        canary_market, ticker_source = _select_canary_market(markets, ticker)
 
         if canary_market is None:
             return CanaryResult(
                 passed=False,
                 check_name=check_name,
                 elapsed_seconds=time.monotonic() - tick,
-                error=f"Canary ticker '{ticker}' not found in {len(markets)} fetched markets",
+                error=f"No usable canary market found in {len(markets)} fetched markets",
                 details={"fetched_count": len(markets)},
             )
+
+        selected_ticker = _market_identifier(canary_market) or ticker
 
         # Step 2: Get AI prior (use cached result from Check 1 if available)
         question = canary_market.get("question", canary_market.get("title", ""))
@@ -401,7 +419,7 @@ def _check_pipeline_dry_run(budget: StageBudget, provider_prior: float = None) -
             remaining = budget.remaining()
             ai_prior = estimate_true_price(
                 market_question=question,
-                market_id=ticker,
+                market_id=selected_ticker,
                 tier="premium",
                 timeout=min(10.0, remaining),
             )
@@ -446,7 +464,8 @@ def _check_pipeline_dry_run(budget: StageBudget, provider_prior: float = None) -
         proof_id = f"canary_dry_run_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}"
         proof_data = {
             "canary": True,
-            "ticker": ticker,
+            "ticker": selected_ticker,
+            "ticker_source": ticker_source,
             "question": question,
             "ai_prior": ai_prior,
             "prior_source": prior_source,
@@ -473,6 +492,8 @@ def _check_pipeline_dry_run(budget: StageBudget, provider_prior: float = None) -
             elapsed_seconds=elapsed,
             details={
                 "ticker": ticker,
+                "selected_ticker": selected_ticker,
+                "ticker_source": ticker_source,
                 "question": question[:80],
                 "ai_prior": round(ai_prior, 4),
                 "prior_source": prior_source,
