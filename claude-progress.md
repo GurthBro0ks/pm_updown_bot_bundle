@@ -1,3 +1,42 @@
+# 2026-07-03 (hourly_shadow_env_loading_rewrite — Fail-Closed Env Loading)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / hourly shadow wrapper
+**Type:** Shell safety fix
+
+### Summary
+Rewrote `scripts/run_hourly_shadow.sh` so the hourly shadow wrapper keeps Kalshi credentials out of source, resolves the repo root from the script path, loads `.env` fail-closed, and validates required variable names without printing values.
+
+### Changes
+1. `scripts/run_hourly_shadow.sh` now uses `#!/usr/bin/env bash` and `set -euo pipefail`.
+2. The wrapper resolves `SCRIPT_DIR` and `REPO_ROOT` instead of depending on caller cwd.
+3. `.env` loading fails closed when missing/unreadable; `source ... || true` was removed.
+4. The wrapper validates `KALSHI_KEY` and readable `KALSHI_SECRET_FILE` by name only.
+5. Added `tests/test_run_hourly_shadow_env.py` with static wrapper contract tests.
+6. Added `docs/ops/hourly_shadow_env_policy.md` documenting the no-inline-secrets/fail-closed policy.
+
+### Verified
+- `bash -n scripts/run_hourly_shadow.sh`: PASS.
+- Static env-loading assertions: PASS.
+- Secret scan of `scripts/run_hourly_shadow.sh`: PASS, zero findings.
+- Focused tests: PASS, 11 passed, 481 deselected, 1 warning.
+- `./scripts/run_tests.sh`: PASS, `STATUS: ALL GATES PASS`.
+- Full pytest: PASS, 492 passed, 2 warnings.
+- Weather dry-run smoke: PASS dry-run only.
+- Cron policy unchanged: weather cron remains `WEATHER_DRY_RUN=true`, no `WEATHER_LIVE_ENABLED=true`, and `cron_micro_live` remains present.
+- Runtime cache hash unchanged for `data/shadow_resolution_cache.json`.
+- Proof: `/tmp/proof_hourly_shadow_env_loading_rewrite_20260703T141840Z`.
+
+### Safety Incident
+During local inspection, one unsanitized `git diff` command printed the old tracked inline Kalshi private-key value from `HEAD`. The value is not repeated here. Treat that key as exposed and rotate/regenerate the Kalshi credential/key material before relying on it. The committed code removes the inline secret from the script, but history and the prior terminal output still require rotation.
+
+### Remaining
+- Operator/Claude closeout should review the proof and decide whether to push after credential rotation guidance is acknowledged.
+- `data/shadow_resolution_cache.json` remains dirty runtime cache noise and was intentionally not touched.
+
+### Result
+WARN: implementation validation passed and local commit pending; safety incident requires credential rotation recommendation.
+
 # Claude Progress — pm_updown_bot_bundle
 
 ## 2026-07-02 (proof_snapshot_diff_template_fix — Secret-Safe Proof Comparison)

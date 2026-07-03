@@ -319,5 +319,45 @@
     ],
     "result": "PASS",
     "notes": "No trading logic or production behavior changed. Existing unrelated dirty files were preserved byte-identical. No push was performed."
+  },
+  "pm-updown-hourly-shadow-env-loading-rewrite-20260703": {
+    "id": "pm-updown-hourly-shadow-env-loading-rewrite-20260703",
+    "status": "implemented_local_warn_secret_rotation_required",
+    "file": "scripts/run_hourly_shadow.sh, tests/test_run_hourly_shadow_env.py, docs/ops/hourly_shadow_env_policy.md",
+    "passes": false,
+    "accepted": false,
+    "manual_qa_required": true,
+    "manual_qa_completed": false,
+    "manual_qa_status": "operator_review_pending",
+    "pushed": false,
+    "commit": "local_commit_pending",
+    "proof_dir": "/tmp/proof_hourly_shadow_env_loading_rewrite_20260703T141840Z",
+    "description": "Fail-closed .env loading for hourly shadow wrapper: credentials stay out of source, .env must be readable, KALSHI_KEY and readable KALSHI_SECRET_FILE are validated by name only, and the existing hourly shadow entrypoint is preserved.",
+    "validation": [
+      "bash -n scripts/run_hourly_shadow.sh: PASS",
+      "static env-loading assertions: PASS",
+      "secret scan of script: PASS zero findings",
+      "focused tests: PASS 11 passed, 481 deselected, 1 warning",
+      "./scripts/run_tests.sh: PASS STATUS ALL GATES PASS",
+      "full pytest: PASS 492 passed, 2 warnings",
+      "weather dry-run smoke: PASS dry-run only",
+      "cron policy unchanged",
+      "runtime cache hash unchanged"
+    ],
+    "safety": {
+      "orders_placed": false,
+      "live_trading_smoke_run": false,
+      "discord_sent": false,
+      "services_restarted": false,
+      "cron_changed": false,
+      "timer_changed": false,
+      "tmux_changed": false,
+      "caddy_changed": false,
+      "dns_changed": false,
+      "secrets_printed": true,
+      "secret_rotation_recommended": true
+    },
+    "notes": "An unsanitized local diff printed the old tracked inline Kalshi private-key value from HEAD. Rotate/regenerate the affected Kalshi key material before relying on it. passes remains false pending operator review/QA.",
+    "result": "WARN_SECRET_ROTATION_REQUIRED"
   }
 }

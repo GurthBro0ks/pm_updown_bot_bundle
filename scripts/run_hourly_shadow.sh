@@ -1,5 +1,45 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
+
 # Hourly Shadow Runner Wrapper
-cd /opt/slimy/pm_updown_bot_bundle
-KALSHI_KEY="d1ac170e-5bb1-4d6a-b483-a2f76e072c7a" \
-KALSHI_SECRET="MIIEowIBAAKCAQEAzyyuDtl9XOiz34OlpvfZyTntzksXDf3kpo671WnXKpoAB9IT8F8jPBpzYJXkzh2rBc2jeyAySIX23XqY9ugUBqFZaBFViTaR2+D6Gk/z6NTMXZRMbQ9LlX7HmPxoDdX7G8QlFZzlgFMv+xEc9b0rOZnMmEcYy3vlSMk0M12qQnP0eZjttahEjFcEHfX/f1l3sqkybtV1oDB3uqB/pTSczCJKkS0pqkOrgDefGQLIDIPLIdJ2x1xyHXDYt2ha+aBbK3bok9uHSgK+1MBgDsTKpR3jvP5wfY2L4J5HcVn/z3+WXc57NGKz26mItgh1DyXqvL4DZCxUUPe5NMaMSgVwrwIDAQABAoIBAAkJjGrhFDsOJZvi8hdx/rdB8Sc2FwKJEu/XEHIzT0EFqGmu7CgTUQX+q2NztnWX+A1lQTPjnX3qEMZBjP78SbSuVihC1VCKfQYH7tu1+tBVyWJtpSspZyUq0MnSJ4yESz4UqioisXo4ZsKU0QbBN+un015zKi2PhoV3IsajgoP/1xQHqf3v/0x/5o6TxXrZOucLwttexPp/tYWKN3Dr+Wu4R6XYB0rSVG87jbby3H8xwCaYmCDKA+XZhlrSyaqwfYdI0CggXTZFXZY7i2RJ6AGkRGjq8UBtJDM8lxn4dKeA0XjcEu5ZqhHvex9eyGPwRkbSL8L5u/IcW/ETvWIZ8ECgYEA0+dvMDdGJEYm18WqHKE0Hrz7O05QBl0jRwZKxA8nEVeshOAEmI7WquVMLXFcpxcW3SkV6ubm8DYa6frYdff5iRmPXRvmpsJo+H/TroSVZDYJKvbUXU5SJzYQC4WXWZVLlQ/iSShVtvTwaeDB8jPWdvwEbT9IVJVxrojfZgG6wsECgYEA+klLe4iAyij6XYXrzBE6hI8tpzWgyjPmulxVZ/d5A+h65zdfp+kHnLmLvOOb2cOKY7W37fiYEh3FsuNSvB2IDn1UjwLXlG62712GNfMydoxO963haEQTgO3iRgT2dL3LgYUQhoqd7UgC6rrlu3XeYTkUVcKc9yKMzDjulTr9v28CgYBfAxE2tEHt98poywcoSRt+gMvA3q9A+zfbG7YgTI7+1qnS9kL5SGp2O9O5OHALt22YAlkCdz+rCwdsS/4MfwBS+bPvUphLwzWf3mjCgk4dnaDks8GqiHiLflEZaW/gSfGWx4V1ufEc1JyLTKyJdba+qOcvOMWsr0lGsbZBHZtowQKBgFEHI5HFunQ4Wf2nGpSBS2GY/N2yRfDQZrUUqW20N5BlVky+p5AzqAw8IZowUcdpP8dSEE7ReWH8E4H7iFBwexi9yH9YGzTptv29WHLk3gR1HiefOmdICsxltyiV+LgIrfarfpMgE0q7Un5trWxIF4uAMC4niCuWGuEO2Wakp3uvAoGBAKrCJUEtg8Z//u1zp8WrcMY3a5hGep35/Krz6bmHkFPwYaZ0l9ey5sbq/LBNcww8hzvWecgao6iyS/zEqlgpyDw1HbJrbO/Y2ZCmXjPLpxl9ba3zyMHW9rvUDAdDzv6KVC0a06q8i8hodKVlpCL2AU/T368cuSeYt0ZeFQYle7Jz python3 scripts/hourly_shadow.py >> logs/hourly.log 2>&1
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="${ENV_FILE:-$REPO_ROOT/.env}"
+
+fail() {
+  echo "[SHADOW] FAIL: $*" >&2
+  exit 1
+}
+
+require_env() {
+  local name="$1"
+  if [ -z "${!name:-}" ]; then
+    fail "missing required env var: $name"
+  fi
+  echo "[SHADOW] PASS: required env var present: $name" >&2
+}
+
+require_readable_file_env() {
+  local name="$1"
+  require_env "$name"
+  if [ ! -r "${!name}" ]; then
+    fail "file referenced by $name is missing or unreadable"
+  fi
+  echo "[SHADOW] PASS: readable file referenced by: $name" >&2
+}
+
+cd "$REPO_ROOT"
+
+if [ ! -r "$ENV_FILE" ]; then
+  fail "env file missing or unreadable: $ENV_FILE"
+fi
+
+set -a
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+set +a
+
+require_env KALSHI_KEY
+require_readable_file_env KALSHI_SECRET_FILE
+
+python3 scripts/hourly_shadow.py >> logs/hourly.log 2>&1
