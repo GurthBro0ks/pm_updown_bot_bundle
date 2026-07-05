@@ -15,8 +15,33 @@
 # More frequent than the main bot because weather markets are time-sensitive
 set -euo pipefail
 
-cd /opt/slimy/pm_updown_bot_bundle
-export $(grep -v '^#' .env | xargs) 2>/dev/null || true
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="${ENV_FILE:-$REPO_ROOT/.env}"
+
+fail() {
+  echo "[WEATHER_CRON] FAIL: $*" >&2
+  exit 1
+}
+
+cd "$REPO_ROOT"
+
+if [ ! -r "$ENV_FILE" ]; then
+  fail "env file missing or unreadable: $ENV_FILE"
+fi
+
+had_xtrace=0
+case "$-" in
+  *x*) had_xtrace=1; set +x ;;
+esac
+set -a
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+set +a
+if [ "$had_xtrace" -eq 1 ]; then
+  set -x
+fi
+
 WEATHER_DRY_RUN="${WEATHER_DRY_RUN:-true}"
 export WEATHER_DRY_RUN
 

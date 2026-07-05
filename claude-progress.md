@@ -1,3 +1,60 @@
+# 2026-07-05 (pm_weather_live_secret_rule_compat_fix — Secret-Safe Weather Cron Bootstrap)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / weather live arming compatibility
+**Type:** Source/test-only safety fix
+**Proof:** `/tmp/proof_pm_weather_live_secret_rule_compat_fix_20260705T021521Z`
+
+### Summary
+Fixed the two blockers from the bounded weather-live arming attempt without
+arming weather live or changing installed cron. Future arming validation should
+use `/home/slimy/init.sh` as the required host bootstrap; repo-local `init.sh`
+is optional only if present. The weather cron wrapper no longer parses `.env`
+with `grep | xargs`.
+
+### Changes
+1. Updated `AGENTS.md` startup guidance to require `source /home/slimy/init.sh`
+   and not require/create a repo-local `init.sh` solely for validation.
+2. Reworked `scripts/cron_weather_trade.sh` to resolve `REPO_ROOT` from the
+   script path, use `ENV_FILE`, fail closed if the env file is unreadable,
+   source the env file with auto-export, and disable xtrace around loading.
+3. Added `tests/test_cron_weather_env.py` with synthetic fake env files and a
+   stub Python binary to verify valid loading, missing live-limit fail-closed
+   behavior, missing env-file fail-closed behavior, no fake secret printing,
+   and dry-run default behavior.
+4. Updated `docs/ops/weather_runtime_policy.md`, `feature_list.json`, and
+   added buglog `docs/buglog/pm_weather_live_secret_rule_compat_fix_20260705.md`.
+
+### Verified
+- Repo started clean at `HEAD == origin/feat/ibkr-forecast-integration ==
+  be2d729f73cfa20e9aad29ed62fac464a9e99cb5`.
+- `bash -n scripts/cron_weather_trade.sh`: PASS.
+- `python3 scripts/kalshi_redacted_health_check.py`: PASS,
+  `KALSHI_AUTH=PASS`, `PORTFOLIO_READONLY=PASS`,
+  `OPEN_ORDERS_READONLY=PASS`, `HTTP_STATUS_CLASS=2xx`,
+  `VALUES_PRINTED=no`.
+- `PYTHONPATH=. pytest tests/test_cron_weather_env.py tests/test_weather_live.py tests/test_kalshi_redacted_health_check.py -q`:
+  PASS, 41 passed.
+- `PYTHONPATH=. pytest tests -q`: PASS, 524 passed, 1 warning.
+- `./scripts/run_tests.sh`: PASS, `STATUS: ALL GATES PASS`.
+- `WEATHER_DRY_RUN=true timeout 90 ./venv/bin/python3 scripts/run_weather_strategy.py --dry-run`:
+  PASS dry-run only, `Trades placed: 0`.
+- Sanitized cron check: installed weather cron unchanged and dry-run locked
+  (`WEATHER_DRY_RUN=true`, `WEATHER_LIVE_ENABLED` absent); main micro-live
+  cron unchanged.
+
+### Safety
+- No `.env`, key files, PEMs, shell history, auth headers, webhook configs, or
+  credential values were inspected or printed by the agent.
+- No installed cron change, weather live arming, live weather run, order
+  placement/cancellation, service restart, Caddy/DNS/systemd/timer/tmux change,
+  or Discord notification.
+
+### Next
+- Fresh exact-bounded nonce required before any weather live arming retry.
+
+---
+
 # 2026-07-05 (pm_kalshi_rotation_weather_hardening_final_closeout — Final Verification)
 
 **Agent:** Claude (SlimyAI NUC1)

@@ -18,7 +18,12 @@ Main bot cron must not be changed by weather policy work.
 Both weather entry points fail closed:
 
 - `scripts/cron_weather_trade.sh` passes `--dry-run` unless `WEATHER_DRY_RUN=false` and `WEATHER_LIVE_ENABLED=true`.
+- `scripts/cron_weather_trade.sh` loads runtime environment through `ENV_FILE`/`.env` using shell `source` with auto-export and xtrace disabled around loading. It must never use grep/xargs env parsing, echo loaded values, or require agents to inspect `.env`.
 - `scripts/run_weather_strategy.py` runs dry-run unless `WEATHER_DRY_RUN=false`, `WEATHER_LIVE_ENABLED=true`, and `--dry-run` is absent.
+
+Startup validation for future live-weather arming phases should require the host
+bootstrap (`source /home/slimy/init.sh`). This repo does not require a local
+`init.sh`; if one exists, it may be sourced after the host bootstrap.
 
 Required preservation paths for future strategy cleanup:
 

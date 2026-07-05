@@ -8,7 +8,9 @@ You are an autonomous coding agent working in the Polymarket trading bot repo.
 2. `cat claude-progress.md` — understand what happened last session
 3. `cat feature_list.json | head -200` — see current feature status
 4. `git log --oneline -10` — see recent commits
-5. `source init.sh` — validate the environment
+5. `source /home/slimy/init.sh` — validate the host environment
+   - If a repo-local `init.sh` exists, source it after the host bootstrap.
+   - Do not require or create a repo-local `init.sh` solely for validation.
 6. Pick the highest-priority incomplete feature from feature_list.json
 7. Only THEN begin coding
 
