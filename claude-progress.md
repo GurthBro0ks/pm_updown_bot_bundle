@@ -1,3 +1,43 @@
+# 2026-07-03 (pm_redacted_health_direct_invocation_fix — Direct Script Bootstrap)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Kalshi redacted health check
+**Type:** Import-path bug fix
+
+### Summary
+Fixed `scripts/kalshi_redacted_health_check.py` so it can be run directly from
+the repo root as `python3 scripts/kalshi_redacted_health_check.py` without
+requiring `PYTHONPATH=.`.
+
+### Changes
+1. Added safe `__file__`-based repo-root discovery near the top of
+   `scripts/kalshi_redacted_health_check.py`.
+2. Inserted the repo root into `sys.path` only when missing, before importing
+   `config` or repo-local utilities.
+3. Added buglog:
+   `docs/buglog/pm_redacted_health_direct_invocation_fix_20260703.md`.
+
+### Verified
+- `python3 scripts/kalshi_redacted_health_check.py`: PASS; redacted health
+  statuses all PASS, `HTTP_STATUS_CLASS=2xx`, `VALUES_PRINTED=no`.
+- `PYTHONPATH=. python3 scripts/kalshi_redacted_health_check.py`: PASS; same
+  redacted output contract.
+- `PYTHONPATH=. pytest tests/test_kalshi_redacted_health_check.py`: PASS,
+  8 passed.
+- `./scripts/run_tests.sh`: PASS, `STATUS: ALL GATES PASS`.
+- Sanitized weather cron posture: dry-run locked and
+  `WEATHER_LIVE_ENABLED=true` absent.
+
+### Safety
+- No `.env`, key files, PEMs, auth headers, webhook configs, or credential
+  values were read or printed.
+- No orders were placed or canceled.
+- No cron changes, service restarts, pushes, or weather live arm.
+
+### Result
+PASS: the redacted Kalshi health check now works by direct invocation and with
+`PYTHONPATH=.`.
+
 # 2026-07-03 (pm_add_redacted_kalshi_health_and_canary_refresh — Redacted Health + Canary Fallback)
 
 **Agent:** Codex (SlimyAI NUC1)

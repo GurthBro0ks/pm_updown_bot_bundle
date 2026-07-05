@@ -451,5 +451,35 @@
     ],
     "result": "PASS",
     "notes": "No live order placement/cancellation, weather live arm, cron change, service restart, secret print, or Discord notification. Expected dirty weather files preserved."
+  },
+  "pm_redacted_health_direct_invocation_fix_20260703": {
+    "status": "fixed_validated",
+    "file": "scripts/kalshi_redacted_health_check.py, docs/buglog/pm_redacted_health_direct_invocation_fix_20260703.md",
+    "passes": true,
+    "manual_qa_required": false,
+    "pushed": false,
+    "commit": "uncommitted",
+    "description": "Allow the redacted Kalshi health check to run directly from the repo root without requiring PYTHONPATH=. The script now bootstraps the repo root onto sys.path before importing config.",
+    "changes": [
+      "scripts/kalshi_redacted_health_check.py resolves the repo root from __file__",
+      "The repo root is inserted into sys.path only if missing",
+      "Path bootstrapping happens before config and repo-local utility imports"
+    ],
+    "validation": [
+      "python3 scripts/kalshi_redacted_health_check.py -> PASS, redacted 2xx status output",
+      "PYTHONPATH=. python3 scripts/kalshi_redacted_health_check.py -> PASS, redacted 2xx status output",
+      "PYTHONPATH=. pytest tests/test_kalshi_redacted_health_check.py -> PASS, 8 passed",
+      "./scripts/run_tests.sh -> PASS, STATUS: ALL GATES PASS",
+      "sanitized cron check -> weather dry-run locked true, WEATHER_LIVE_ENABLED=true absent"
+    ],
+    "safety": {
+      "orders_placed": false,
+      "orders_canceled": false,
+      "secrets_printed": false,
+      "cron_changed": false,
+      "weather_live_armed": false
+    },
+    "result": "PASS",
+    "notes": "No .env, key, PEM, auth header, webhook config, or credential values were read or printed. No commit or push performed."
   }
 }
