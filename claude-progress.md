@@ -1,3 +1,50 @@
+# 2026-07-05 (pm_kalshi_rotation_weather_hardening_final_closeout — Final Verification)
+
+**Agent:** Claude (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Kalshi key rotation + weather hardening
+**Type:** Closeout / project-state recording (no source changes)
+
+### Summary
+Final closeout for the Kalshi key rotation, redacted health/canary refresh,
+weather open-exposure hardening, and direct-invocation health-check fix.
+Verified actual repo state independently rather than trusting any pre-supplied
+summary, then recorded the accepted pushed state.
+
+### Verified
+- `git status` clean; `HEAD == origin/feat/ibkr-forecast-integration ==
+  0a64324d4130bb9c6c83f3968b024091310cf564`.
+- Commits `767b13c`, `d3044e6`, `0a64324` all present in `git log`.
+- `python3 scripts/kalshi_redacted_health_check.py`: PASS (redacted 2xx,
+  `VALUES_PRINTED=no`).
+- `PYTHONPATH=. pytest tests/test_kalshi_redacted_health_check.py`: PASS,
+  8 passed.
+- `PYTHONPATH=. pytest tests`: PASS, 519 passed, 1 warning.
+- `./scripts/run_tests.sh`: PASS, `STATUS: ALL GATES PASS`.
+- Weather/dry-run/live-gate/exposure focused pytest subset: PASS, 36 passed.
+- Sanitized crontab check: only `WEATHER_DRY_RUN=true` present,
+  `WEATHER_LIVE_ENABLED` absent.
+
+### Changes
+- Corrected two stale placeholder fields in `feature_list.json`
+  (`pm_kalshi_redacted_health_canary_refresh_20260703` commit,
+  `pm_redacted_health_direct_invocation_fix_20260703` pushed/commit).
+- Added missing `feature_list.json` entry for the weather open-exposure
+  hardening commit (`d3044e6`), which had no prior record.
+- Added closeout entry `pm_kalshi_rotation_weather_hardening_final_closeout_20260705`
+  to `feature_list.json`.
+- Added buglog:
+  `docs/buglog/pm_kalshi_rotation_weather_hardening_final_closeout_20260705.md`.
+
+### Safety
+- No `.env`, keys, PEMs, shell history, or credential values read/printed.
+- No live orders, cron/service/systemd/tmux/Caddy/DNS changes, or restarts.
+- Weather remains dry-run locked; live not armed.
+
+### Next
+- Fresh exact-bounded nonce required before any future weather live arming.
+
+---
+
 # 2026-07-03 (pm_redacted_health_direct_invocation_fix — Direct Script Bootstrap)
 
 **Agent:** Codex (SlimyAI NUC1)

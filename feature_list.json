@@ -429,7 +429,7 @@
     "passes": true,
     "manual_qa_required": true,
     "pushed": true,
-    "commit": "self_commit_final_sha_reported_in_closeout",
+    "commit": "767b13c1c0857658c60e1a9d99b52e5ceb1c4502",
     "proof_dir": "/tmp/proof_pm_add_redacted_kalshi_health_and_canary_refresh_20260703T202952Z",
     "description": "Adds a redacted readonly Kalshi health command for auth, portfolio, and open-orders checks, and makes the canary fall back to a current fetched market when the configured ticker is stale.",
     "changes": [
@@ -457,8 +457,8 @@
     "file": "scripts/kalshi_redacted_health_check.py, docs/buglog/pm_redacted_health_direct_invocation_fix_20260703.md",
     "passes": true,
     "manual_qa_required": false,
-    "pushed": false,
-    "commit": "uncommitted",
+    "pushed": true,
+    "commit": "0a64324d4130bb9c6c83f3968b024091310cf564",
     "description": "Allow the redacted Kalshi health check to run directly from the repo root without requiring PYTHONPATH=. The script now bootstraps the repo root onto sys.path before importing config.",
     "changes": [
       "scripts/kalshi_redacted_health_check.py resolves the repo root from __file__",
@@ -481,5 +481,58 @@
     },
     "result": "PASS",
     "notes": "No .env, key, PEM, auth header, webhook config, or credential values were read or printed. No commit or push performed."
+  },
+  "pm_weather_open_exposure_fail_closed_20260703": {
+    "status": "fixed_validated",
+    "file": "scripts/run_weather_strategy.py, tests/test_weather_live.py",
+    "passes": true,
+    "manual_qa_required": true,
+    "manual_qa_status": "PASS_operator_accepted",
+    "pushed": true,
+    "commit": "d3044e6f53b46ef268224b110ba76dd2d2916da7",
+    "description": "Weather live-order gating now fails closed on open-exposure checks: if open exposure cannot be determined (e.g. a portfolio read error), the run treats exposure as at-cap and blocks further live orders instead of assuming zero exposure.",
+    "validation": [
+      "PYTHONPATH=. pytest tests/test_weather_live.py -> passed",
+      "PYTHONPATH=. pytest tests -> 519 passed, 1 warning",
+      "./scripts/run_tests.sh -> PASS, STATUS: ALL GATES PASS",
+      "sanitized cron check -> WEATHER_DRY_RUN=true, WEATHER_LIVE_ENABLED=absent"
+    ],
+    "safety": {
+      "orders_placed": false,
+      "orders_canceled": false,
+      "secrets_printed": false,
+      "cron_changed": false,
+      "weather_live_armed": false
+    },
+    "result": "PASS",
+    "notes": "No .env, key, PEM, auth header, webhook config, or credential values were read or printed. Weather remains dry-run locked."
+  },
+  "pm_kalshi_rotation_weather_hardening_final_closeout_20260705": {
+    "status": "closeout_recorded",
+    "file": "feature_list.json, claude-progress.md, docs/buglog/pm_kalshi_rotation_weather_hardening_final_closeout_20260705.md",
+    "passes": true,
+    "manual_qa_required": false,
+    "pushed": true,
+    "commit": "0a64324d4130bb9c6c83f3968b024091310cf564",
+    "description": "Final closeout verification of the Kalshi credential rotation, redacted health/canary refresh, weather open-exposure hardening, and direct-invocation health-check fix. No source changes; verification and project-state docs only.",
+    "validation": [
+      "git status clean, HEAD == origin/feat/ibkr-forecast-integration == 0a64324d4130bb9c6c83f3968b024091310cf564",
+      "python3 scripts/kalshi_redacted_health_check.py -> KALSHI_AUTH=PASS, PORTFOLIO_READONLY=PASS, OPEN_ORDERS_READONLY=PASS, HTTP_STATUS_CLASS=2xx, VALUES_PRINTED=no",
+      "PYTHONPATH=. pytest tests/test_kalshi_redacted_health_check.py -> 8 passed",
+      "PYTHONPATH=. pytest tests -> 519 passed, 1 warning",
+      "./scripts/run_tests.sh -> PASS, STATUS: ALL GATES PASS",
+      "weather/dry_run/live_gate/exposure focused pytest subset -> 36 passed",
+      "crontab sanitized check -> only WEATHER_DRY_RUN=true present, WEATHER_LIVE_ENABLED absent"
+    ],
+    "safety": {
+      "orders_placed": false,
+      "orders_canceled": false,
+      "secrets_printed": false,
+      "cron_changed": false,
+      "weather_live_armed": false,
+      "services_restarted": false
+    },
+    "result": "PASS",
+    "notes": "No .env, key, PEM, auth header, webhook config, or credential values were read, printed, or touched. Stale placeholder commit/pushed fields on the two prior entries above were corrected to their actual merged SHAs during this closeout."
   }
 }
