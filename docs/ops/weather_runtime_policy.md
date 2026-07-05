@@ -1,8 +1,8 @@
 # Weather Runtime Policy
 
-Current policy: **weather trading stays DRY-RUN**.
+Current policy: **weather trading is live-armed with tiny weather-only caps**.
 
-Weather may only be promoted to live after all gates are true:
+Weather was promoted to live after these gates passed:
 
 - Security cleanup PASS.
 - Exposed Kalshi credentials rotated and old key revoked.
@@ -12,7 +12,20 @@ Weather may only be promoted to live after all gates are true:
 - Claude safety closeout PASS.
 - A separate live-weather activation prompt is approved.
 
-During this blocked state, weather cron must use `WEATHER_DRY_RUN=true`.
+Current accepted installed weather cron state:
+
+- `WEATHER_DRY_RUN=false`
+- `WEATHER_LIVE_ENABLED=true`
+- `WEATHER_MAX_ORDERS_PER_RUN=1`
+- `WEATHER_MAX_ORDER_USD=0.25`
+- `WEATHER_MAX_RUN_EXPOSURE_USD=1.00`
+- `WEATHER_MAX_OPEN_EXPOSURE_USD=2.00`
+
+Rollback target, if any future WARN/FAIL or operator decision requires it:
+
+- `WEATHER_DRY_RUN=true`
+- `WEATHER_LIVE_ENABLED` absent or false
+
 Main bot cron must not be changed by weather policy work.
 
 Both weather entry points fail closed:

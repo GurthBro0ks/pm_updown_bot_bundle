@@ -1,3 +1,41 @@
+# 2026-07-05 (pm_weather_live_arm_single_cycle_host_policy_nonce_v2 — Operator Accepted Live-Armed State)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / weather live arming
+**Type:** Live cron arming acceptance record
+**Proof:** `/tmp/proof_pm_weather_live_arm_single_cycle_host_policy_nonce_v2_20260705T030545Z`
+**Manual QA:** PASS_operator_accepted
+**Accepted Weather Live Armed State:** true
+**Accepted Cron State:** `WEATHER_DRY_RUN=false WEATHER_LIVE_ENABLED=true tiny_caps_present=yes`
+
+### Summary
+Operator accepted the weather live-armed cron state after the host-policy nonce
+arming phase passed. The accepted state is weather-only live arming with tiny
+caps, and the controlled live cycle placed zero orders because no eligible tiny
+trade passed all gates.
+
+### Verified
+- Repo clean and synced at
+  `HEAD == origin/feat/ibkr-forecast-integration ==
+  9dc6ad60503e41f575a27ee5c2879d221380fded`.
+- Installed weather cron currently has one `cron_weather_trade.sh` line with
+  `WEATHER_DRY_RUN=false`, `WEATHER_LIVE_ENABLED=true`, and tiny caps present.
+- Main micro-live cron remains present.
+- Accepted proof:
+  `/tmp/proof_pm_weather_live_arm_single_cycle_host_policy_nonce_v2_20260705T030545Z`.
+
+### Safety
+- This acceptance record did not change installed cron, services, Caddy, DNS,
+  systemd, timers, tmux, Discord secrets, or trading state.
+- No `.env`, key files, PEMs, shell history, auth headers, webhook configs, or
+  credential values were inspected or printed.
+
+### Next
+- Continue operator monitoring/manual QA. Roll back weather cron to dry-run if
+  any WARN/FAIL, ambiguity, or operator decision requires it.
+
+---
+
 # 2026-07-05 (pm_weather_live_secret_rule_compat_fix — Secret-Safe Weather Cron Bootstrap)
 
 **Agent:** Codex (SlimyAI NUC1)
