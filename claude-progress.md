@@ -4,6 +4,8 @@
 **Project:** pm_updown_bot_bundle / weather live arming compatibility
 **Type:** Source/test-only safety fix
 **Proof:** `/tmp/proof_pm_weather_live_secret_rule_compat_fix_20260705T021521Z`
+**Manual QA:** PASS_operator_accepted
+**Accepted Commit:** `8af860b592d4267819cab23dca67cdddddfa190e`
 
 ### Summary
 Fixed the two blockers from the bounded weather-live arming attempt without
@@ -52,6 +54,8 @@ with `grep | xargs`.
 
 ### Next
 - Fresh exact-bounded nonce required before any weather live arming retry.
+- Operator accepted commit `8af860b592d4267819cab23dca67cdddddfa190e`
+  for this source/test-only compatibility fix.
 
 ---
 

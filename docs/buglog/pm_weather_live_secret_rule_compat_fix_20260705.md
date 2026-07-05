@@ -31,3 +31,9 @@ See proof directory for exact command outputs:
 - `./scripts/run_tests.sh`
 - Weather dry-run smoke
 - Sanitized cron check
+
+## Acceptance
+
+- Manual QA: PASS_operator_accepted.
+- Accepted commit: 8af860b592d4267819cab23dca67cdddddfa190e.
+- Acceptance recorded from the live operator message on 2026-07-05.
