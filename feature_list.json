@@ -607,5 +607,43 @@
     },
     "result": "PASS",
     "notes": "Operator accepted the live-armed state: MANUAL_QA_STATUS=PASS_operator_accepted, ACCEPTED_WEATHER_LIVE_ARMED_STATE=true."
+  },
+  "pm_main_cron_preserve_inline_max_days_fix_20260706": {
+    "status": "fixed_validated_operator_qa_pending",
+    "file": "scripts/cron_micro_live.sh, tests/test_cron_micro_live_env.py, docs/buglog/pm_main_cron_preserve_inline_max_days_fix_20260706.md, feature_list.json, claude-progress.md",
+    "passes": false,
+    "validation_passed": true,
+    "manual_qa_required": true,
+    "manual_qa_status": "pending_operator_qa",
+    "pushed": true,
+    "commit": "self_commit_final_sha_reported_in_closeout",
+    "proof_dir": "/tmp/proof_pm_main_cron_preserve_inline_max_days_fix_20260706T172739Z",
+    "description": "Preserve operator/cron inline non-secret runtime overrides across main micro-live env loading, especially MAX_DAYS_TO_EXPIRY=3, without widening expiry or changing category gates.",
+    "changes": [
+      "Reworked scripts/cron_micro_live.sh to resolve the repo from the script path, support ENV_FILE for synthetic tests, fail closed on missing env file, suppress xtrace while sourcing, and avoid printing loaded values.",
+      "Snapshots and restores only known non-secret runtime knobs after env loading: TRADING_PAUSED, run/order caps, MIN_TRADE_PRICE_CENTS, MAX_DAYS_TO_EXPIRY, and KALSHI_ALLOWED_CATEGORIES.",
+      "Added synthetic-env tests proving inline MAX_DAYS_TO_EXPIRY=3 survives a fake env value of 14, unset MAX_DAYS_TO_EXPIRY can fall back to fake env, missing env file fails closed, and fake secret values are not printed."
+    ],
+    "validation": [
+      "bash -n scripts/cron_micro_live.sh -> PASS",
+      "bash -n scripts/cron_weather_trade.sh -> PASS",
+      "PYTHONPATH=. pytest tests/test_cron_micro_live_env.py tests/test_cron_weather_env.py -q -> 9 passed",
+      "python3 scripts/kalshi_redacted_health_check.py -> KALSHI_AUTH=PASS, PORTFOLIO_READONLY=PASS, OPEN_ORDERS_READONLY=PASS, HTTP_STATUS_CLASS=2xx, VALUES_PRINTED=no",
+      "PYTHONPATH=. pytest tests -q -> 528 passed, 1 warning",
+      "./scripts/run_tests.sh -> PASS, STATUS: ALL GATES PASS",
+      "sanitized cron check -> main cron present, TRADING_PAUSED=false, inline MAX_DAYS_TO_EXPIRY=3; weather remains WEATHER_DRY_RUN=false WEATHER_LIVE_ENABLED=true"
+    ],
+    "safety": {
+      "orders_placed": false,
+      "orders_canceled": false,
+      "secrets_printed": false,
+      "cron_changed": false,
+      "category_gates_changed": false,
+      "max_days_widened": false,
+      "weather_live_changed": false,
+      "services_restarted": false
+    },
+    "result": "PASS",
+    "notes": "No installed cron mutation, main live manual run, order placement/cancellation, weather arm/disarm, service restart, or category-gate change. Operator QA remains pending until the next scheduled main cron proves max_days=3 at runtime."
   }
 }

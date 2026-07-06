@@ -1,3 +1,63 @@
+# 2026-07-06 (pm_main_cron_preserve_inline_max_days_fix — Preserve Main Cron Inline Runtime Overrides)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / main micro-live cron env loading
+**Type:** Source/test-only runtime wrapper fix
+**Proof:** `/tmp/proof_pm_main_cron_preserve_inline_max_days_fix_20260706T172739Z`
+**Manual QA:** pending_operator_qa
+
+### Summary
+Fixed `scripts/cron_micro_live.sh` so operator/cron inline non-secret runtime
+overrides survive repo env loading. This directly addresses the diagnosis where
+cron showed `MAX_DAYS_TO_EXPIRY=3` but the latest main runtime log still showed
+`max_days=14`.
+
+### Changes
+1. Reworked the main micro-live wrapper to resolve the repo from the script path,
+   support `ENV_FILE` for synthetic tests, fail closed on missing env file, and
+   disable xtrace while sourcing.
+2. Snapshotted and restored only known non-secret runtime controls after env
+   loading: trading pause, order/run caps, min trade price, max days to expiry,
+   and category allowlist.
+3. Added synthetic fake-env tests proving inline max-days override preservation,
+   env fallback when unset, fail-closed missing-env behavior, and no fake secret
+   printing.
+4. Added buglog:
+   `docs/buglog/pm_main_cron_preserve_inline_max_days_fix_20260706.md`.
+
+### Verified
+- `bash -n scripts/cron_micro_live.sh`: PASS.
+- `bash -n scripts/cron_weather_trade.sh`: PASS.
+- `PYTHONPATH=. pytest tests/test_cron_micro_live_env.py tests/test_cron_weather_env.py -q`:
+  PASS, 9 passed.
+- `python3 scripts/kalshi_redacted_health_check.py`: PASS,
+  `KALSHI_AUTH=PASS`, `PORTFOLIO_READONLY=PASS`,
+  `OPEN_ORDERS_READONLY=PASS`, `HTTP_STATUS_CLASS=2xx`,
+  `VALUES_PRINTED=no`.
+- `PYTHONPATH=. pytest tests -q`: PASS, 528 passed, 1 warning.
+- `./scripts/run_tests.sh`: PASS, `STATUS: ALL GATES PASS`.
+- Sanitized cron posture: main cron present, `TRADING_PAUSED=false`, inline
+  `MAX_DAYS_TO_EXPIRY=3`; weather remained
+  `WEATHER_DRY_RUN=false WEATHER_LIVE_ENABLED=true`.
+
+### Safety
+- No `.env`, key files, PEMs, shell history, auth headers, webhook configs, or
+  credential values were inspected or printed.
+- No installed cron change, main live manual run, order placement/cancellation,
+  category-gate change, weather arm/disarm, service restart,
+  Caddy/DNS/systemd/timer/tmux change, Discord notification, or runtime config
+  mutation.
+
+### Remaining
+- Wait for the next scheduled main cron and verify runtime logs show
+  `max_days=3`.
+- If short-horizon non-weather betting still does not happen, continue the prior
+  diagnosis: current fetched <=3-day markets were weather-only, while broader
+  raw <=3-day non-weather markets were sports/other and excluded by the current
+  category gates.
+
+---
+
 # 2026-07-05 (pm_weather_live_arm_single_cycle_host_policy_nonce_v2 — Operator Accepted Live-Armed State)
 
 **Agent:** Codex (SlimyAI NUC1)
