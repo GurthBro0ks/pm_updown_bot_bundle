@@ -1,3 +1,57 @@
+# 2026-07-08 (pm_main_three_day_redacted_market_inventory_tool — Read-Only Main Market Inventory)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / main Kalshi market diagnosis
+**Type:** Read-only diagnostic tooling
+**Proof:** `/tmp/proof_pm_main_three_day_redacted_market_inventory_tool_20260708T143817Z`
+**Manual QA:** pending_operator_qa
+
+### Summary
+Added `scripts/main_market_inventory_redacted.py`, a read-only inventory command
+that explains why the main bot has zero 3-day non-weather candidates without
+running a live cycle, changing cron, changing category gates, or widening the
+user-required `MAX_DAYS_TO_EXPIRY=3`.
+
+### Current Inventory
+- `MARKET_INVENTORY=PASS`
+- `MAX_DAYS=3`
+- `TOTAL_FETCHED=79`
+- `AFTER_EXPIRY_FILTER=0`
+- `AFTER_WEATHER_EXCLUSION=0`
+- `AFTER_CATEGORY_FILTER=0`
+- `ZERO_CANDIDATE_REASON=no_current_3_day_markets`
+
+### Changes
+1. Added a direct-invocation-safe CLI with `--max-days`, `--allowed-categories`,
+   and `--sample-limit`.
+2. Defaults the max-days gate to 3 and refuses attempts to widen it.
+3. Counts public category and ticker samples only after expiry/weather/category
+   filters.
+4. Added fake-market tests for expiry/category/weather classification and
+   redacted output behavior.
+5. Added buglog:
+   `docs/buglog/pm_main_three_day_redacted_market_inventory_tool_20260708.md`.
+
+### Verified
+- `bash -n scripts/cron_micro_live.sh && bash -n scripts/cron_weather_trade.sh`: PASS.
+- `python3 -m json.tool feature_list.json`: PASS.
+- `python3 -m py_compile scripts/main_market_inventory_redacted.py tests/test_main_market_inventory_redacted.py`: PASS.
+- `PYTHONPATH=. pytest tests/test_main_market_inventory_redacted.py -q`: PASS, 8 passed.
+- `python3 scripts/main_market_inventory_redacted.py --max-days 3 --allowed-categories index,crypto,economics,commodities,financials`: PASS, `TOTAL_FETCHED=79`, `AFTER_EXPIRY_FILTER=0`, `ZERO_CANDIDATE_REASON=no_current_3_day_markets`.
+- `python3 scripts/kalshi_redacted_health_check.py`: PASS, `KALSHI_AUTH=PASS`, `PORTFOLIO_READONLY=PASS`, `OPEN_ORDERS_READONLY=PASS`, `HTTP_STATUS_CLASS=2xx`, `VALUES_PRINTED=no`.
+- `PYTHONPATH=. pytest tests -q`: PASS, 536 passed, 1 warning.
+- `./scripts/run_tests.sh`: PASS, `STATUS: ALL GATES PASS`.
+- Sanitized cron check: main cron present, `TRADING_PAUSED=false`, `MAX_DAYS_TO_EXPIRY=3`, `KALSHI_ALLOWED_CATEGORIES=index,crypto,economics,commodities,financials`; weather remains `WEATHER_DRY_RUN=false WEATHER_LIVE_ENABLED=true`.
+
+### Safety
+- No installed cron change, main live manual run, order placement/cancellation,
+  category-gate change, weather arm/disarm, service restart,
+  Caddy/DNS/systemd/timer/tmux change, Discord notification, or runtime config
+  mutation.
+- No credential values, auth headers, key paths, or response bodies were printed.
+
+---
+
 # 2026-07-06 (pm_main_cron_preserve_inline_max_days_fix — Preserve Main Cron Inline Runtime Overrides)
 
 **Agent:** Codex (SlimyAI NUC1)
