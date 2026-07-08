@@ -1,10 +1,39 @@
+# 2026-07-08 (pm_main_three_day_redacted_market_inventory_tool — Manual QA Accepted)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / main Kalshi market diagnosis
+**Type:** Manual QA acceptance record
+**Accepted Commit:** `78d24db18632b3384165a5bcdfab655e7ba62afc`
+**Manual QA:** PASS_operator_accepted
+
+### Summary
+Quick manual QA matched the PASS result for the redacted main-market inventory
+tool at `HEAD == origin/feat/ibkr-forecast-integration ==
+78d24db18632b3384165a5bcdfab655e7ba62afc`.
+
+### Verified
+- `git status --short --branch`: branch clean and tracking origin.
+- `git rev-parse HEAD`: `78d24db18632b3384165a5bcdfab655e7ba62afc`.
+- `git rev-parse origin/feat/ibkr-forecast-integration`: `78d24db18632b3384165a5bcdfab655e7ba62afc`.
+- `python3 scripts/main_market_inventory_redacted.py --max-days 3 --allowed-categories index,crypto,economics,commodities,financials`: PASS, `MAX_DAYS=3`, `TOTAL_FETCHED=349`, `AFTER_EXPIRY_FILTER=0`, `ZERO_CANDIDATE_REASON=no_current_3_day_markets`.
+- `python3 scripts/kalshi_redacted_health_check.py`: PASS, `KALSHI_AUTH=PASS`, `PORTFOLIO_READONLY=PASS`, `OPEN_ORDERS_READONLY=PASS`, `HTTP_STATUS_CLASS=2xx`, `VALUES_PRINTED=no`.
+
+### Safety
+- No installed cron change, main live manual run, order placement/cancellation,
+  category-gate change, weather arm/disarm, service restart,
+  Caddy/DNS/systemd/timer/tmux change, Discord notification, or runtime config
+  mutation.
+- No credential values, auth headers, key paths, or response bodies were printed.
+
+---
+
 # 2026-07-08 (pm_main_three_day_redacted_market_inventory_tool — Read-Only Main Market Inventory)
 
 **Agent:** Codex (SlimyAI NUC1)
 **Project:** pm_updown_bot_bundle / main Kalshi market diagnosis
 **Type:** Read-only diagnostic tooling
 **Proof:** `/tmp/proof_pm_main_three_day_redacted_market_inventory_tool_20260708T143817Z`
-**Manual QA:** pending_operator_qa
+**Manual QA:** PASS_operator_accepted
 
 ### Summary
 Added `scripts/main_market_inventory_redacted.py`, a read-only inventory command

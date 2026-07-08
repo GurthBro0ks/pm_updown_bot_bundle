@@ -647,14 +647,16 @@
     "notes": "No installed cron mutation, main live manual run, order placement/cancellation, weather arm/disarm, service restart, or category-gate change. Operator QA remains pending until the next scheduled main cron proves max_days=3 at runtime."
   },
   "pm_main_three_day_redacted_market_inventory_tool_20260708": {
-    "status": "built_validated_operator_qa_pending",
+    "status": "accepted_manual_qa_pass",
     "file": "scripts/main_market_inventory_redacted.py, tests/test_main_market_inventory_redacted.py, docs/buglog/pm_main_three_day_redacted_market_inventory_tool_20260708.md, feature_list.json, claude-progress.md",
-    "passes": false,
+    "passes": true,
+    "accepted": true,
     "validation_passed": true,
     "manual_qa_required": true,
-    "manual_qa_status": "pending_operator_qa",
+    "manual_qa_status": "PASS_operator_accepted",
     "pushed": false,
-    "commit": "self_commit_final_sha_reported_in_closeout",
+    "commit": "78d24db18632b3384165a5bcdfab655e7ba62afc",
+    "accepted_commit": "78d24db18632b3384165a5bcdfab655e7ba62afc",
     "proof_dir": "/tmp/proof_pm_main_three_day_redacted_market_inventory_tool_20260708T143817Z",
     "description": "Read-only redacted main-market inventory tool that reports why the main bot has zero <=3-day non-weather order candidates while preserving MAX_DAYS_TO_EXPIRY=3 and current category/weather/cron behavior.",
     "changes": [
