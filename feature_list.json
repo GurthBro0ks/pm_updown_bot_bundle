@@ -4,8 +4,8 @@
     "file": "utils/kalshi.py, scripts/main_market_inventory_redacted.py, tests/test_kalshi_fetch_supplemental_series.py, tests/test_main_market_inventory_redacted.py",
     "passes": false,
     "manual_qa_required": true,
-    "pushed": false,
-    "commit": "pending_commit_this_phase",
+    "pushed": true,
+    "commit": "4ff644413b844b5d438eab0c9a0367385e82334e",
     "proof_dir": "/tmp/proof_pm_main_three_day_fetch_universe_supplement_fix_20260708T151514Z",
     "description": "Supplement the main Kalshi fetch universe with bounded priority allowed-category short-horizon series so KXNASDAQ100U financials markets are not missed solely because the series ranks outside KALSHI_SERIES_LIMIT=50.",
     "changes": [

@@ -3,6 +3,7 @@
 **Agent:** Codex (SlimyAI NUC1)
 **Project:** pm_updown_bot_bundle / main Kalshi market diagnosis
 **Type:** Source/test-only fetch universe fix
+**Source Commit:** `4ff644413b844b5d438eab0c9a0367385e82334e`
 **Proof:** `/tmp/proof_pm_main_three_day_fetch_universe_supplement_fix_20260708T151514Z`
 **Manual QA:** pending_operator_qa
 
