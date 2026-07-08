@@ -1,3 +1,69 @@
+# 2026-07-08 (pm_main_three_day_fetch_universe_supplement_fix — Source Fix Built)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / main Kalshi market diagnosis
+**Type:** Source/test-only fetch universe fix
+**Proof:** `/tmp/proof_pm_main_three_day_fetch_universe_supplement_fix_20260708T151514Z`
+**Manual QA:** pending_operator_qa
+
+### Summary
+Added a bounded priority supplemental series path so the main bot fetch universe
+includes `KXNASDAQ100U` even when it ranks outside the default
+`KALSHI_SERIES_LIMIT=50`. This preserves `MAX_DAYS_TO_EXPIRY=3`, does not expand
+allowed categories, and leaves all expiry/category/weather/trading gates in
+place after fetch.
+
+### Current Inventory After Fix
+- `MARKET_INVENTORY=PASS`
+- `MAX_DAYS=3`
+- `TOTAL_FETCHED=337`
+- `AFTER_EXPIRY_FILTER=134`
+- `AFTER_WEATHER_EXCLUSION=134`
+- `AFTER_CATEGORY_FILTER=105`
+- `THREE_DAY_ALLOWED_COUNT=105`
+- `SUPPLEMENTAL_SERIES_MARKET_COUNT=100`
+- `SUPPLEMENTAL_THREE_DAY_ALLOWED_COUNT=100`
+- `ZERO_CANDIDATE_REASON=has_allowed_candidates`
+
+### Changes
+1. Added `KALSHI_MAIN_SUPPLEMENTAL_SERIES = ("KXNASDAQ100U",)` and a pure
+   deduping selector for top-N plus supplemental series.
+2. Tagged normalized markets with `kalshi_fetch_source`.
+3. Extended the redacted inventory output with supplemental-series counts.
+4. Added fixture tests proving out-of-top-N inclusion, dedupe, expiry filtering,
+   weather exclusion, disallowed category exclusion, and no order action in
+   inventory tests.
+5. Added buglog:
+   `docs/buglog/pm_main_three_day_fetch_universe_supplement_fix_20260708.md`.
+
+### Verified
+- `bash -n scripts/cron_micro_live.sh`: PASS.
+- `bash -n scripts/cron_weather_trade.sh`: PASS.
+- `python3 -m py_compile utils/kalshi.py scripts/main_market_inventory_redacted.py tests/test_kalshi_fetch_supplemental_series.py tests/test_main_market_inventory_redacted.py`: PASS.
+- `PYTHONPATH=. pytest tests/test_kalshi_fetch_supplemental_series.py tests/test_main_market_inventory_redacted.py -q`: PASS, 16 passed.
+- `python3 scripts/main_market_inventory_redacted.py --max-days 3 --allowed-categories index,crypto,economics,commodities,financials`: PASS, see counts above.
+- `python3 scripts/kalshi_redacted_health_check.py`: PASS, `KALSHI_AUTH=PASS`, `PORTFOLIO_READONLY=PASS`, `OPEN_ORDERS_READONLY=PASS`, `HTTP_STATUS_CLASS=2xx`, `VALUES_PRINTED=no`.
+- `PYTHONPATH=. pytest tests -q`: PASS, 544 passed, 1 warning.
+- `./scripts/run_tests.sh`: PASS, `STATUS: ALL GATES PASS`.
+- Sanitized cron check: main cron present, `TRADING_PAUSED=false`,
+  `MAX_DAYS_TO_EXPIRY=3`,
+  `KALSHI_ALLOWED_CATEGORIES=index,crypto,economics,commodities,financials`;
+  weather remains `WEATHER_DRY_RUN=false WEATHER_LIVE_ENABLED=true`.
+
+### Safety
+- No installed cron change, main live manual run, order placement/cancellation,
+  category-gate expansion, weather change, service restart,
+  Caddy/DNS/systemd/timer/tmux change, Discord notification, or runtime config
+  mutation.
+- No credential values, auth headers, key paths, or response bodies were printed.
+
+### Remaining
+- Manual operator QA.
+- After push and manual QA, wait for the next scheduled main cron to see whether
+  the order path reaches AI/gates.
+
+---
+
 # 2026-07-08 (pm_main_three_day_redacted_market_inventory_tool — Manual QA Accepted)
 
 **Agent:** Codex (SlimyAI NUC1)

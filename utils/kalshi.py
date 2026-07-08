@@ -34,6 +34,7 @@ KALSHI_BLOCKED_CATEGORIES = {
 # Previously blocked: KXMV, KXMVESPORTS, KXNFL, KXNBA, KXMLB, KXNHL, KXEPL, KXUCL
 KALSHI_BLOCKED_PREFIXES = ()
 KALSHI_CANONICAL_BASE_URL = "https://api.elections.kalshi.com"
+KALSHI_MAIN_SUPPLEMENTAL_SERIES = ("KXNASDAQ100U",)
 
 
 def _safe_float(value, default=0.0):
@@ -59,6 +60,44 @@ def _candidate_kalshi_base_urls():
     if configured == KALSHI_CANONICAL_BASE_URL:
         return [configured]
     return [configured, KALSHI_CANONICAL_BASE_URL]
+
+
+def _series_ticker(series):
+    return str(series.get('ticker') or '').strip().upper()
+
+
+def _series_sort_key(series):
+    return (
+        -_safe_float(series.get('volume', 0), 0.0),
+        _safe_float(series.get('fee_multiplier', 1), 1.0),
+    )
+
+
+def _select_series_for_fetch(
+    target_series,
+    series_limit,
+    supplemental_series=KALSHI_MAIN_SUPPLEMENTAL_SERIES,
+):
+    """Select top-N series plus bounded priority supplemental series."""
+    sorted_series = sorted(target_series, key=_series_sort_key)
+    selected = sorted_series if series_limit <= 0 else list(sorted_series[:series_limit])
+    selected_tickers = {_series_ticker(series) for series in selected}
+    supplemental_tickers = {
+        str(ticker).strip().upper()
+        for ticker in supplemental_series
+        if str(ticker).strip()
+    }
+
+    supplemental_added = set()
+    if supplemental_tickers:
+        for series in sorted_series:
+            ticker = _series_ticker(series)
+            if ticker in supplemental_tickers and ticker not in selected_tickers:
+                selected.append(series)
+                selected_tickers.add(ticker)
+                supplemental_added.add(ticker)
+
+    return selected, supplemental_added
 
 
 def _market_price_value(market, dollars_key, legacy_key):
@@ -275,16 +314,13 @@ def fetch_kalshi_markets():
         all_markets = []
         series_with_markets = 0
 
-        # Sort by series volume (higher first), then lower fee multiplier.
-        target_series.sort(key=lambda s: (
-            -_safe_float(s.get('volume', 0), 0.0),
-            _safe_float(s.get('fee_multiplier', 1), 1.0),
-        ))
-
-        selected_series = target_series if series_limit <= 0 else target_series[:series_limit]
+        selected_series, supplemental_added = _select_series_for_fetch(
+            target_series,
+            series_limit,
+        )
         logger.info(
             f"[KALSHI FILTER] Series limit: {len(target_series)} -> {len(selected_series)} "
-            f"(series_limit={series_limit})"
+            f"(series_limit={series_limit}, supplemental_added={sorted(supplemental_added)})"
         )
 
         for series in selected_series:
@@ -300,6 +336,11 @@ def fetch_kalshi_markets():
                     m['series_category'] = series.get('category')
                     m['fee_multiplier'] = series.get('fee_multiplier', 0.07)
                     m['series_volume'] = series.get('volume', 0)
+                    m['_kalshi_fetch_source'] = (
+                        'supplemental_series'
+                        if _series_ticker(series) in supplemental_added
+                        else 'top_series'
+                    )
                 
                 all_markets.extend(markets)
         
@@ -424,6 +465,7 @@ def fetch_kalshi_markets():
             # Preserve series metadata not in the raw normalizer output
             norm["series_ticker"] = m.get('series_ticker')
             norm["series_category"] = m.get('series_category')
+            norm["kalshi_fetch_source"] = m.get('_kalshi_fetch_source')
             norm["fee_multiplier"] = _safe_float(m.get('fee_multiplier', 1), 1.0)
             norm["fee_type"] = "quadratic" if _safe_float(m.get('fee_multiplier', 1), 1.0) < 1 else "standard"
             markets.append(norm)

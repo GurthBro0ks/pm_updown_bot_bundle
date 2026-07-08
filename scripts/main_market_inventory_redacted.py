@@ -82,6 +82,8 @@ class InventoryResult:
     zero_candidate_reason: str
     sample_allowed_tickers: list[str]
     sample_disallowed_tickers: list[str]
+    supplemental_series_market_count: int
+    supplemental_three_day_allowed_count: int
 
 
 def parse_allowed_categories(raw: str | Sequence[str]) -> set[str]:
@@ -244,6 +246,14 @@ def build_inventory(
         zero_candidate_reason=reason,
         sample_allowed_tickers=sample_tickers(allowed_markets, sample_limit),
         sample_disallowed_tickers=sample_tickers(disallowed_markets, sample_limit),
+        supplemental_series_market_count=sum(
+            1 for market in markets
+            if market.get("kalshi_fetch_source") == "supplemental_series"
+        ),
+        supplemental_three_day_allowed_count=sum(
+            1 for market in allowed_markets
+            if market.get("kalshi_fetch_source") == "supplemental_series"
+        ),
     )
 
 
@@ -265,6 +275,8 @@ def format_inventory(result: InventoryResult) -> str:
         f"CATEGORY_COUNTS_PUBLIC={category_counts}",
         f"THREE_DAY_ALLOWED_COUNT={result.three_day_allowed_count}",
         f"THREE_DAY_DISALLOWED_COUNT={result.three_day_disallowed_count}",
+        f"SUPPLEMENTAL_SERIES_MARKET_COUNT={result.supplemental_series_market_count}",
+        f"SUPPLEMENTAL_THREE_DAY_ALLOWED_COUNT={result.supplemental_three_day_allowed_count}",
         f"ZERO_CANDIDATE_REASON={result.zero_candidate_reason}",
         f"SAMPLE_ALLOWED_TICKERS_PUBLIC={allowed_sample}",
         f"SAMPLE_DISALLOWED_TICKERS_PUBLIC={disallowed_sample}",
