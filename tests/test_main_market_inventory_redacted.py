@@ -3,6 +3,8 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 
+import requests
+
 from scripts import main_market_inventory_redacted as inventory
 
 
@@ -186,6 +188,71 @@ def test_inventory_fetcher_only_fetches_markets_without_order_action():
 
     assert calls == {"fetch": 1, "order": 0}
     assert result.three_day_allowed_count == 1
+
+
+def test_inventory_fetch_requests_identity_encoding_for_decode_robustness():
+    seen_headers = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {}
+
+    def fake_request_get(_url, **kwargs):
+        seen_headers.update(kwargs.get("headers") or {})
+        return FakeResponse()
+
+    def fake_fetcher():
+        inventory.kalshi_utils.requests.get("https://example.test/markets", headers={"X-Test": "1"})
+        return [
+            _market(
+                "KXNASDAQ100U-26JUL08H1600-T29199.99",
+                1,
+                "financials",
+                kalshi_fetch_source="supplemental_series",
+            )
+        ]
+
+    result = inventory.run_inventory(
+        max_days=3,
+        allowed_categories=ALLOWED,
+        sample_limit=20,
+        fetcher=fake_fetcher,
+        request_get=fake_request_get,
+    )
+
+    assert result.status == "PASS"
+    assert seen_headers["Accept-Encoding"] == "identity"
+    assert seen_headers["X-Test"] == "1"
+    assert result.three_day_allowed_count == 1
+
+
+def test_inventory_decode_failure_is_warn_not_misleading_zero_fetch():
+    def fake_request_get(_url, **_kwargs):
+        raise requests.exceptions.ContentDecodingError("brotli content-encoding decode failed")
+
+    def fake_fetcher():
+        try:
+            inventory.kalshi_utils.requests.get("https://example.test/series")
+        except Exception:
+            return []
+        return []
+
+    result = inventory.run_inventory(
+        max_days=3,
+        allowed_categories=ALLOWED,
+        sample_limit=20,
+        fetcher=fake_fetcher,
+        request_get=fake_request_get,
+    )
+    output = inventory.format_inventory(result)
+
+    assert result.status == "WARN_DECODE_UNSUPPORTED"
+    assert result.zero_candidate_reason == "decode_unsupported_fail_closed"
+    assert "MARKET_INVENTORY=WARN_DECODE_UNSUPPORTED" in output
+    assert "ZERO_CANDIDATE_REASON=decode_unsupported_fail_closed" in output
+    assert "brotli" not in output
 
 
 def test_zero_candidate_reason_prefers_no_current_three_day_markets():

@@ -24,7 +24,8 @@ if str(REPO_ROOT) not in sys.path:
 # Match existing redacted health-check behavior: config loads runtime env for
 # the read-only Kalshi client path. This script never prints loaded values.
 import config as _runtime_config  # noqa: F401
-from utils.kalshi import fetch_kalshi_markets
+import requests
+import utils.kalshi as kalshi_utils
 
 
 DEFAULT_MAX_DAYS = 3
@@ -84,6 +85,53 @@ class InventoryResult:
     sample_disallowed_tickers: list[str]
     supplemental_series_market_count: int
     supplemental_three_day_allowed_count: int
+
+
+@dataclass
+class FetchDiagnostics:
+    decode_error: bool = False
+    requested_identity_encoding: bool = False
+
+
+def _is_decode_error(exc: BaseException) -> bool:
+    if isinstance(exc, requests.exceptions.ContentDecodingError):
+        return True
+    text = str(exc).lower()
+    return "content-encoding" in text or "decode" in text and "brotli" in text
+
+
+def _identity_safe_request_get(original_get: Callable, diagnostics: FetchDiagnostics) -> Callable:
+    def wrapped_get(*args, **kwargs):
+        headers = dict(kwargs.get("headers") or {})
+        headers.setdefault("Accept-Encoding", "identity")
+        kwargs["headers"] = headers
+        diagnostics.requested_identity_encoding = True
+        try:
+            return original_get(*args, **kwargs)
+        except Exception as exc:
+            if _is_decode_error(exc):
+                diagnostics.decode_error = True
+            raise
+
+    return wrapped_get
+
+
+def decode_safe_fetch_markets(
+    *,
+    fetcher: Callable[[], Sequence[dict]] = kalshi_utils.fetch_kalshi_markets,
+    request_get: Callable | None = None,
+) -> tuple[list[dict], FetchDiagnostics]:
+    diagnostics = FetchDiagnostics()
+    original_get = kalshi_utils.requests.get
+    kalshi_utils.requests.get = _identity_safe_request_get(
+        request_get or original_get,
+        diagnostics,
+    )
+    try:
+        markets = list(fetcher())
+    finally:
+        kalshi_utils.requests.get = original_get
+    return markets, diagnostics
 
 
 def parse_allowed_categories(raw: str | Sequence[str]) -> set[str]:
@@ -289,15 +337,37 @@ def run_inventory(
     max_days: int,
     allowed_categories: set[str],
     sample_limit: int,
-    fetcher: Callable[[], Sequence[dict]] = fetch_kalshi_markets,
+    fetcher: Callable[[], Sequence[dict]] = kalshi_utils.fetch_kalshi_markets,
+    request_get: Callable | None = None,
 ) -> InventoryResult:
-    markets = list(fetcher())
-    return build_inventory(
+    markets, diagnostics = decode_safe_fetch_markets(
+        fetcher=fetcher,
+        request_get=request_get,
+    )
+    result = build_inventory(
         markets,
         max_days=max_days,
         allowed_categories=allowed_categories,
         sample_limit=sample_limit,
     )
+    if diagnostics.decode_error:
+        return InventoryResult(
+            status="WARN_DECODE_UNSUPPORTED",
+            max_days=result.max_days,
+            total_fetched=result.total_fetched,
+            after_expiry_filter=result.after_expiry_filter,
+            after_weather_exclusion=result.after_weather_exclusion,
+            after_category_filter=result.after_category_filter,
+            category_counts=result.category_counts,
+            three_day_allowed_count=result.three_day_allowed_count,
+            three_day_disallowed_count=result.three_day_disallowed_count,
+            zero_candidate_reason="decode_unsupported_fail_closed",
+            sample_allowed_tickers=result.sample_allowed_tickers,
+            sample_disallowed_tickers=result.sample_disallowed_tickers,
+            supplemental_series_market_count=result.supplemental_series_market_count,
+            supplemental_three_day_allowed_count=result.supplemental_three_day_allowed_count,
+        )
+    return result
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -329,7 +399,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         sample_limit=max(0, args.sample_limit),
     )
     print(format_inventory(result), end="")
-    return 0 if result.status == "PASS" else 1
+    return 0 if result.status in {"PASS", "WARN_DECODE_UNSUPPORTED"} else 1
 
 
 if __name__ == "__main__":

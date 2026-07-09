@@ -21,6 +21,7 @@ def _make_temp_micro_repo(tmp_path: Path) -> Path:
         "#!/usr/bin/env bash\n"
         "printf 'PYTHON_STUB_ARGS=%s\\n' \"$*\"\n"
         "printf 'PYTHON_STUB_MAX_DAYS_TO_EXPIRY=%s\\n' \"${MAX_DAYS_TO_EXPIRY:-}\"\n"
+        "printf 'PYTHON_STUB_KALSHI_ALLOWED_CATEGORIES=%s\\n' \"${KALSHI_ALLOWED_CATEGORIES:-}\"\n"
     )
     python_stub.chmod(python_stub.stat().st_mode | stat.S_IXUSR)
     return repo
@@ -31,6 +32,7 @@ def _run_micro_cron(
     env_file: Path,
     *,
     max_days_to_expiry: str | None = None,
+    allowed_categories: str | None = None,
 ) -> subprocess.CompletedProcess:
     env = os.environ.copy()
     env["ENV_FILE"] = str(env_file)
@@ -38,6 +40,10 @@ def _run_micro_cron(
         env.pop("MAX_DAYS_TO_EXPIRY", None)
     else:
         env["MAX_DAYS_TO_EXPIRY"] = max_days_to_expiry
+    if allowed_categories is None:
+        env.pop("KALSHI_ALLOWED_CATEGORIES", None)
+    else:
+        env["KALSHI_ALLOWED_CATEGORIES"] = allowed_categories
 
     return subprocess.run(
         [str(repo / "scripts" / "cron_micro_live.sh")],
@@ -72,6 +78,32 @@ def test_micro_cron_preserves_inline_max_days_over_fake_env_default(tmp_path: Pa
     assert "do-not-print-this" not in log
 
 
+def test_micro_cron_preserves_inline_allowed_categories_over_fake_env_default(tmp_path: Path) -> None:
+    repo = _make_temp_micro_repo(tmp_path)
+    env_file = tmp_path / "fake.env"
+    env_file.write_text(
+        "KALSHI_ALLOWED_CATEGORIES=index,crypto,economics,commodities,financials,politics\n"
+        "FAKE_SECRET_VALUE=do-not-print-this\n"
+    )
+
+    result = _run_micro_cron(
+        repo,
+        env_file,
+        allowed_categories="index,crypto,economics,commodities,financials",
+    )
+
+    assert result.returncode == 0
+    log = _cron_log(repo)
+    assert (
+        "PYTHON_STUB_KALSHI_ALLOWED_CATEGORIES="
+        "index,crypto,economics,commodities,financials"
+    ) in log
+    assert "politics" not in log
+    assert "do-not-print-this" not in result.stdout
+    assert "do-not-print-this" not in result.stderr
+    assert "do-not-print-this" not in log
+
+
 def test_micro_cron_uses_fake_env_max_days_when_inline_unset(tmp_path: Path) -> None:
     repo = _make_temp_micro_repo(tmp_path)
     env_file = tmp_path / "fake.env"
@@ -85,6 +117,27 @@ def test_micro_cron_uses_fake_env_max_days_when_inline_unset(tmp_path: Path) -> 
     assert result.returncode == 0
     log = _cron_log(repo)
     assert "PYTHON_STUB_MAX_DAYS_TO_EXPIRY=14" in log
+    assert "do-not-print-this" not in result.stdout
+    assert "do-not-print-this" not in result.stderr
+    assert "do-not-print-this" not in log
+
+
+def test_micro_cron_uses_fake_env_allowed_categories_when_inline_unset(tmp_path: Path) -> None:
+    repo = _make_temp_micro_repo(tmp_path)
+    env_file = tmp_path / "fake.env"
+    env_file.write_text(
+        "KALSHI_ALLOWED_CATEGORIES=index,crypto,economics,commodities,financials,politics\n"
+        "FAKE_SECRET_VALUE=do-not-print-this\n"
+    )
+
+    result = _run_micro_cron(repo, env_file)
+
+    assert result.returncode == 0
+    log = _cron_log(repo)
+    assert (
+        "PYTHON_STUB_KALSHI_ALLOWED_CATEGORIES="
+        "index,crypto,economics,commodities,financials,politics"
+    ) in log
     assert "do-not-print-this" not in result.stdout
     assert "do-not-print-this" not in result.stderr
     assert "do-not-print-this" not in log
@@ -110,5 +163,6 @@ def test_micro_cron_wrapper_uses_secret_safe_env_loader() -> None:
     assert 'source "$ENV_FILE"' in text
     assert "set +x" in text
     assert 'preserve_runtime_override "MAX_DAYS_TO_EXPIRY"' in text
+    assert 'preserve_runtime_override "KALSHI_ALLOWED_CATEGORIES"' in text
     assert 'preserve_runtime_override "KALSHI_KEY"' not in text
     assert 'preserve_runtime_override "KALSHI_SECRET_FILE"' not in text
