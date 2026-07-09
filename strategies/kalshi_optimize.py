@@ -435,6 +435,32 @@ def check_micro_live_gates(market, size, price, risk_caps, venue, computed_edge_
     passed = len(violations) == 0
     return passed, violations
 
+
+def gate_failure_kinds_from_violations(violations):
+    """Classify existing gate violation text into redacted diagnostic labels."""
+    kinds = []
+    for violation in violations:
+        text = str(violation).lower()
+        if "fallback prior" in text:
+            kind = "fallback_prior"
+        elif text.startswith("size ") or " > max $" in text:
+            kind = "size_limit"
+        elif text.startswith("liquidity "):
+            kind = "liquidity_min"
+        elif text.startswith("edge ") or " edge " in text:
+            kind = "edge_below_threshold"
+        elif text.startswith("market ends in"):
+            kind = "market_end_time"
+        elif text.startswith("price ") and "too extreme" in text:
+            kind = "price_sanity"
+        elif "minimum floor" in text:
+            kind = "min_price_floor"
+        else:
+            kind = "unknown_gate_failure"
+        if kind not in kinds:
+            kinds.append(kind)
+    return kinds or ["unknown_gate_failure"]
+
 # Load environment
 from dotenv import load_dotenv
 
@@ -1325,7 +1351,8 @@ def optimize_kalshi_strategy(
         
         if not passed:
             logger.debug(f"Market {market_id}: Failed gates: {violations}")
-            if any(str(v).startswith("Edge ") or "Edge " in str(v) for v in violations):
+            gate_failure_kinds = gate_failure_kinds_from_violations(violations)
+            if "edge_below_threshold" in gate_failure_kinds:
                 edge_or_profitability_blocked_count += 1
                 rejection_reason = "gate_edge_below_threshold"
             else:
@@ -1340,6 +1367,7 @@ def optimize_kalshi_strategy(
                     fee_adjusted_edge=edge_after_fees_pct,
                     required_threshold=risk_caps["edge_after_fees_pct"],
                     rejection_reason=rejection_reason,
+                    gate_failure_kinds=gate_failure_kinds,
                 ))
             if scratchpad is not None:
                 for v in violations:

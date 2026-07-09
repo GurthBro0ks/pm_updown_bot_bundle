@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+from collections import Counter
 from typing import Any
 
 
@@ -34,6 +35,8 @@ class NearestMiss:
     fee_adjusted_edge: float
     required_threshold: float
     rejection_reason: str
+    gate_failure_kind: str = "none"
+    gate_failure_kinds: tuple[str, ...] = ()
 
     def sortable_gap(self) -> float:
         return self.required_threshold - self.fee_adjusted_edge
@@ -89,8 +92,14 @@ def make_nearest_miss(
     fee_adjusted_edge: float,
     required_threshold: float,
     rejection_reason: str,
+    gate_failure_kinds: list[str] | tuple[str, ...] | None = None,
 ) -> NearestMiss:
     ticker = market.get("ticker") or market.get("id") or "unknown"
+    safe_kinds = tuple(
+        _safe_text(kind, default="unknown_gate_failure", max_len=48)
+        for kind in (gate_failure_kinds or ())
+    )
+    primary_kind = safe_kinds[0] if safe_kinds else "none"
     return NearestMiss(
         ticker=_safe_text(ticker),
         category=public_category(market),
@@ -101,12 +110,34 @@ def make_nearest_miss(
         fee_adjusted_edge=_safe_float(fee_adjusted_edge, digits=2),
         required_threshold=_safe_float(required_threshold, digits=2),
         rejection_reason=_safe_text(rejection_reason, max_len=80),
+        gate_failure_kind=primary_kind,
+        gate_failure_kinds=safe_kinds,
     )
 
 
 def bounded_nearest_misses(misses: list[NearestMiss], sample_limit: int) -> list[NearestMiss]:
     limit = max(0, int(sample_limit))
     return sorted(misses, key=lambda miss: (miss.sortable_gap(), miss.ticker))[:limit]
+
+
+def gate_failure_kind_counts(misses: list[NearestMiss]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for miss in misses:
+        kinds = miss.gate_failure_kinds or ((miss.gate_failure_kind,) if miss.gate_failure_kind else ())
+        for kind in kinds:
+            safe_kind = _safe_text(kind, default="unknown_gate_failure", max_len=48)
+            if safe_kind != "none":
+                counts[safe_kind] += 1
+    return dict(sorted(counts.items()))
+
+
+def gate_failure_kind_counts_string(counts: dict[str, Any] | None) -> str:
+    if not counts:
+        return "none"
+    return ",".join(
+        f"{_safe_text(kind, default='unknown_gate_failure', max_len=48)}:{_safe_int(count)}"
+        for kind, count in sorted(counts.items())
+    )
 
 
 def classify_zero_order_reason(
@@ -164,6 +195,7 @@ def build_summary(
         "price_gate_blocked_count": int(price_gate_blocked_count),
         "edge_or_profitability_blocked_count": int(edge_or_profitability_blocked_count),
         "order_placed_count": int(order_placed_count),
+        "gate_failure_kind_counts": gate_failure_kind_counts(nearest_misses),
         "zero_order_reason": zero_order_reason,
         "nearest_misses": [miss.__dict__ for miss in bounded],
         "values_printed": "no_secret_values",
@@ -205,6 +237,7 @@ def sample_string(misses: list[dict[str, Any]]) -> str:
             ("fee_adjusted_edge", miss.get("fee_adjusted_edge")),
             ("required_threshold", miss.get("required_threshold")),
             ("rejection_reason", miss.get("rejection_reason")),
+            ("gate_failure_kind", miss.get("gate_failure_kind", "none")),
         ]
         parts.append(",".join(f"{key}:{_safe_text(value)}" for key, value in fields))
     return ";".join(parts)
@@ -224,6 +257,7 @@ def format_summary(summary: dict[str, Any] | None, *, missing_status: str = "WAR
             ("NO_PROFITABLE_MAKER_COUNT", "unknown"),
             ("PRICE_GATE_BLOCKED_COUNT", "unknown"),
             ("EDGE_OR_PROFITABILITY_BLOCKED_COUNT", "unknown"),
+            ("GATE_FAILURE_KIND_COUNTS", "none"),
             ("SAMPLE_NEAREST_MISSES_PUBLIC", "none"),
             ("ZERO_ORDER_REASON", "future_cron_run_required_for_structured_detail"),
         ]
@@ -240,6 +274,7 @@ def format_summary(summary: dict[str, Any] | None, *, missing_status: str = "WAR
             ("NO_PROFITABLE_MAKER_COUNT", summary.get("no_profitable_maker_count", "unknown")),
             ("PRICE_GATE_BLOCKED_COUNT", summary.get("price_gate_blocked_count", "unknown")),
             ("EDGE_OR_PROFITABILITY_BLOCKED_COUNT", summary.get("edge_or_profitability_blocked_count", "unknown")),
+            ("GATE_FAILURE_KIND_COUNTS", gate_failure_kind_counts_string(summary.get("gate_failure_kind_counts"))),
             ("SAMPLE_NEAREST_MISSES_PUBLIC", sample_string(summary.get("nearest_misses", []))),
             ("ZERO_ORDER_REASON", _safe_text(summary.get("zero_order_reason"), default="unknown")),
         ]

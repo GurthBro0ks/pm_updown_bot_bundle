@@ -1,3 +1,58 @@
+# 2026-07-09 (pm_main_micro_live_gate_failure_kind_diagnostic — Source Fix Built)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / main Kalshi runtime diagnostics
+**Type:** Diagnostic-only source/test change
+**Proof:** `/tmp/proof_pm_main_micro_live_gate_failure_kind_diagnostic_20260709T171329Z`
+**Manual QA:** pending_operator_qa
+
+### Summary
+Added redacted diagnostic-only gate failure kinds for
+`check_micro_live_gates()` nearest-miss failures. Generic
+`rejection_reason=gate_failed` is preserved, but fresh structured summaries now
+also carry `gate_failure_kind`, `gate_failure_kinds`, and
+`gate_failure_kind_counts` so operators can distinguish `market_end_time`,
+`liquidity_min`, `fallback_prior`, `size_limit`, `price_sanity`, and
+`unknown_gate_failure`.
+
+### Changes
+1. Added `gate_failure_kinds_from_violations()` as a pure classifier over
+   existing violation text; it does not feed back into gate decisions.
+2. Extended `utils/edge_nearest_miss.py` redacted payloads and CLI formatting
+   with gate failure kind fields and counts.
+3. Added fake-fixture tests for all requested failure kinds, unknown fallback,
+   redaction, bounded output, direct invocation, and unchanged gate decisions.
+4. Added buglog:
+   `docs/buglog/pm_main_micro_live_gate_failure_kind_diagnostic_20260709.md`.
+
+### Verified
+- `python3 -m py_compile strategies/kalshi_optimize.py utils/edge_nearest_miss.py scripts/main_edge_nearest_miss_redacted.py tests/test_main_edge_nearest_miss_redacted.py`: PASS.
+- `PYTHONPATH=. pytest -q tests/test_main_edge_nearest_miss_redacted.py`: PASS, 14 passed.
+- `python3 scripts/kalshi_redacted_health_check.py`: PASS.
+- `python3 scripts/main_market_inventory_redacted.py --max-days 3 --allowed-categories index,crypto,economics,commodities,financials`: PASS, `MAX_DAYS=3`, `THREE_DAY_ALLOWED_COUNT=100`, `ZERO_CANDIDATE_REASON=has_allowed_candidates`.
+- `python3 scripts/main_run_gate_summary_redacted.py`: PASS, `ZERO_ORDER_REASON=edge_or_profitability_blocked`.
+- `python3 scripts/main_edge_nearest_miss_redacted.py`: PASS; prints `GATE_FAILURE_KIND_COUNTS=none` against the pre-existing latest summary because that summary predates this diagnostic field.
+- `PYTHONPATH=. pytest tests`: PASS, 565 passed, 1 warning.
+- `./scripts/run_tests.sh`: PASS, `STATUS: ALL GATES PASS`.
+- Sanitized cron check: main cron present, `TRADING_PAUSED=false`,
+  `MAX_DAYS_TO_EXPIRY=3`, `MIN_TRADE_PRICE_CENTS=25`,
+  `KALSHI_ALLOWED_CATEGORIES=index,crypto,economics,commodities,financials`;
+  weather remains `WEATHER_DRY_RUN=false WEATHER_LIVE_ENABLED=true`.
+
+### Safety
+- Diagnostic-only source/test/docs change. No trading behavior, thresholds,
+  gates, sizing, cron, runtime config, weather state, service state, or order
+  path was changed.
+- No main live manual run and no order placement/cancellation/modification.
+- No credential values, auth headers, key paths, webhook URLs, or response
+  bodies were printed.
+
+### Remaining
+- Manual operator QA.
+- Wait for the next scheduled main cron to write a fresh nearest-miss summary,
+  then run `python3 scripts/main_edge_nearest_miss_redacted.py` and confirm
+  `gate_failure_kind` is populated for any new `gate_failed` candidate.
+
 # 2026-07-09 (pm_main_runtime_categories_and_inventory_decode_fix — Manual QA Accepted)
 
 **Agent:** Codex (SlimyAI NUC1)

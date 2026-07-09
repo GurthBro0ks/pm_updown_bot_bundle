@@ -1,4 +1,33 @@
 {
+  "pm_main_micro_live_gate_failure_kind_diagnostic_20260709": {
+    "status": "built_validation_pass_manual_qa_pending",
+    "file": "strategies/kalshi_optimize.py, utils/edge_nearest_miss.py, tests/test_main_edge_nearest_miss_redacted.py, docs/buglog/pm_main_micro_live_gate_failure_kind_diagnostic_20260709.md",
+    "passes": false,
+    "manual_qa_required": true,
+    "pushed": true,
+    "commit": "self_commit_final_sha_reported_in_closeout",
+    "proof_dir": "/tmp/proof_pm_main_micro_live_gate_failure_kind_diagnostic_20260709T171329Z",
+    "description": "Add redacted diagnostic-only gate failure kinds to main nearest-miss output so generic gate_failed candidates expose public-safe failure classes without changing trading behavior.",
+    "changes": [
+      "Added diagnostic classification for existing check_micro_live_gates violation strings",
+      "Nearest-miss structured output now includes gate_failure_kind, gate_failure_kinds, and gate_failure_kind_counts",
+      "Redacted nearest-miss CLI now prints GATE_FAILURE_KIND_COUNTS and includes gate_failure_kind in public samples",
+      "Added fake-fixture tests for market_end_time, liquidity_min, fallback_prior, size_limit, price_sanity, unknown_gate_failure, redaction, bounded output, direct invocation, and unchanged gate decisions"
+    ],
+    "validation": [
+      "python3 -m py_compile strategies/kalshi_optimize.py utils/edge_nearest_miss.py scripts/main_edge_nearest_miss_redacted.py tests/test_main_edge_nearest_miss_redacted.py -> PASS",
+      "PYTHONPATH=. pytest -q tests/test_main_edge_nearest_miss_redacted.py -> 14 passed",
+      "python3 scripts/kalshi_redacted_health_check.py -> PASS",
+      "python3 scripts/main_market_inventory_redacted.py --max-days 3 --allowed-categories index,crypto,economics,commodities,financials -> PASS; MAX_DAYS=3; THREE_DAY_ALLOWED_COUNT=100; ZERO_CANDIDATE_REASON=has_allowed_candidates",
+      "python3 scripts/main_run_gate_summary_redacted.py -> PASS; ZERO_ORDER_REASON=edge_or_profitability_blocked",
+      "python3 scripts/main_edge_nearest_miss_redacted.py -> PASS; GATE_FAILURE_KIND_COUNTS=none on pre-existing latest summary",
+      "PYTHONPATH=. pytest tests -> 565 passed, 1 warning",
+      "./scripts/run_tests.sh -> STATUS: ALL GATES PASS",
+      "sanitized cron check -> main cron present; TRADING_PAUSED=false; MAX_DAYS_TO_EXPIRY=3; MIN_TRADE_PRICE_CENTS=25; KALSHI_ALLOWED_CATEGORIES=index,crypto,economics,commodities,financials; WEATHER_DRY_RUN=false; WEATHER_LIVE_ENABLED=true"
+    ],
+    "result": "PASS_VALIDATION_MANUAL_QA_PENDING",
+    "notes": "Diagnostic-only source/test change. No cron/runtime/weather/threshold change, live manual run, order action, service restart, or secret print."
+  },
   "pm_main_runtime_categories_and_inventory_decode_fix_20260709": {
     "status": "accepted_manual_qa_pass",
     "file": "scripts/main_market_inventory_redacted.py, scripts/main_run_gate_summary_redacted.py, tests/test_cron_micro_live_env.py, tests/test_main_market_inventory_redacted.py, tests/test_main_run_gate_summary_redacted.py, docs/buglog/pm_main_runtime_categories_inventory_decode_gate_summary_20260709.md",
