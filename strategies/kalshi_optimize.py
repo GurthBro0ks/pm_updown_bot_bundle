@@ -18,6 +18,13 @@ sys.path.insert(0, '/opt/slimy/pm_updown_bot_bundle')
 from utils.proof import generate_proof
 from utils.kalshi import fetch_kalshi_markets
 from utils.pnl_database import record_trade
+try:
+    from utils.edge_nearest_miss import build_summary as build_edge_nearest_miss_summary
+    from utils.edge_nearest_miss import make_nearest_miss, write_summary as write_edge_nearest_miss_summary
+except Exception:
+    build_edge_nearest_miss_summary = None
+    make_nearest_miss = None
+    write_edge_nearest_miss_summary = None
 
 try:
     from utils.discord_notify import notify_order_placed
@@ -1087,6 +1094,11 @@ def optimize_kalshi_strategy(
         "orders_placed": [],
         "orders_failed": [],
     }
+    nearest_misses = []
+    order_intent_count = 0
+    price_gate_blocked_count = 0
+    edge_or_profitability_blocked_count = 0
+    no_profitable_maker_count = 0 if best_maker_market else 1
     
     for market in markets:
         market_id = market.get("id")
@@ -1158,6 +1170,17 @@ def optimize_kalshi_strategy(
                 )
 
             if not val_result["passed"]:
+                if make_nearest_miss is not None:
+                    nearest_misses.append(make_nearest_miss(
+                        market=market,
+                        side="yes",
+                        price=yes_price,
+                        ai_prior=true_price,
+                        raw_edge=calculate_edge_pct(true_price, yes_price, market_id),
+                        fee_adjusted_edge=get_edge_after_fees(market, true_price=true_price),
+                        required_threshold=risk_caps["edge_after_fees_pct"],
+                        rejection_reason="prior_validation_failed",
+                    ))
                 continue
 
             # Use adjusted prior for sizing if validation passed
@@ -1194,12 +1217,24 @@ def optimize_kalshi_strategy(
         # ── Edge sanity: reject capped / insane raw edge ─────────────────
         # A capped edge means the model/price comparison is too extreme or noisy.
         # This is NOT a valid edge — reject the candidate entirely.
-        _, raw_edge_was_capped = calculate_edge_pct_with_flag(true_price, yes_price, market_id)
+        raw_edge_pct, raw_edge_was_capped = calculate_edge_pct_with_flag(true_price, yes_price, market_id)
         if raw_edge_was_capped:
             logger.info(
                 "[EDGE] Rejecting %s: raw edge exceeds max sane edge %.2f%%",
                 market_id, MAX_EDGE_PCT,
             )
+            edge_or_profitability_blocked_count += 1
+            if make_nearest_miss is not None:
+                nearest_misses.append(make_nearest_miss(
+                    market=market,
+                    side="yes",
+                    price=yes_price,
+                    ai_prior=true_price,
+                    raw_edge=raw_edge_pct,
+                    fee_adjusted_edge=edge_after_fees_pct,
+                    required_threshold=risk_caps["edge_after_fees_pct"],
+                    rejection_reason="raw_edge_above_sanity_cap",
+                ))
             continue
 
         # Check if this market is a best maker market
@@ -1208,6 +1243,18 @@ def optimize_kalshi_strategy(
         # Only trade if edge after fees is sufficient
         if edge_after_fees_pct < risk_caps["edge_after_fees_pct"]:
             logger.debug(f"Market {market_id}: edge={edge_after_fees_pct:.2f}% < {risk_caps['edge_after_fees_pct']}%, too low")
+            edge_or_profitability_blocked_count += 1
+            if make_nearest_miss is not None:
+                nearest_misses.append(make_nearest_miss(
+                    market=market,
+                    side="yes",
+                    price=yes_price,
+                    ai_prior=true_price,
+                    raw_edge=raw_edge_pct,
+                    fee_adjusted_edge=edge_after_fees_pct,
+                    required_threshold=risk_caps["edge_after_fees_pct"],
+                    rejection_reason="edge_below_threshold",
+                ))
             continue
         
         # Determine if maker order (if not best maker)
@@ -1236,6 +1283,7 @@ def optimize_kalshi_strategy(
             fee_cost = order_price * estimated_fee_pct / 100  # 0.99 * 0.00035
             
             logger.debug(f"Market {market_id}: Estimated fee: {estimated_fee_pct:.2f}% (${fee_cost:.4f})")
+        order_intent_count += 1
         
         # Edge already computed by get_edge_after_fees above; do NOT recalculate
         # The fee-adjusted edge from get_edge_after_fees is the authoritative value
@@ -1258,6 +1306,18 @@ def optimize_kalshi_strategy(
                 "[PRICE] Skipping %s: price %dc < min %dc",
                 market_id, price_cents, MIN_TRADE_PRICE_CENTS,
             )
+            price_gate_blocked_count += 1
+            if make_nearest_miss is not None:
+                nearest_misses.append(make_nearest_miss(
+                    market=market,
+                    side=order_side,
+                    price=yes_price,
+                    ai_prior=true_price,
+                    raw_edge=raw_edge_pct,
+                    fee_adjusted_edge=edge_after_fees_pct,
+                    required_threshold=risk_caps["edge_after_fees_pct"],
+                    rejection_reason="price_below_minimum",
+                ))
             continue
 
         # Check if order passes gates
@@ -1265,6 +1325,22 @@ def optimize_kalshi_strategy(
         
         if not passed:
             logger.debug(f"Market {market_id}: Failed gates: {violations}")
+            if any(str(v).startswith("Edge ") or "Edge " in str(v) for v in violations):
+                edge_or_profitability_blocked_count += 1
+                rejection_reason = "gate_edge_below_threshold"
+            else:
+                rejection_reason = "gate_failed"
+            if make_nearest_miss is not None:
+                nearest_misses.append(make_nearest_miss(
+                    market=market,
+                    side=order_side,
+                    price=yes_price,
+                    ai_prior=true_price,
+                    raw_edge=raw_edge_pct,
+                    fee_adjusted_edge=edge_after_fees_pct,
+                    required_threshold=risk_caps["edge_after_fees_pct"],
+                    rejection_reason=rejection_reason,
+                ))
             if scratchpad is not None:
                 for v in violations:
                     if "minimum floor" in v:
@@ -1589,6 +1665,32 @@ def optimize_kalshi_strategy(
         },
         "risk_caps": risk_caps
     })
+
+    should_write_edge_summary = bool(os.getenv("MAIN_EDGE_NEAREST_MISS_PATH")) or mode == "micro-live"
+    if (
+        should_write_edge_summary
+        and build_edge_nearest_miss_summary is not None
+        and write_edge_nearest_miss_summary is not None
+    ):
+        try:
+            edge_summary = build_edge_nearest_miss_summary(
+                run_timestamp=datetime.now(timezone.utc).isoformat(),
+                ai_processed_count=cascade_attempted,
+                order_intent_count=order_intent_count,
+                nearest_misses=nearest_misses,
+                edge_threshold=risk_caps["edge_after_fees_pct"],
+                fee_adjusted_edge_threshold=risk_caps["edge_after_fees_pct"],
+                no_profitable_maker_count=no_profitable_maker_count,
+                price_gate_blocked_count=price_gate_blocked_count,
+                edge_or_profitability_blocked_count=(
+                    edge_or_profitability_blocked_count + no_profitable_maker_count
+                ),
+                order_placed_count=total_trades,
+                sample_limit=10,
+            )
+            write_edge_nearest_miss_summary(edge_summary)
+        except Exception as exc:
+            logger.warning("[EDGE_DIAG] Could not write redacted nearest-miss summary: %s", exc)
 
     generate_proof(proof_id, proof_data)
     
