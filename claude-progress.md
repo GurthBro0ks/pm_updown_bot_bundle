@@ -1,3 +1,42 @@
+# 2026-07-09 (pm_main_runtime_categories_and_inventory_decode_fix — Manual QA Accepted)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / main Kalshi runtime diagnostics
+**Type:** Manual QA acceptance record
+**Accepted Commit:** `339d8ccbc7752d5428617a461edb53bd20812049`
+**Proof:** `/tmp/proof_pm_main_runtime_categories_and_inventory_decode_fix_20260709T091220Z`
+**Manual QA:** PASS_operator_accepted
+
+### Summary
+Operator accepted the runtime-category preservation, redacted inventory decode
+hardening, and redacted main-run gate summary fix at
+`HEAD == origin/feat/ibkr-forecast-integration ==
+339d8ccbc7752d5428617a461edb53bd20812049`.
+
+### Verified
+- `git rev-parse HEAD`: `339d8ccbc7752d5428617a461edb53bd20812049`.
+- `git rev-parse origin/feat/ibkr-forecast-integration`: `339d8ccbc7752d5428617a461edb53bd20812049`.
+- `git status --short --branch`: target repo clean and tracking origin.
+- Prior implementation validation recorded in proof: shell syntax, py_compile,
+  focused tests, redacted inventory, Kalshi health, redacted gate summary,
+  `PYTHONPATH=. pytest tests`, `./scripts/run_tests.sh`, and sanitized cron all
+  passed.
+
+### Safety
+- Acceptance bookkeeping only.
+- No installed cron change, main live manual run, order placement/cancellation,
+  threshold/category change, weather arm/disarm, service restart,
+  Caddy/DNS/systemd/timer/tmux change, Discord notification, or runtime config
+  mutation.
+- No credential values, auth headers, key paths, or response bodies were printed.
+
+### Remaining
+- Wait for the next scheduled main cron and use
+  `scripts/main_run_gate_summary_redacted.py --log logs/cron.log` to classify
+  the latest zero-order reason.
+
+---
+
 # 2026-07-08 (pm_main_three_day_fetch_universe_supplement_fix — Source Fix Built)
 
 **Agent:** Codex (SlimyAI NUC1)
