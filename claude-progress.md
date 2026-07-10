@@ -1436,3 +1436,10 @@ pytest tests/test_contract_signals.py tests/test_fear_regime.py -v → 24 passed
 - Dedup callers in kalshi_optimize.py updated to use status="resting"
 - Validation: resting=0, canceled=18, all=18 — correct filtering confirmed
 - Committed and pushed: 675ab39
+## 2026-07-10 - Main Order Intent-to-Submission Gap Diagnosis
+
+- Diagnosed `ORDER_INTENTS=5` at 08:00Z versus the 12:01Z nearest-miss output as an artifact-selection mismatch: the gate tool read `logs/cron.log`, while installed main cron writes `logs/cron_micro_live.log`; nearest-miss reads `logs/main_edge_nearest_miss_latest.json`.
+- Corrected the diagnostic default to the micro-live log, surfaced both artifact paths, and added redacted future-run post-intent blocker, submission-status, and skip-reason fields. `ORDER_SUBMISSION_PROCESSED` remains a legacy stage-budget metric, not evidence of a submission attempt.
+- Verified `python3 -m py_compile` for touched modules, focused tests (19 passed), `PYTHONPATH=. pytest tests` (567 passed, 1 warning), and `./scripts/run_tests.sh` (`STATUS: ALL GATES PASS`).
+- No manual main run, order action, cron change, risk/threshold/category/price/expiry change, weather change, service restart, commit, push, or secret output. New runtime diagnostic fields await a scheduled micro-live run.
+- Proof: `/tmp/proof_pm_main_order_intent_to_submission_gap_diagnosis_20260710T132252Z`.

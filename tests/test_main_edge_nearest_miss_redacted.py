@@ -128,6 +128,32 @@ def test_nearest_miss_output_includes_public_edge_fields(tmp_path):
     assert "VALUES_PRINTED=no_secret_values" in output
 
 
+def test_summary_includes_redacted_post_intent_diagnostics(tmp_path):
+    summary = diag.build_summary(
+        run_timestamp="2026-07-10T12:00:20Z",
+        ai_processed_count=1,
+        order_intent_count=1,
+        nearest_misses=[],
+        edge_threshold=3.0,
+        fee_adjusted_edge_threshold=3.0,
+        no_profitable_maker_count=0,
+        price_gate_blocked_count=0,
+        edge_or_profitability_blocked_count=0,
+        order_placed_count=0,
+        order_submission_attempted_count=0,
+        order_submission_succeeded_count=0,
+        order_submission_failed_count=0,
+        submission_skipped_reason_counts={"duplicate_or_open_position": 1},
+        post_intent_blocker_counts={"duplicate_or_open_position": 1},
+    )
+    output = diag.format_summary(summary, artifact=tmp_path / "nearest.json")
+
+    assert "NEAREST_MISS_ARTIFACT=" in output
+    assert "POST_INTENT_BLOCKER_COUNTS=duplicate_or_open_position:1" in output
+    assert "ORDER_INTENT_TO_SUBMISSION_STATUS=intents:1,attempted:0,succeeded:0,failed:0" in output
+    assert "SUBMISSION_SKIPPED_REASON_COUNTS=duplicate_or_open_position:1" in output
+
+
 def test_secret_looking_fake_values_are_redacted_or_absent(tmp_path):
     miss = diag.make_nearest_miss(
         market=_market(ticker="authorization-bearer-fake", category="api_key_secret_fake"),

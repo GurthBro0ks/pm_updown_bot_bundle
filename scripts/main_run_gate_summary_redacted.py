@@ -14,7 +14,7 @@ import re
 from typing import Iterable, Sequence
 
 
-DEFAULT_LOG = Path("logs/cron.log")
+DEFAULT_LOG = Path("logs/cron_micro_live.log")
 SECRET_MARKER_RE = re.compile(
     r"(secret|token|password|passwd|private[_-]?key|api[_-]?key|authorization|bearer|webhook|signature|credential)",
     re.IGNORECASE,
@@ -35,6 +35,9 @@ class GateSummary:
     edge_or_profitability_blocked: int
     order_submission_processed: int | None
     order_placed: int | None
+    post_intent_blocker_counts: str
+    order_intent_to_submission_status: str
+    submission_skipped_reason_counts: str
     zero_order_reason: str
 
 
@@ -130,6 +133,9 @@ def summarize_lines(lines: Sequence[str]) -> GateSummary:
             edge_or_profitability_blocked=0,
             order_submission_processed=None,
             order_placed=None,
+            post_intent_blocker_counts="unknown",
+            order_intent_to_submission_status="unknown",
+            submission_skipped_reason_counts="unknown",
             zero_order_reason="no_main_run_found",
         )
 
@@ -139,6 +145,9 @@ def summarize_lines(lines: Sequence[str]) -> GateSummary:
     category_match = None
     exit_code = "unknown"
     order_submission_processed = None
+    post_intent_blocker_counts = "unknown"
+    order_intent_to_submission_status = "unknown"
+    submission_skipped_reason_counts = "unknown"
 
     for line in run:
         match = re.search(r"\[EXPIRY\] Filtered \d+ -> (\d+) markets", line)
@@ -153,6 +162,15 @@ def summarize_lines(lines: Sequence[str]) -> GateSummary:
         match = re.search(r"Exit code: (\d+)", line)
         if match:
             exit_code = match.group(1)
+        match = re.search(r"\[ORDER_DIAG\] POST_INTENT_BLOCKER_COUNTS=([^\s]+)", line)
+        if match:
+            post_intent_blocker_counts = match.group(1)
+        match = re.search(r"\[ORDER_DIAG\] ORDER_INTENT_TO_SUBMISSION_STATUS=([^\s]+)", line)
+        if match:
+            order_intent_to_submission_status = match.group(1)
+        match = re.search(r"\[ORDER_DIAG\] SUBMISSION_SKIPPED_REASON_COUNTS=([^\s]+)", line)
+        if match:
+            submission_skipped_reason_counts = match.group(1)
 
     ai_processed = sum(1 for line in run if "[kelly] AI prior:" in line)
     order_intents = sum(1 for line in run if re.search(r"Market [A-Za-z0-9_.:-]+: (YES|NO) order", line))
@@ -190,13 +208,17 @@ def summarize_lines(lines: Sequence[str]) -> GateSummary:
         edge_or_profitability_blocked=edge_or_profitability_blocked,
         order_submission_processed=order_submission_processed,
         order_placed=order_placed,
+        post_intent_blocker_counts=post_intent_blocker_counts,
+        order_intent_to_submission_status=order_intent_to_submission_status,
+        submission_skipped_reason_counts=submission_skipped_reason_counts,
         zero_order_reason=zero_order_reason,
     )
 
 
-def format_summary(summary: GateSummary) -> str:
+def format_summary(summary: GateSummary, *, artifact: Path | None = None) -> str:
     fields = [
         ("MAIN_RUN_GATE_SUMMARY", summary.status),
+        ("LATEST_RUN_ARTIFACT", artifact or "unknown"),
         ("RUN_TIMESTAMP", summary.run_timestamp),
         ("EXIT_CODE", summary.exit_code),
         ("MARKETS_FETCHED", summary.markets_fetched),
@@ -208,6 +230,9 @@ def format_summary(summary: GateSummary) -> str:
         ("EDGE_OR_PROFITABILITY_BLOCKED", summary.edge_or_profitability_blocked),
         ("ORDER_SUBMISSION_PROCESSED", summary.order_submission_processed),
         ("ORDER_PLACED", summary.order_placed),
+        ("POST_INTENT_BLOCKER_COUNTS", summary.post_intent_blocker_counts),
+        ("ORDER_INTENT_TO_SUBMISSION_STATUS", summary.order_intent_to_submission_status),
+        ("SUBMISSION_SKIPPED_REASON_COUNTS", summary.submission_skipped_reason_counts),
         ("ZERO_ORDER_REASON", summary.zero_order_reason),
         ("VALUES_PRINTED", "no_secret_values"),
     ]
@@ -227,7 +252,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(format_summary(summarize_lines([])), end="")
         return 1
     summary = summarize_lines(path.read_text(errors="replace").splitlines())
-    print(format_summary(summary), end="")
+    print(format_summary(summary, artifact=path), end="")
     return 0 if summary.status == "PASS" else 1
 
 

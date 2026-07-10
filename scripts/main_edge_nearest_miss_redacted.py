@@ -17,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from utils.edge_nearest_miss import format_summary, load_summary
+from utils.edge_nearest_miss import format_summary, latest_summary_path, load_summary
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -32,9 +32,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
-    summary_path = Path(args.summary) if args.summary else None
+    summary_path = Path(args.summary) if args.summary else latest_summary_path()
     summary = load_summary(summary_path)
-    print(format_summary(summary), end="")
+    print(format_summary(summary, artifact=summary_path), end="")
     return 0
 
 

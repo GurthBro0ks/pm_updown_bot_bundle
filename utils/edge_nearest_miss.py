@@ -140,6 +140,15 @@ def gate_failure_kind_counts_string(counts: dict[str, Any] | None) -> str:
     )
 
 
+def public_count_string(counts: dict[str, Any] | None, *, default: str = "none") -> str:
+    if not counts:
+        return default
+    return ",".join(
+        f"{_safe_text(kind, default='unknown', max_len=48)}:{_safe_int(count)}"
+        for kind, count in sorted(counts.items())
+    )
+
+
 def classify_zero_order_reason(
     *,
     order_placed_count: int,
@@ -174,6 +183,11 @@ def build_summary(
     edge_or_profitability_blocked_count: int,
     order_placed_count: int,
     sample_limit: int = 10,
+    order_submission_attempted_count: int = 0,
+    order_submission_succeeded_count: int = 0,
+    order_submission_failed_count: int = 0,
+    submission_skipped_reason_counts: dict[str, int] | None = None,
+    post_intent_blocker_counts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     bounded = bounded_nearest_misses(nearest_misses, sample_limit)
     zero_order_reason = classify_zero_order_reason(
@@ -195,6 +209,11 @@ def build_summary(
         "price_gate_blocked_count": int(price_gate_blocked_count),
         "edge_or_profitability_blocked_count": int(edge_or_profitability_blocked_count),
         "order_placed_count": int(order_placed_count),
+        "order_submission_attempted_count": int(order_submission_attempted_count),
+        "order_submission_succeeded_count": int(order_submission_succeeded_count),
+        "order_submission_failed_count": int(order_submission_failed_count),
+        "submission_skipped_reason_counts": dict(sorted((submission_skipped_reason_counts or {}).items())),
+        "post_intent_blocker_counts": dict(sorted((post_intent_blocker_counts or {}).items())),
         "gate_failure_kind_counts": gate_failure_kind_counts(nearest_misses),
         "zero_order_reason": zero_order_reason,
         "nearest_misses": [miss.__dict__ for miss in bounded],
@@ -243,10 +262,17 @@ def sample_string(misses: list[dict[str, Any]]) -> str:
     return ";".join(parts)
 
 
-def format_summary(summary: dict[str, Any] | None, *, missing_status: str = "WARN_NO_PRIOR_STRUCTURED_DETAIL") -> str:
+def format_summary(
+    summary: dict[str, Any] | None,
+    *,
+    missing_status: str = "WARN_NO_PRIOR_STRUCTURED_DETAIL",
+    artifact: Path | None = None,
+) -> str:
+    artifact_value = _safe_text(artifact, default="unknown", max_len=160)
     if summary is None:
         fields = [
             ("MAIN_EDGE_NEAREST_MISS", missing_status),
+            ("NEAREST_MISS_ARTIFACT", artifact_value),
             ("VALUES_PRINTED", "no_secret_values"),
             ("LATEST_RUN_TIMESTAMP", "unknown"),
             ("AI_PROCESSED_COUNT", "unknown"),
@@ -264,6 +290,7 @@ def format_summary(summary: dict[str, Any] | None, *, missing_status: str = "WAR
     else:
         fields = [
             ("MAIN_EDGE_NEAREST_MISS", "PASS"),
+            ("NEAREST_MISS_ARTIFACT", artifact_value),
             ("VALUES_PRINTED", "no_secret_values"),
             ("LATEST_RUN_TIMESTAMP", summary.get("run_timestamp", "unknown")),
             ("AI_PROCESSED_COUNT", summary.get("ai_processed_count", "unknown")),
@@ -274,6 +301,14 @@ def format_summary(summary: dict[str, Any] | None, *, missing_status: str = "WAR
             ("NO_PROFITABLE_MAKER_COUNT", summary.get("no_profitable_maker_count", "unknown")),
             ("PRICE_GATE_BLOCKED_COUNT", summary.get("price_gate_blocked_count", "unknown")),
             ("EDGE_OR_PROFITABILITY_BLOCKED_COUNT", summary.get("edge_or_profitability_blocked_count", "unknown")),
+            ("POST_INTENT_BLOCKER_COUNTS", public_count_string(summary.get("post_intent_blocker_counts"), default="unknown")),
+            ("ORDER_INTENT_TO_SUBMISSION_STATUS", "intents:{},attempted:{},succeeded:{},failed:{}".format(
+                _safe_int(summary.get("order_intent_count")),
+                _safe_int(summary.get("order_submission_attempted_count")),
+                _safe_int(summary.get("order_submission_succeeded_count")),
+                _safe_int(summary.get("order_submission_failed_count")),
+            )),
+            ("SUBMISSION_SKIPPED_REASON_COUNTS", public_count_string(summary.get("submission_skipped_reason_counts"), default="unknown")),
             ("GATE_FAILURE_KIND_COUNTS", gate_failure_kind_counts_string(summary.get("gate_failure_kind_counts"))),
             ("SAMPLE_NEAREST_MISSES_PUBLIC", sample_string(summary.get("nearest_misses", []))),
             ("ZERO_ORDER_REASON", _safe_text(summary.get("zero_order_reason"), default="unknown")),

@@ -63,3 +63,23 @@ def test_summary_filters_secret_marker_lines_from_counts():
     assert result.price_gate_blocked == 0
     assert "fake" not in output
     assert "VALUES_PRINTED=no_secret_values" in output
+
+
+def test_latest_run_reads_redacted_post_intent_diagnostics():
+    lines = [
+        "2026-07-10 12:00:20,149 | INFO | Fetching Kalshi markets...",
+        "2026-07-10 12:00:30,381 | INFO | Fetched 10 markets",
+        "2026-07-10 12:00:30,401 | INFO | [kelly] AI prior: source=gemini prob=0.650 (premium market: KXTEST)",
+        "2026-07-10 12:00:31,539 | INFO | Market KXTEST: YES order (limit) at 0.5000 (will pay taker fee on fill)",
+        "2026-07-10 12:00:31,559 | INFO | [ORDER_DIAG] POST_INTENT_BLOCKER_COUNTS=duplicate_or_open_position:1",
+        "2026-07-10 12:00:31,559 | INFO | [ORDER_DIAG] ORDER_INTENT_TO_SUBMISSION_STATUS=intents:1,attempted:0,succeeded:0,failed:0",
+        "2026-07-10 12:00:31,559 | INFO | [ORDER_DIAG] SUBMISSION_SKIPPED_REASON_COUNTS=duplicate_or_open_position:1",
+    ]
+
+    result = summary.summarize_lines(lines)
+    output = summary.format_summary(result, artifact=summary.DEFAULT_LOG)
+
+    assert result.post_intent_blocker_counts == "duplicate_or_open_position:1"
+    assert result.order_intent_to_submission_status == "intents:1,attempted:0,succeeded:0,failed:0"
+    assert result.submission_skipped_reason_counts == "duplicate_or_open_position:1"
+    assert "LATEST_RUN_ARTIFACT=logs/cron_micro_live.log" in output

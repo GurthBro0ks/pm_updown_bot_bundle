@@ -20,10 +20,15 @@ from utils.kalshi import fetch_kalshi_markets
 from utils.pnl_database import record_trade
 try:
     from utils.edge_nearest_miss import build_summary as build_edge_nearest_miss_summary
-    from utils.edge_nearest_miss import make_nearest_miss, write_summary as write_edge_nearest_miss_summary
+    from utils.edge_nearest_miss import (
+        make_nearest_miss,
+        public_count_string,
+        write_summary as write_edge_nearest_miss_summary,
+    )
 except Exception:
     build_edge_nearest_miss_summary = None
     make_nearest_miss = None
+    public_count_string = None
     write_edge_nearest_miss_summary = None
 
 try:
@@ -1122,6 +1127,11 @@ def optimize_kalshi_strategy(
     }
     nearest_misses = []
     order_intent_count = 0
+    order_submission_attempted_count = 0
+    order_submission_succeeded_count = 0
+    order_submission_failed_count = 0
+    submission_skipped_reason_counts = {}
+    post_intent_blocker_counts = {}
     price_gate_blocked_count = 0
     edge_or_profitability_blocked_count = 0
     no_profitable_maker_count = 0 if best_maker_market else 1
@@ -1419,6 +1429,8 @@ def optimize_kalshi_strategy(
                         "%s Already have %d open orders (max %d), skipping run",
                         prefix, len(existing_orders), MAX_OPEN_ORDERS,
                     )
+                    submission_skipped_reason_counts["max_open_orders"] = submission_skipped_reason_counts.get("max_open_orders", 0) + 1
+                    post_intent_blocker_counts["max_open_orders"] = post_intent_blocker_counts.get("max_open_orders", 0) + 1
                     break
 
                 optimize_kalshi_strategy._existing_tickers = all_existing_tickers
@@ -1433,6 +1445,8 @@ def optimize_kalshi_strategy(
 
             if market_id in all_existing_tickers:
                 logger.info("%s SKIP %s — already have open order or position", prefix, market_id)
+                submission_skipped_reason_counts["duplicate_or_open_position"] = submission_skipped_reason_counts.get("duplicate_or_open_position", 0) + 1
+                post_intent_blocker_counts["duplicate_or_open_position"] = post_intent_blocker_counts.get("duplicate_or_open_position", 0) + 1
                 continue
 
             # ── Cash balance guard ─────────────────────────────────────────
@@ -1443,6 +1457,8 @@ def optimize_kalshi_strategy(
                     logger.info(
                         "%s Insufficient cash: $%.2f, skipping order cycle", prefix, cash_balance
                     )
+                    submission_skipped_reason_counts["insufficient_cash"] = submission_skipped_reason_counts.get("insufficient_cash", 0) + 1
+                    post_intent_blocker_counts["insufficient_cash"] = post_intent_blocker_counts.get("insufficient_cash", 0) + 1
                     break
             except Exception as e:
                 logger.warning("%s Cash balance check failed: %s", prefix, e)
@@ -1455,6 +1471,8 @@ def optimize_kalshi_strategy(
                         "[DAILY_LOSS] Skipping live order cycle: daily_pnl=%.2f max_loss=%.2f",
                         daily_pnl, MAX_DAILY_LOSS_USD,
                     )
+                    submission_skipped_reason_counts["daily_loss_limit"] = submission_skipped_reason_counts.get("daily_loss_limit", 0) + 1
+                    post_intent_blocker_counts["daily_loss_limit"] = post_intent_blocker_counts.get("daily_loss_limit", 0) + 1
                     break
 
             # ── Max orders per run ────────────────────────────────────────
@@ -1464,6 +1482,8 @@ def optimize_kalshi_strategy(
                     "[RUN_LIMIT] Max orders per run reached: %d/%d",
                     orders_placed_this_run, MAX_ORDERS_PER_RUN,
                 )
+                submission_skipped_reason_counts["max_orders_per_run"] = submission_skipped_reason_counts.get("max_orders_per_run", 0) + 1
+                post_intent_blocker_counts["max_orders_per_run"] = post_intent_blocker_counts.get("max_orders_per_run", 0) + 1
                 break
 
             # ── Max notional per run ──────────────────────────────────────
@@ -1474,6 +1494,8 @@ def optimize_kalshi_strategy(
                     "[RUN_LIMIT] Max notional per run reached: %.2f/%.2f (next=%.2f)",
                     notional_this_run, MAX_NOTIONAL_PER_RUN_USD, order_notional,
                 )
+                submission_skipped_reason_counts["max_notional_per_run"] = submission_skipped_reason_counts.get("max_notional_per_run", 0) + 1
+                post_intent_blocker_counts["max_notional_per_run"] = post_intent_blocker_counts.get("max_notional_per_run", 0) + 1
                 break
 
             # Safety countdown on first order of session
@@ -1491,6 +1513,7 @@ def optimize_kalshi_strategy(
             try:
                 from utils.kalshi_orders import KalshiOrderClient
                 order_client = KalshiOrderClient()
+                order_submission_attempted_count += 1
                 result = order_client.place_order(
                     ticker=market_id,
                     side=order_side,
@@ -1498,6 +1521,7 @@ def optimize_kalshi_strategy(
                     price_cents=price_cents,
                 )
                 result_order = result.get("order", {})
+                order_submission_succeeded_count += 1
                 taker_cost_str = result_order.get("taker_fill_cost_dollars", "0")
                 try:
                     cost_usd = float(taker_cost_str)
@@ -1582,6 +1606,8 @@ def optimize_kalshi_strategy(
                     except Exception:
                         pass
             except Exception as e:
+                order_submission_failed_count += 1
+                post_intent_blocker_counts["submission_failed"] = post_intent_blocker_counts.get("submission_failed", 0) + 1
                 logger.error("%s ORDER FAILED: %s", prefix, e)
                 proof_data.setdefault("orders_failed", []).append({
                     "market_id": market_id,
@@ -1589,6 +1615,8 @@ def optimize_kalshi_strategy(
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 })
         elif dry_run:
+            submission_skipped_reason_counts["dry_run"] = submission_skipped_reason_counts.get("dry_run", 0) + 1
+            post_intent_blocker_counts["dry_run"] = post_intent_blocker_counts.get("dry_run", 0) + 1
             prefix = MICRO_LIVE_LOG if mode == "micro-live" else "SHADOW MODE"
             price_cents_shadow = int(round(order_price * 100))
             cost_usd_shadow = price_cents_shadow / 100.0  # estimated cost in dollars
@@ -1714,9 +1742,29 @@ def optimize_kalshi_strategy(
                     edge_or_profitability_blocked_count + no_profitable_maker_count
                 ),
                 order_placed_count=total_trades,
+                order_submission_attempted_count=order_submission_attempted_count,
+                order_submission_succeeded_count=order_submission_succeeded_count,
+                order_submission_failed_count=order_submission_failed_count,
+                submission_skipped_reason_counts=submission_skipped_reason_counts,
+                post_intent_blocker_counts=post_intent_blocker_counts,
                 sample_limit=10,
             )
             write_edge_nearest_miss_summary(edge_summary)
+            logger.info(
+                "[ORDER_DIAG] POST_INTENT_BLOCKER_COUNTS=%s",
+                public_count_string(post_intent_blocker_counts) if public_count_string else "unknown",
+            )
+            logger.info(
+                "[ORDER_DIAG] ORDER_INTENT_TO_SUBMISSION_STATUS=intents:%d,attempted:%d,succeeded:%d,failed:%d",
+                order_intent_count,
+                order_submission_attempted_count,
+                order_submission_succeeded_count,
+                order_submission_failed_count,
+            )
+            logger.info(
+                "[ORDER_DIAG] SUBMISSION_SKIPPED_REASON_COUNTS=%s",
+                public_count_string(submission_skipped_reason_counts) if public_count_string else "unknown",
+            )
         except Exception as exc:
             logger.warning("[EDGE_DIAG] Could not write redacted nearest-miss summary: %s", exc)
 
