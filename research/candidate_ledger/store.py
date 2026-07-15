@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sqlite3
-from typing import Any, Iterator, Mapping
+from typing import Any, Iterable, Iterator, Mapping
 from urllib.parse import quote
 
 from .migrations import migrate, validate_migrations
@@ -47,20 +47,35 @@ def validate_database_path(database_path: str | Path) -> Path:
 class CandidateLedger:
     """One-writer append API plus bounded read-only queries."""
 
-    def __init__(self, database_path: str | Path, *, initialize: bool = False, read_only: bool = False):
+    def __init__(
+        self,
+        database_path: str | Path,
+        *,
+        initialize: bool = False,
+        read_only: bool = False,
+        timeout_ms: int = 5000,
+    ):
         self.path = validate_database_path(database_path)
         self.read_only = read_only
+        if type(timeout_ms) is not int or not 1 <= timeout_ms <= 10_000:
+            raise ValidationError("timeout_ms must be an integer from 1 to 10000")
+        timeout_seconds = timeout_ms / 1000.0
         if read_only:
             if not self.path.is_file():
                 raise ValidationError("database does not exist")
             uri = f"file:{quote(str(self.path))}?mode=ro"
-            self.connection = sqlite3.connect(uri, uri=True, isolation_level=None)
+            self.connection = sqlite3.connect(
+                uri, uri=True, isolation_level=None, timeout=timeout_seconds
+            )
         else:
             if not initialize and not self.path.is_file():
                 raise ValidationError("database does not exist; initialize it explicitly")
-            self.connection = sqlite3.connect(self.path, isolation_level=None)
+            self.connection = sqlite3.connect(
+                self.path, isolation_level=None, timeout=timeout_seconds
+            )
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys = ON")
+        self.connection.execute(f"PRAGMA busy_timeout = {timeout_ms}")
         if initialize:
             if read_only:
                 raise ValidationError("read-only ledger cannot initialize a database")
@@ -69,10 +84,12 @@ class CandidateLedger:
             self._require_initialized()
 
     @classmethod
-    def initialize(cls, database_path: str | Path) -> "CandidateLedger":
+    def initialize(
+        cls, database_path: str | Path, *, timeout_ms: int = 5000
+    ) -> "CandidateLedger":
         """Create or migrate an explicitly named local database."""
 
-        return cls(database_path, initialize=True)
+        return cls(database_path, initialize=True, timeout_ms=timeout_ms)
 
     @classmethod
     def open_read_only(cls, database_path: str | Path) -> "CandidateLedger":
@@ -172,6 +189,57 @@ class CandidateLedger:
     ) -> AppendResult:
         """Append once transactionally; identical retries are idempotent."""
 
+        prepared = self._prepare_event(
+            candidate_id=candidate_id,
+            event_type=event_type,
+            event_timestamp=event_timestamp,
+            payload=payload,
+            event_id=event_id,
+        )
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            result = self._append_prepared_event(prepared)
+            self.connection.commit()
+            return result
+        except Exception:
+            if self.connection.in_transaction:
+                self.connection.rollback()
+            raise
+
+    def append_events(self, events: Iterable[Mapping[str, Any]]) -> list[AppendResult]:
+        """Append a bounded caller-supplied batch in one transaction."""
+
+        prepared = [
+            self._prepare_event(
+                candidate_id=event["candidate_id"],
+                event_type=event["event_type"],
+                event_timestamp=event["event_timestamp"],
+                payload=event["payload"],
+                event_id=event.get("event_id"),
+            )
+            for event in events
+        ]
+        if not prepared:
+            return []
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            results = [self._append_prepared_event(event) for event in prepared]
+            self.connection.commit()
+            return results
+        except Exception:
+            if self.connection.in_transaction:
+                self.connection.rollback()
+            raise
+
+    def _prepare_event(
+        self,
+        *,
+        candidate_id: str,
+        event_type: str,
+        event_timestamp: str,
+        payload: Mapping[str, Any],
+        event_id: str | None,
+    ) -> dict[str, Any]:
         if self.read_only:
             raise ValidationError("read-only ledger cannot append")
         parse_utc_timestamp(event_timestamp, field="event_timestamp")
@@ -190,35 +258,49 @@ class CandidateLedger:
         )
         if not resolved_event_id.startswith("evt_") or len(resolved_event_id) > 128:
             raise ValidationError("event_id must be a bounded evt_ identifier")
+        return {
+            "candidate_id": candidate_id,
+            "event_type": event_type,
+            "event_timestamp": event_timestamp,
+            "payload": payload,
+            "payload_json": payload_json,
+            "payload_sha256": payload_sha256,
+            "event_id": resolved_event_id,
+        }
 
-        self.connection.execute("BEGIN IMMEDIATE")
-        try:
-            existing = self.connection.execute(
+    def _append_prepared_event(self, event: Mapping[str, Any]) -> AppendResult:
+        candidate_id = event["candidate_id"]
+        event_type = event["event_type"]
+        event_timestamp = event["event_timestamp"]
+        payload = event["payload"]
+        payload_json = event["payload_json"]
+        payload_sha256 = event["payload_sha256"]
+        resolved_event_id = event["event_id"]
+        existing = self.connection.execute(
                 "SELECT sequence,candidate_id,event_type,event_timestamp,schema_version,payload_sha256 FROM candidate_events WHERE event_id=?",
                 (resolved_event_id,),
             ).fetchone()
-            if existing:
-                same = (
-                    existing["candidate_id"] == candidate_id
-                    and existing["event_type"] == event_type
-                    and existing["event_timestamp"] == event_timestamp
-                    and existing["schema_version"] == SCHEMA_VERSION
-                    and existing["payload_sha256"] == payload_sha256
-                )
-                self.connection.rollback()
-                if same:
-                    return AppendResult(resolved_event_id, int(existing["sequence"]), False)
-                raise DuplicateEventError("event_id already exists with different content")
-
-            self._validate_event_against_history(
-                candidate_id=candidate_id,
-                event_type=event_type,
-                event_timestamp=event_timestamp,
-                payload=payload,
+        if existing:
+            same = (
+                existing["candidate_id"] == candidate_id
+                and existing["event_type"] == event_type
+                and existing["event_timestamp"] == event_timestamp
+                and existing["schema_version"] == SCHEMA_VERSION
+                and existing["payload_sha256"] == payload_sha256
             )
-            if event_type == "candidate_observed" and self._candidate_snapshot(candidate_id) is not None:
-                raise DuplicateCandidateError("candidate snapshot already exists")
-            cursor = self.connection.execute(
+            if same:
+                return AppendResult(resolved_event_id, int(existing["sequence"]), False)
+            raise DuplicateEventError("event_id already exists with different content")
+
+        self._validate_event_against_history(
+            candidate_id=candidate_id,
+            event_type=event_type,
+            event_timestamp=event_timestamp,
+            payload=payload,
+        )
+        if event_type == "candidate_observed" and self._candidate_snapshot(candidate_id) is not None:
+            raise DuplicateCandidateError("candidate snapshot already exists")
+        cursor = self.connection.execute(
                 """
                 INSERT INTO candidate_events(
                     event_id,candidate_id,event_type,event_timestamp,schema_version,
@@ -236,13 +318,7 @@ class CandidateLedger:
                     utc_now(),
                 ),
             )
-            sequence = int(cursor.lastrowid)
-            self.connection.commit()
-            return AppendResult(resolved_event_id, sequence, True)
-        except Exception:
-            if self.connection.in_transaction:
-                self.connection.rollback()
-            raise
+        return AppendResult(resolved_event_id, int(cursor.lastrowid), True)
 
     def history(self, candidate_id: str) -> list[StoredEvent]:
         """Return one candidate's ordered event history."""

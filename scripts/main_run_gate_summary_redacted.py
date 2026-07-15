@@ -39,6 +39,12 @@ class GateSummary:
     order_intent_to_submission_status: str
     submission_skipped_reason_counts: str
     zero_order_reason: str
+    shadow_capture_enabled: str
+    shadow_capture_attempted: str
+    shadow_capture_written_count: str
+    shadow_capture_dropped_count: str
+    shadow_capture_warning_count: str
+    shadow_capture_status: str
 
 
 def _safe_lines(lines: Iterable[str]) -> list[str]:
@@ -137,6 +143,12 @@ def summarize_lines(lines: Sequence[str]) -> GateSummary:
             order_intent_to_submission_status="unknown",
             submission_skipped_reason_counts="unknown",
             zero_order_reason="no_main_run_found",
+            shadow_capture_enabled="unknown",
+            shadow_capture_attempted="unknown",
+            shadow_capture_written_count="unknown",
+            shadow_capture_dropped_count="unknown",
+            shadow_capture_warning_count="unknown",
+            shadow_capture_status="unknown",
         )
 
     run = runs[-1]
@@ -148,6 +160,14 @@ def summarize_lines(lines: Sequence[str]) -> GateSummary:
     post_intent_blocker_counts = "unknown"
     order_intent_to_submission_status = "unknown"
     submission_skipped_reason_counts = "unknown"
+    shadow_capture = {
+        "SHADOW_CAPTURE_ENABLED": "unknown",
+        "SHADOW_CAPTURE_ATTEMPTED": "unknown",
+        "SHADOW_CAPTURE_WRITTEN_COUNT": "unknown",
+        "SHADOW_CAPTURE_DROPPED_COUNT": "unknown",
+        "SHADOW_CAPTURE_WARNING_COUNT": "unknown",
+        "SHADOW_CAPTURE_STATUS": "unknown",
+    }
 
     for line in run:
         match = re.search(r"\[EXPIRY\] Filtered \d+ -> (\d+) markets", line)
@@ -171,6 +191,9 @@ def summarize_lines(lines: Sequence[str]) -> GateSummary:
         match = re.search(r"\[ORDER_DIAG\] SUBMISSION_SKIPPED_REASON_COUNTS=([^\s]+)", line)
         if match:
             submission_skipped_reason_counts = match.group(1)
+        match = re.search(r"\[SHADOW_CAPTURE\] (SHADOW_CAPTURE_[A-Z_]+)=([^\s]+)", line)
+        if match and match.group(1) in shadow_capture:
+            shadow_capture[match.group(1)] = match.group(2)
 
     ai_processed = sum(1 for line in run if "[kelly] AI prior:" in line)
     order_intents = sum(1 for line in run if re.search(r"Market [A-Za-z0-9_.:-]+: (YES|NO) order", line))
@@ -212,6 +235,12 @@ def summarize_lines(lines: Sequence[str]) -> GateSummary:
         order_intent_to_submission_status=order_intent_to_submission_status,
         submission_skipped_reason_counts=submission_skipped_reason_counts,
         zero_order_reason=zero_order_reason,
+        shadow_capture_enabled=shadow_capture["SHADOW_CAPTURE_ENABLED"],
+        shadow_capture_attempted=shadow_capture["SHADOW_CAPTURE_ATTEMPTED"],
+        shadow_capture_written_count=shadow_capture["SHADOW_CAPTURE_WRITTEN_COUNT"],
+        shadow_capture_dropped_count=shadow_capture["SHADOW_CAPTURE_DROPPED_COUNT"],
+        shadow_capture_warning_count=shadow_capture["SHADOW_CAPTURE_WARNING_COUNT"],
+        shadow_capture_status=shadow_capture["SHADOW_CAPTURE_STATUS"],
     )
 
 
@@ -233,6 +262,12 @@ def format_summary(summary: GateSummary, *, artifact: Path | None = None) -> str
         ("POST_INTENT_BLOCKER_COUNTS", summary.post_intent_blocker_counts),
         ("ORDER_INTENT_TO_SUBMISSION_STATUS", summary.order_intent_to_submission_status),
         ("SUBMISSION_SKIPPED_REASON_COUNTS", summary.submission_skipped_reason_counts),
+        ("SHADOW_CAPTURE_ENABLED", summary.shadow_capture_enabled),
+        ("SHADOW_CAPTURE_ATTEMPTED", summary.shadow_capture_attempted),
+        ("SHADOW_CAPTURE_WRITTEN_COUNT", summary.shadow_capture_written_count),
+        ("SHADOW_CAPTURE_DROPPED_COUNT", summary.shadow_capture_dropped_count),
+        ("SHADOW_CAPTURE_WARNING_COUNT", summary.shadow_capture_warning_count),
+        ("SHADOW_CAPTURE_STATUS", summary.shadow_capture_status),
         ("ZERO_ORDER_REASON", summary.zero_order_reason),
         ("VALUES_PRINTED", "no_secret_values"),
     ]

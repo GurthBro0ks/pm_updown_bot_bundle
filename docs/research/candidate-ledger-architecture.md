@@ -11,7 +11,15 @@
 5. **Chronology is an invariant.** UTC cutoffs are ordered and assignments are
    derived from candidate timestamps. Source data newer than the candidate is
    rejected as leakage.
-6. **Research cannot deploy.** The package has no production runner imports,
+6. **Observation is one-way.** The package has no production runner imports,
    code-writing path, cron integration, strategy mutation, or external API.
+   The main strategy may submit finalized public observations to the adapter;
+   the adapter never returns ledger data to the decision path.
 7. **Bounded summaries.** CLIs emit counts and aggregate metrics, never raw
    candidate payloads by default.
+8. **Failure is non-authoritative.** Configuration, validation, lock, migration,
+   and write failures are reduced to redacted status counts and cannot change
+   trading decisions or process exit status.
+9. **Activation is separate.** Source support is disabled by default, no
+   database path is tracked, and installed cron activation requires a distinct
+   exact-bounded approval.

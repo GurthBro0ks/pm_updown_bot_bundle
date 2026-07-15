@@ -1,8 +1,10 @@
 # Candidate ledger v1
 
-Phase 1A is an offline research foundation. It does not capture production
-candidates, import production runners, place orders, call external services, or
-modify strategy parameters.
+Phase 1A is the offline research foundation. Phase 1B adds a narrow
+observational hook to the existing main evaluation pipeline, but capture is
+disabled by default and has no tracked database path. It never places orders,
+calls external services, reads ledger data into strategy logic, or modifies
+strategy parameters.
 
 ## Storage contract
 
@@ -13,8 +15,10 @@ SQLite triggers reject `UPDATE` and `DELETE` on the event table. The API exposes
 no mutation method, transactions use `BEGIN IMMEDIATE`, and the supported
 deployment contract is one writer per database.
 
-Every CLI requires an explicit local database path. There is no default path,
-network client, production hook, or environment-based database discovery.
+Every CLI requires an explicit local database path. The Phase 1B runtime
+adapter also requires both `CANDIDATE_LEDGER_SHADOW_ENABLED=true` and an
+explicit `CANDIDATE_LEDGER_DB_PATH`. There is no default path or network
+client. Invalid configuration produces only a redacted warning.
 
 ## Identity and idempotency
 
@@ -62,6 +66,18 @@ maker/taker assumption selects one. No Kalshi fee constant is embedded. The
 holdout assignments use registered UTC cutoffs, never shuffle, reject duplicate
 candidate ids, and reject source timestamps later than candidate observation.
 
-Phase 1B—production candidate capture or any production import—requires a new
-operator-approved phase. Autonomous production self-modification remains
-permanently prohibited.
+## Disabled shadow capture
+
+The runtime adapter collects validated public/non-secret candidate and gate
+events in memory after decisions are final. It caps candidates per run, flushes
+the event batch in one short local SQLite transaction, uses a bounded lock
+timeout, and catches all adapter/database failures. No ledger query is present
+on the selection, scoring, gate, sizing, or order path. Capture failure cannot
+change a decision, block an order, or change a successful process exit status.
+
+`CANDIDATE_LEDGER_CAPTURE_MAX_PER_RUN` and
+`CANDIDATE_LEDGER_SQLITE_TIMEOUT_MS` are bounded controls. The status CLI and
+main-run fields expose counts and health only, never raw candidates. Installed
+cron does not set any capture field. Production activation requires a new
+exact-bounded approval. GreedBot integration and autonomous production
+self-modification remain prohibited.

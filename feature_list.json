@@ -1,4 +1,21 @@
 {
+  "pm_candidate_ledger_shadow_capture_phase1b_20260715": {
+    "status": "built_validation_pass_manual_qa_pending",
+    "file": "research/candidate_ledger/capture.py, research/candidate_ledger/runtime_adapter.py, research/candidate_ledger/store.py, research/candidate_ledger/schema.py, strategies/kalshi_optimize.py, utils/edge_nearest_miss.py, scripts/main_run_gate_summary_redacted.py, scripts/candidate_capture_status_redacted.py, tests/test_candidate_ledger_capture.py, tests/test_candidate_ledger_capture_integration.py, tests/test_candidate_ledger_production_isolation.py, docs/research/candidate-ledger-v1.md, docs/research/candidate-ledger-architecture.md, docs/buglog/pm_candidate_ledger_shadow_capture_phase1b_20260715.md, manual_qa_checklist.md",
+    "passes": false,
+    "accepted": false,
+    "validation_passed": true,
+    "manual_qa_required": true,
+    "manual_qa_completed": false,
+    "manual_qa_status": "pending_operator_qa",
+    "production_capture_enabled": false,
+    "phase_1b_activation_authorized": false,
+    "pushed": false,
+    "commit": "pending_commit_sha_reported_in_closeout",
+    "description": "Disabled-by-default, explicit-path, failure-isolated shadow capture of public candidate evaluation events into the append-only Phase 1A SQLite ledger.",
+    "result": "PASS_VALIDATION_MANUAL_QA_PENDING",
+    "notes": "No installed cron activation, trading-decision input, external transmission, GreedBot integration, weather change, or autonomous self-modification. Operator QA and independent safety review remain required."
+  },
   "pm_candidate_ledger_replay_foundation_phase1a_20260715": {
     "status": "accepted_manual_qa_pass",
     "file": "schemas/candidate_ledger/v1.schema.json, docs/research/candidate-ledger-v1.md, docs/research/candidate-ledger-architecture.md, research/candidate_ledger/, scripts/candidate_ledger_*.py, scripts/candidate_replay_evaluate.py, tests/test_candidate_ledger_*.py, tests/conftest.py, docs/buglog/pm_candidate_ledger_replay_foundation_phase1a_20260715.md",

@@ -306,11 +306,32 @@ def validate_event_payload(event_type: str, payload: Mapping[str, Any]) -> None:
             raise LeakageError("candidate_observed must not contain later fill, settlement, score, or acceptance outcomes")
         return
     if event_type == "gate_evaluated":
-        _event_exact(body, {"gates"}, event_type)
+        if set(body) not in ({"gates"}, {"gates", "edge", "decision"}):
+            raise ValidationError(
+                "event.gate_evaluated keys invalid; expected gates or gates+edge+decision"
+            )
         gates = _mapping(body["gates"], "event.gate_evaluated.gates")
         _exact_keys(gates, GATE_KEYS, "event.gate_evaluated.gates")
         for field in GATE_KEYS - {"gate_failure_kinds"}:
             _bool(gates[field], f"event.gate_evaluated.gates.{field}")
+        if "edge" in body:
+            edge = _mapping(body["edge"], "event.gate_evaluated.edge")
+            _exact_keys(edge, EDGE_KEYS, "event.gate_evaluated.edge")
+            _number(edge["raw_edge"], "event.gate_evaluated.edge.raw_edge")
+            _number(edge["fee_adjusted_edge"], "event.gate_evaluated.edge.fee_adjusted_edge", nullable=True)
+            _number(edge["required_threshold"], "event.gate_evaluated.edge.required_threshold")
+            _number(edge["estimated_fees"], "event.gate_evaluated.edge.estimated_fees", nullable=True, minimum=0)
+            if edge["maker_assumption"] not in {"maker", "taker", "unknown"}:
+                raise ValidationError("event.gate_evaluated.edge.maker_assumption is unsupported")
+            _number(edge["expected_value"], "event.gate_evaluated.edge.expected_value", nullable=True)
+            decision = _mapping(body["decision"], "event.gate_evaluated.decision")
+            _exact_keys(decision, DECISION_KEYS, "event.gate_evaluated.decision")
+            _string(decision["rejection_reason"], "event.gate_evaluated.decision.rejection_reason", nullable=True, max_length=256)
+            for field in ("order_intent_created", "order_attempted", "order_placed"):
+                _bool(decision[field], f"event.gate_evaluated.decision.{field}")
+            _string(decision["internal_order_reference"], "event.gate_evaluated.decision.internal_order_reference", nullable=True, max_length=128)
+            _integer(decision["quantity"], "event.gate_evaluated.decision.quantity", nullable=True, minimum=0)
+            _integer(decision["limit_price_cents"], "event.gate_evaluated.decision.limit_price_cents", nullable=True, minimum=1, maximum=99)
         return
     if event_type == "order_intent_created":
         _event_exact(body, {"internal_order_reference", "quantity", "limit_price_cents"}, event_type)

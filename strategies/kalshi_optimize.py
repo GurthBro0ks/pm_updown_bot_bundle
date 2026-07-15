@@ -97,6 +97,11 @@ try:
 except Exception:
     SHADOW_PER_CALL_TIMEOUT_CAP = 5.0
 
+try:
+    from research.candidate_ledger.runtime_adapter import create_candidate_capture
+except Exception:
+    create_candidate_capture = None
+
 _TICKER_CATEGORY_MAP = {
     "KXINX": "index", "KXINXU": "index", "KXNDX": "index",
     "KXNASDAQ100": "index", "KXNASDAQ100U": "index",
@@ -109,6 +114,44 @@ _TICKER_CATEGORY_MAP = {
 # Edge calculation sanity limits
 MAX_EDGE_PCT = 500.0
 MIN_EDGE_PCT = -100.0
+
+
+def _record_shadow_candidate(capture_runtime, **evaluation):
+    """Best-effort observation only; never return data to the decision path."""
+
+    if capture_runtime is None:
+        return
+    try:
+        capture_runtime.record_evaluation(**evaluation)
+    except Exception:
+        logger.warning("[SHADOW_CAPTURE] candidate observation dropped")
+
+
+def _flush_shadow_candidates(capture_runtime):
+    """Flush once and emit bounded status fields without propagating failures."""
+
+    fallback = {
+        "SHADOW_CAPTURE_ENABLED": "false",
+        "SHADOW_CAPTURE_ATTEMPTED": "false",
+        "SHADOW_CAPTURE_WRITTEN_COUNT": 0,
+        "SHADOW_CAPTURE_DROPPED_COUNT": 0,
+        "SHADOW_CAPTURE_WARNING_COUNT": 0,
+        "SHADOW_CAPTURE_STATUS": "DISABLED",
+    }
+    if capture_runtime is not None:
+        try:
+            fallback = capture_runtime.flush().summary_fields()
+        except Exception:
+            fallback.update(
+                {
+                    "SHADOW_CAPTURE_ENABLED": "true",
+                    "SHADOW_CAPTURE_WARNING_COUNT": 1,
+                    "SHADOW_CAPTURE_STATUS": "WARN",
+                }
+            )
+    for name, value in fallback.items():
+        logger.info("[SHADOW_CAPTURE] %s=%s", name, value)
+    return fallback
 
 # Expiry filters (configurable via env)
 MAX_DAYS_TO_EXPIRY = float(os.getenv("MAX_DAYS_TO_EXPIRY", "14") or "14")
@@ -829,6 +872,16 @@ def optimize_kalshi_strategy(
         "edge_after_fees_pct": 3.0,
         "market_end_hrs": 0
     }
+
+    capture_runtime = None
+    if create_candidate_capture is not None:
+        try:
+            capture_runtime = create_candidate_capture(
+                mode=mode,
+                run_id=str(getattr(stage_budget, "_cron_run_id", "standalone-shadow-run")),
+            )
+        except Exception:
+            logger.warning("[SHADOW_CAPTURE] adapter initialization failed safely")
     
     # Fetch Kalshi markets
     logger.info("Fetching Kalshi markets...")
@@ -836,6 +889,7 @@ def optimize_kalshi_strategy(
     
     if not markets:
         logger.warning("No markets fetched")
+        _flush_shadow_candidates(capture_runtime)
         return 0
     
     logger.info(f"Fetched {len(markets)} markets")
@@ -1206,17 +1260,33 @@ def optimize_kalshi_strategy(
                 )
 
             if not val_result["passed"]:
+                prior_raw_edge = calculate_edge_pct(true_price, yes_price, market_id)
+                prior_fee_edge = get_edge_after_fees(market, true_price=true_price)
                 if make_nearest_miss is not None:
                     nearest_misses.append(make_nearest_miss(
                         market=market,
                         side="yes",
                         price=yes_price,
                         ai_prior=true_price,
-                        raw_edge=calculate_edge_pct(true_price, yes_price, market_id),
-                        fee_adjusted_edge=get_edge_after_fees(market, true_price=true_price),
+                        raw_edge=prior_raw_edge,
+                        fee_adjusted_edge=prior_fee_edge,
                         required_threshold=risk_caps["edge_after_fees_pct"],
                         rejection_reason="prior_validation_failed",
                     ))
+                _record_shadow_candidate(
+                    capture_runtime,
+                    market=market,
+                    observed_price=yes_price,
+                    ai_prior=true_price,
+                    fallback_prior_used=bool(market.get("_ai_prior_is_fallback")),
+                    raw_edge=prior_raw_edge,
+                    fee_adjusted_edge=prior_fee_edge,
+                    required_threshold=risk_caps["edge_after_fees_pct"],
+                    rejection_reason="prior_validation_failed",
+                    gate_failure_kinds=["prior_validation"],
+                    order_intent_created=False,
+                    expected_value=prior_fee_edge,
+                )
                 continue
 
             # Use adjusted prior for sizing if validation passed
@@ -1271,6 +1341,20 @@ def optimize_kalshi_strategy(
                     required_threshold=risk_caps["edge_after_fees_pct"],
                     rejection_reason="raw_edge_above_sanity_cap",
                 ))
+            _record_shadow_candidate(
+                capture_runtime,
+                market=market,
+                observed_price=yes_price,
+                ai_prior=true_price,
+                fallback_prior_used=bool(market.get("_ai_prior_is_fallback")),
+                raw_edge=raw_edge_pct,
+                fee_adjusted_edge=edge_after_fees_pct,
+                required_threshold=risk_caps["edge_after_fees_pct"],
+                rejection_reason="raw_edge_above_sanity_cap",
+                gate_failure_kinds=["price_sanity"],
+                order_intent_created=False,
+                expected_value=edge_after_fees_pct,
+            )
             continue
 
         # Check if this market is a best maker market
@@ -1291,6 +1375,20 @@ def optimize_kalshi_strategy(
                     required_threshold=risk_caps["edge_after_fees_pct"],
                     rejection_reason="edge_below_threshold",
                 ))
+            _record_shadow_candidate(
+                capture_runtime,
+                market=market,
+                observed_price=yes_price,
+                ai_prior=true_price,
+                fallback_prior_used=bool(market.get("_ai_prior_is_fallback")),
+                raw_edge=raw_edge_pct,
+                fee_adjusted_edge=edge_after_fees_pct,
+                required_threshold=risk_caps["edge_after_fees_pct"],
+                rejection_reason="edge_below_threshold",
+                gate_failure_kinds=["edge_below_threshold"],
+                order_intent_created=False,
+                expected_value=edge_after_fees_pct,
+            )
             continue
         
         # Determine if maker order (if not best maker)
@@ -1354,6 +1452,20 @@ def optimize_kalshi_strategy(
                     required_threshold=risk_caps["edge_after_fees_pct"],
                     rejection_reason="price_below_minimum",
                 ))
+            _record_shadow_candidate(
+                capture_runtime,
+                market=market,
+                observed_price=yes_price,
+                ai_prior=true_price,
+                fallback_prior_used=bool(market.get("_ai_prior_is_fallback")),
+                raw_edge=raw_edge_pct,
+                fee_adjusted_edge=edge_after_fees_pct,
+                required_threshold=risk_caps["edge_after_fees_pct"],
+                rejection_reason="price_below_minimum",
+                gate_failure_kinds=["price_below_minimum"],
+                order_intent_created=False,
+                expected_value=edge_after_fees_pct,
+            )
             continue
 
         # Check if order passes gates
@@ -1396,7 +1508,38 @@ def optimize_kalshi_strategy(
                             gate_name="fallback_prior",
                             reason="cascade_failed",
                         )
+            _record_shadow_candidate(
+                capture_runtime,
+                market=market,
+                observed_price=yes_price,
+                ai_prior=true_price,
+                fallback_prior_used=bool(market.get("_ai_prior_is_fallback")),
+                raw_edge=raw_edge_pct,
+                fee_adjusted_edge=edge_after_fees_pct,
+                required_threshold=risk_caps["edge_after_fees_pct"],
+                rejection_reason=rejection_reason,
+                gate_failure_kinds=gate_failure_kinds,
+                order_intent_created=False,
+                expected_value=edge_after_fees_pct,
+            )
             continue
+
+        _record_shadow_candidate(
+            capture_runtime,
+            market=market,
+            observed_price=yes_price,
+            ai_prior=true_price,
+            fallback_prior_used=bool(market.get("_ai_prior_is_fallback")),
+            raw_edge=raw_edge_pct,
+            fee_adjusted_edge=edge_after_fees_pct,
+            required_threshold=risk_caps["edge_after_fees_pct"],
+            rejection_reason=None,
+            gate_failure_kinds=[],
+            order_intent_created=True,
+            intent_price=order_price,
+            maker_assumption="maker" if use_maker else "taker",
+            expected_value=edge_after_fees_pct,
+        )
         
         # Execute trade (in live modes: real-live or micro-live)
         # Track first-order safety countdown across the session
@@ -1722,6 +1865,8 @@ def optimize_kalshi_strategy(
         "risk_caps": risk_caps
     })
 
+    shadow_capture_summary = _flush_shadow_candidates(capture_runtime)
+
     should_write_edge_summary = bool(os.getenv("MAIN_EDGE_NEAREST_MISS_PATH")) or mode == "micro-live"
     if (
         should_write_edge_summary
@@ -1749,6 +1894,7 @@ def optimize_kalshi_strategy(
                 post_intent_blocker_counts=post_intent_blocker_counts,
                 sample_limit=10,
             )
+            edge_summary.update(shadow_capture_summary)
             write_edge_nearest_miss_summary(edge_summary)
             logger.info(
                 "[ORDER_DIAG] POST_INTENT_BLOCKER_COUNTS=%s",

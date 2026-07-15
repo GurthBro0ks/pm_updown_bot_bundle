@@ -64,9 +64,23 @@ def test_import_has_no_production_side_effects():
     assert result.returncode == 0, result.stderr
 
 
-def test_phase_1b_and_self_modification_are_explicitly_excluded():
+def test_phase_1b_activation_and_self_modification_are_explicitly_excluded():
     docs = (ROOT / "docs/research/candidate-ledger-v1.md").read_text().lower()
     architecture = (ROOT / "docs/research/candidate-ledger-architecture.md").read_text().lower()
-    assert "phase 1b" in docs and "requires a new" in docs
-    assert "autonomous production self-modification" in docs
-    assert "research cannot deploy" in architecture
+    assert "phase 1b" in docs and "disabled by default" in docs
+    assert "production activation requires a new" in docs
+    assert "autonomous production" in docs and "self-modification remain prohibited" in docs
+    assert "observation is one-way" in architecture
+
+
+def test_installed_runner_wrappers_do_not_activate_capture():
+    for relative in ("scripts/cron_micro_live.sh", "scripts/cron_weather_trade.sh"):
+        text = (ROOT / relative).read_text()
+        assert "CANDIDATE_LEDGER_SHADOW_ENABLED" not in text
+        assert "CANDIDATE_LEDGER_DB_PATH" not in text
+
+
+def test_capture_has_no_greedbot_or_self_modification_path():
+    source = "\n".join(path.read_text().lower() for path in RESEARCH_FILES)
+    assert "greedbot" not in source
+    assert "self-modif" not in source

@@ -13,6 +13,7 @@ from .models import (
     deterministic_event_id,
 )
 from .store import CandidateLedger
+from .capture import CaptureConfig, CaptureStatus, ShadowCaptureBuffer
 
 __all__ = [
     "EVENT_TYPES",
@@ -20,9 +21,12 @@ __all__ = [
     "AppendResult",
     "CandidateLedger",
     "CandidateLedgerError",
+    "CaptureConfig",
+    "CaptureStatus",
     "DuplicateCandidateError",
     "DuplicateEventError",
     "LeakageError",
+    "ShadowCaptureBuffer",
     "ValidationError",
     "deterministic_candidate_id",
     "deterministic_event_id",

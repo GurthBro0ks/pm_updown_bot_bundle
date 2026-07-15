@@ -1,9 +1,22 @@
-# Manual QA Checklist
+# Phase 1B manual QA checklist
 
-- [ ] Confirm no trading behavior or thresholds changed.
-- [ ] Confirm both diagnostic tools select the same latest scheduled run.
-- [ ] Confirm post-intent fields are present or correctly report that a future run is required.
-- [ ] Confirm no live order action occurred.
-- [ ] Confirm weather remained live armed.
-- [ ] Confirm no secrets were printed.
-- [ ] Confirm HEAD equals origin and the worktree is clean.
+- [ ] Capture defaults disabled.
+- [ ] Disabled mode creates no database.
+- [ ] Explicit database path is required.
+- [ ] Synthetic enabled mode captures accepted and rejected candidates.
+- [ ] Events remain append-only.
+- [ ] Capture failure preserves decisions and exit status.
+- [ ] Behavior equivalence passes.
+- [ ] No raw prompts or secret fields are stored.
+- [ ] Status output is bounded.
+- [ ] No external network or data transmission occurs.
+- [ ] No GreedBot integration exists.
+- [ ] No autonomous self-modification exists.
+- [ ] Installed main and weather cron do not enable capture.
+- [ ] Production capture remains disabled.
+- [ ] `MAX_DAYS_TO_EXPIRY` remains 3 in the installed main schedule.
+- [ ] Categories and thresholds remain unchanged.
+- [ ] Weather behavior remains unchanged.
+- [ ] No live order action occurred.
+- [ ] No secrets were printed.
+- [ ] Repository is clean and `HEAD` equals origin after push.

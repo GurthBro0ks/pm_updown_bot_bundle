@@ -1468,3 +1468,49 @@ pytest tests/test_contract_signals.py tests/test_fear_regime.py -v → 24 passed
 - `feature_list.json` entry `pm_candidate_ledger_replay_foundation_phase1a_20260715` updated in place: `passes=true`, `accepted=true`, `manual_qa_completed=true`, `manual_qa_status=PASS_operator_accepted`, `independent_review_status=PASS`, `production_capture_enabled=false`, `phase_1b_authorized=false`, `result=PASS_OPERATOR_ACCEPTED`.
 - No production candidate capture enabled, no Phase 1B implementation, no GreedBot integration, no trading/weather/cron/service/threshold/gate/sizing change, no secret access/print. `MAX_DAYS_TO_EXPIRY` unchanged.
 - Next: Phase 1B (any production wiring/shadow capture) requires a separate explicit approval; not authorized by this closeout.
+# 2026-07-15 (pm_candidate_ledger_shadow_capture_phase1b_implementation — Validation PASS, QA Pending)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / candidate ledger Phase 1B
+**Type:** Disabled-by-default observational source/test implementation
+**Proof:** `/tmp/proof_pm_candidate_ledger_shadow_capture_phase1b_implementation_20260715T214312Z`
+**Manual QA:** pending_operator_qa
+
+### Summary
+
+Implemented a failure-isolated shadow candidate-capture adapter on the accepted
+Phase 1A append-only ledger. The existing Kalshi evaluation pipeline now offers
+finalized public candidate/gate observations to an in-memory bounded buffer and
+flushes one local SQLite batch near the existing proof/diagnostic stage.
+Capture remains disabled unless the flag is exactly `true` and an explicit local
+database path is supplied.
+
+### Verified
+
+- Hard clean-tree gate: `HEAD == origin == 4d047b9831330eb981946995ec9ec6307768fe1d` before implementation.
+- Focused capture/ledger/diagnostic/isolation suite: 70 passed.
+- Full repository suite: 633 passed, one pre-existing dependency warning.
+- `./scripts/run_tests.sh`: exit 0, `STATUS: ALL GATES PASS`.
+- JSON validation, touched-Python `py_compile`, and `git diff --check`: PASS.
+- Synthetic bounded capture: 100 candidates / 200 events, append-only valid,
+  database mode `0600`, 170.566 ms total on this host; no production latency claim.
+- Disabled synthetic mode created no database.
+- Redacted health, inventory, gate-summary, and nearest-miss commands: PASS.
+- Sanitized installed-cron audit: no capture flag/path; max-days 3, minimum
+  price 25 cents, and accepted categories unchanged.
+- Purpose-built changed-file/proof secret scan: zero actual findings.
+
+### Safety
+
+- No production capture activation, installed cron/runtime change, live/manual
+  main or weather run, order action, trading threshold/gate/sizing change,
+  weather change, service restart, external candidate transmission, GreedBot
+  integration, autonomous self-modification, or secret output.
+- Capture and database failures preserve decisions, order intent, sizing, and
+  exit status. Ledger data is never read by the decision path.
+
+### Remaining
+
+- Independent safety/architecture review and operator manual QA.
+- Production shadow-capture activation requires a separate fresh exact-bounded
+  approval and remains unauthorized.
