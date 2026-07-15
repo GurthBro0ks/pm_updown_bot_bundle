@@ -1448,3 +1448,14 @@ pytest tests/test_contract_signals.py tests/test_fear_regime.py -v → 24 passed
 - Operator manual QA accepted commit `a0f20af444a3e59c2bfd4314c57b467854ac88e0` (`MANUAL_QA_STATUS=PASS_operator_accepted`).
 - The accepted diagnostic-only change aligns the gate summary to `logs/cron_micro_live.log`, identifies both tool artifacts, and records future-run redacted post-intent diagnostics.
 - Accepted commit remains equal to `origin/feat/ibkr-forecast-integration`; no runtime configuration, cron, weather state, service, or order action changed during acceptance recording.
+
+## 2026-07-15 - Candidate Ledger and Replay Foundation Phase 1A
+
+- Implemented the offline-only QuantAgent-inspired Phase 1A foundation at implementation commit `c2dd1e080a4834c87ab0e01b6c9cb64014ba1e26`: closed schema v1, standard-library SQLite migrations/event store, deterministic binary replay, chronological experiment splits/leakage guards, explicit-path local CLIs, research documentation, and synthetic tests.
+- The event store is append-only by API and SQLite triggers: candidate observations are unresolved immutable snapshots; fills, settlement, hypothetical results, assignments, and reviews are later bounded events. Identical append retries are idempotent; conflicting duplicates fail.
+- Fee-dependent PnL remains unknown unless maker/taker fees are explicitly supplied. No exchange fee constant was invented. UTC source timestamps newer than candidate observation fail closed; experiment assignments are chronological, strategy-version-pinned, disjoint, and append-once.
+- Production isolation is explicit and tested: `runner.py`, main cron, weather cron, and weather runner do not import/invoke the ledger; the research package imports no production runner/strategy/venue/network client; direct import has no production side effects. No production candidate capture, GreedBot integration, external call/transmission, strategy mutation, or autonomous self-modification path exists.
+- Verified: schema JSON PASS; py_compile PASS; focused suite 42 passed; full repository suite 609 passed with one pre-existing dependency warning; `./scripts/run_tests.sh` reported `STATUS: ALL GATES PASS`; direct CLI init/read-only validate/summary/replay deterministic smoke PASS; diff check and production-isolation guards PASS.
+- Safety: no source behavior in production runners changed; no live/manual strategy run, order action, threshold/category/price/expiry/Kelly/bankroll/notional/liquidity/exposure gate change, cron/weather/service/Caddy/DNS/systemd/timer/tmux/Discord change, secret access/print, API-key creation, or external data transfer.
+- Manual operator QA and independent Claude safety review remain pending. `passes` remains false. Phase 1B production capture/wiring requires separate approval.
+- Proof: `/tmp/proof_pm_candidate_ledger_replay_foundation_phase1a_20260715T154301Z`.
