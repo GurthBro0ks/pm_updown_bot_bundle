@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://slimyai.local/schemas/candidate-ledger/v1.schema.json",
+  "title": "PM Bot candidate ledger v1",
+  "description": "Offline research-only candidate snapshot. Secret-bearing fields, raw prompts, credentials, auth headers, webhook URLs, private account identifiers, and raw external response bodies are prohibited.",
+  "type": "object",
+  "required": [
+    "identity",
+    "market",
+    "prediction",
+    "edge",
+    "gates",
+    "decision",
+    "outcome",
+    "research"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "identity": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "candidate_id",
+        "run_id",
+        "run_timestamp",
+        "strategy_version",
+        "git_commit",
+        "environment_mode"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {"const": "1.0.0"},
+        "candidate_id": {"type": "string", "pattern": "^cand_[0-9a-f]{32}$"},
+        "run_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "run_timestamp": {"type": "string", "format": "date-time"},
+        "strategy_version": {"type": "string", "minLength": 1, "maxLength": 128},
+        "git_commit": {"type": "string", "pattern": "^[0-9a-f]{7,40}$"},
+        "environment_mode": {
+          "type": "string",
+          "enum": ["dry_run", "micro_live", "live", "replay_offline"]
+        }
+      }
+    },
+    "market": {
+      "type": "object",
+      "required": [
+        "ticker",
+        "series",
+        "category",
+        "public_title",
+        "expiry",
+        "settlement_rule_reference",
+        "side",
+        "observed_price_cents",
+        "bid_cents",
+        "ask_cents",
+        "spread_cents"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "ticker": {"type": "string", "minLength": 1, "maxLength": 128},
+        "series": {"type": "string", "minLength": 1, "maxLength": 128},
+        "category": {"type": "string", "minLength": 1, "maxLength": 64},
+        "public_title": {"type": "string", "minLength": 1, "maxLength": 512},
+        "expiry": {"type": "string", "format": "date-time"},
+        "settlement_rule_reference": {"type": "string", "minLength": 1, "maxLength": 512},
+        "side": {"type": "string", "enum": ["yes", "no"]},
+        "observed_price_cents": {"type": "integer", "minimum": 1, "maximum": 99},
+        "bid_cents": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
+        "ask_cents": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
+        "spread_cents": {"type": ["integer", "null"], "minimum": 0, "maximum": 100}
+      }
+    },
+    "prediction": {
+      "type": "object",
+      "required": [
+        "provider",
+        "model",
+        "policy_version",
+        "ai_prior",
+        "fallback_prior_used",
+        "confidence",
+        "source_data_timestamps"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "provider": {"type": "string", "minLength": 1, "maxLength": 64},
+        "model": {"type": "string", "minLength": 1, "maxLength": 128},
+        "policy_version": {"type": "string", "minLength": 1, "maxLength": 128},
+        "ai_prior": {"type": "number", "minimum": 0, "maximum": 1, "description": "Predicted probability that the market settles YES."},
+        "fallback_prior_used": {"type": "boolean"},
+        "confidence": {
+          "type": "object",
+          "required": ["confidence_bucket", "self_reported_confidence"],
+          "additionalProperties": false,
+          "properties": {
+            "confidence_bucket": {"type": "string", "enum": ["low", "medium", "high", "unknown"]},
+            "self_reported_confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1}
+          }
+        },
+        "source_data_timestamps": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^(?!(?:.*(?:secret|token|password|credential|authorization|webhook|api_key|private_key))).{1,64}$"
+          },
+          "additionalProperties": {"type": "string", "format": "date-time"}
+        }
+      }
+    },
+    "edge": {
+      "type": "object",
+      "required": [
+        "raw_edge",
+        "fee_adjusted_edge",
+        "required_threshold",
+        "estimated_fees",
+        "maker_assumption",
+        "expected_value"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "raw_edge": {"type": "number"},
+        "fee_adjusted_edge": {"type": ["number", "null"]},
+        "required_threshold": {"type": "number"},
+        "estimated_fees": {"type": ["number", "null"], "minimum": 0, "description": "Explicit total fee estimate for the recorded maker/taker assumption; null means unknown."},
+        "maker_assumption": {"type": "string", "enum": ["maker", "taker", "unknown"]},
+        "expected_value": {"type": ["number", "null"]}
+      }
+    },
+    "gates": {
+      "type": "object",
+      "required": [
+        "expiry_pass",
+        "category_pass",
+        "weather_exclusion_pass",
+        "price_pass",
+        "edge_pass",
+        "profitability_pass",
+        "fallback_prior_pass",
+        "liquidity_pass",
+        "market_end_time_pass",
+        "price_sanity_pass",
+        "size_pass",
+        "bankroll_pass",
+        "notional_pass",
+        "duplicate_pass",
+        "open_order_pass",
+        "gate_failure_kinds"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "expiry_pass": {"type": "boolean"},
+        "category_pass": {"type": "boolean"},
+        "weather_exclusion_pass": {"type": "boolean"},
+        "price_pass": {"type": "boolean"},
+        "edge_pass": {"type": "boolean"},
+        "profitability_pass": {"type": "boolean"},
+        "fallback_prior_pass": {"type": "boolean"},
+        "liquidity_pass": {"type": "boolean"},
+        "market_end_time_pass": {"type": "boolean"},
+        "price_sanity_pass": {"type": "boolean"},
+        "size_pass": {"type": "boolean"},
+        "bankroll_pass": {"type": "boolean"},
+        "notional_pass": {"type": "boolean"},
+        "duplicate_pass": {"type": "boolean"},
+        "open_order_pass": {"type": "boolean"},
+        "gate_failure_kinds": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1, "maxLength": 128}
+        }
+      }
+    },
+    "decision": {
+      "type": "object",
+      "required": [
+        "rejection_reason",
+        "order_intent_created",
+        "order_attempted",
+        "order_placed",
+        "internal_order_reference",
+        "quantity",
+        "limit_price_cents"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "rejection_reason": {"type": ["string", "null"], "maxLength": 256},
+        "order_intent_created": {"type": "boolean"},
+        "order_attempted": {"type": "boolean"},
+        "order_placed": {"type": "boolean"},
+        "internal_order_reference": {"type": ["string", "null"], "maxLength": 128},
+        "quantity": {"type": ["integer", "null"], "minimum": 0},
+        "limit_price_cents": {"type": ["integer", "null"], "minimum": 1, "maximum": 99}
+      }
+    },
+    "outcome": {
+      "type": "object",
+      "required": [
+        "fill_status",
+        "filled_quantity",
+        "average_fill_price",
+        "settlement_result",
+        "resolved_at",
+        "realized_pnl",
+        "hypothetical_pnl_if_traded",
+        "estimated_fill_feasibility",
+        "brier_score",
+        "log_loss",
+        "calibration_bucket"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "fill_status": {"type": "string", "enum": ["not_traded", "unfilled", "partially_filled", "filled"]},
+        "filled_quantity": {"type": ["integer", "null"], "minimum": 0},
+        "average_fill_price": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+        "settlement_result": {"type": ["string", "null"], "enum": ["yes", "no", "pending", null]},
+        "resolved_at": {"type": ["string", "null"], "format": "date-time"},
+        "realized_pnl": {"type": ["number", "null"]},
+        "hypothetical_pnl_if_traded": {"type": ["number", "null"]},
+        "estimated_fill_feasibility": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "brier_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "log_loss": {"type": ["number", "null"], "minimum": 0},
+        "calibration_bucket": {
+          "type": ["string", "null"],
+          "enum": ["0.0-0.1", "0.1-0.2", "0.2-0.3", "0.3-0.4", "0.4-0.5", "0.5-0.6", "0.6-0.7", "0.7-0.8", "0.8-0.9", "0.9-1.0", null]
+        }
+      }
+    },
+    "research": {
+      "type": "object",
+      "required": [
+        "experiment_id",
+        "train_or_holdout",
+        "replay_policy_version",
+        "review_score",
+        "review_findings",
+        "accepted_into_knowledge_base",
+        "provenance",
+        "immutable_created_at"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "experiment_id": {"type": ["string", "null"], "maxLength": 128},
+        "train_or_holdout": {"type": "string", "enum": ["train", "validation", "holdout", "not_applicable"]},
+        "replay_policy_version": {"type": ["string", "null"], "maxLength": 128},
+        "review_score": {"type": ["number", "null"]},
+        "review_findings": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {"type": "string", "maxLength": 512}
+        },
+        "accepted_into_knowledge_base": {"type": "boolean"},
+        "provenance": {"type": "string", "enum": ["live_discovery", "offline_replay", "synthetic_fixture", "inner_loop_hypothesis"]},
+        "immutable_created_at": {"type": "string", "format": "date-time"}
+      }
+    }
+  }
+}
