@@ -1443,3 +1443,8 @@ pytest tests/test_contract_signals.py tests/test_fear_regime.py -v → 24 passed
 - Verified `python3 -m py_compile` for touched modules, focused tests (19 passed), `PYTHONPATH=. pytest tests` (567 passed, 1 warning), and `./scripts/run_tests.sh` (`STATUS: ALL GATES PASS`).
 - No manual main run, order action, cron change, risk/threshold/category/price/expiry change, weather change, service restart, commit, push, or secret output. New runtime diagnostic fields await a scheduled micro-live run.
 - Proof: `/tmp/proof_pm_main_order_intent_to_submission_gap_diagnosis_20260710T132252Z`.
+## 2026-07-10 - Main Order Intent-to-Submission Diagnostics Accepted
+
+- Operator manual QA accepted commit `a0f20af444a3e59c2bfd4314c57b467854ac88e0` (`MANUAL_QA_STATUS=PASS_operator_accepted`).
+- The accepted diagnostic-only change aligns the gate summary to `logs/cron_micro_live.log`, identifies both tool artifacts, and records future-run redacted post-intent diagnostics.
+- Accepted commit remains equal to `origin/feat/ibkr-forecast-integration`; no runtime configuration, cron, weather state, service, or order action changed during acceptance recording.

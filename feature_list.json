@@ -29,12 +29,17 @@
     "notes": "Diagnostic-only source/test change. No cron/runtime/weather/threshold change, live manual run, order action, service restart, or secret print."
   },
   "pm_main_order_intent_to_submission_gap_diagnosis_20260710": {
-    "status": "built_validation_pass_manual_qa_pending",
-    "file": "scripts/main_run_gate_summary_redacted.py, scripts/main_edge_nearest_miss_redacted.py, strategies/kalshi_optimize.py, utils/edge_nearest_miss.py, tests/test_main_run_gate_summary_redacted.py, tests/test_main_edge_nearest_miss_redacted.py, docs/buglog/pm_main_order_intent_to_submission_gap_diagnosis_20260710.md",
-    "passes": false,
+    "status": "accepted_manual_qa_pass",
+    "file": "scripts/main_run_gate_summary_redacted.py, scripts/main_edge_nearest_miss_redacted.py, strategies/kalshi_optimize.py, utils/edge_nearest_miss.py, tests/test_main_run_gate_summary_redacted.py, tests/test_main_edge_nearest_miss_redacted.py, docs/buglog/pm_main_order_intent_to_submission_gap_diagnosis_20260710.md, manual_qa_checklist.md",
+    "passes": true,
+    "accepted": true,
+    "validation_passed": true,
     "manual_qa_required": true,
-    "pushed": false,
-    "commit": "not_committed",
+    "manual_qa_completed": true,
+    "manual_qa_status": "PASS_operator_accepted",
+    "pushed": true,
+    "commit": "a0f20af444a3e59c2bfd4314c57b467854ac88e0",
+    "accepted_commit": "a0f20af444a3e59c2bfd4314c57b467854ac88e0",
     "proof_dir": "/tmp/proof_pm_main_order_intent_to_submission_gap_diagnosis_20260710T132252Z",
     "description": "Diagnose and repair redacted diagnostic artifact selection for the main order-intent-to-submission gap without changing trading behavior.",
     "changes": [
@@ -48,8 +53,8 @@
       "PYTHONPATH=. pytest tests -> 567 passed, 1 warning",
       "./scripts/run_tests.sh -> STATUS: ALL GATES PASS"
     ],
-    "result": "PASS_VALIDATION_MANUAL_QA_PENDING",
-    "notes": "The historical 08:00Z versus 12:01Z discrepancy was an artifact-selection mismatch. The new fields need one scheduled micro-live run for runtime confirmation; no live run was manually invoked."
+    "result": "PASS_OPERATOR_ACCEPTED",
+    "notes": "Operator accepted commit a0f20af444a3e59c2bfd4314c57b467854ac88e0. The historical 08:00Z versus 12:01Z discrepancy was an artifact-selection mismatch; no live run was manually invoked in the implementation phase."
   },
   "pm_main_runtime_categories_and_inventory_decode_fix_20260709": {
     "status": "accepted_manual_qa_pass",
