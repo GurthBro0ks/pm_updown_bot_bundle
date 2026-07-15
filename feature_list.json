@@ -10,8 +10,8 @@
     "manual_qa_status": "pending_operator_qa",
     "production_capture_enabled": false,
     "phase_1b_activation_authorized": false,
-    "pushed": false,
-    "commit": "pending_commit_sha_reported_in_closeout",
+    "pushed": true,
+    "commit": "a0436bf4c14c39549ae7c20cd91fa726d531a889",
     "description": "Disabled-by-default, explicit-path, failure-isolated shadow capture of public candidate evaluation events into the append-only Phase 1A SQLite ledger.",
     "result": "PASS_VALIDATION_MANUAL_QA_PENDING",
     "notes": "No installed cron activation, trading-decision input, external transmission, GreedBot integration, weather change, or autonomous self-modification. Operator QA and independent safety review remain required."
