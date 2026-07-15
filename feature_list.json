@@ -1,16 +1,23 @@
 {
   "pm_candidate_ledger_replay_foundation_phase1a_20260715": {
-    "status": "built_validation_pass_manual_qa_pending",
+    "status": "accepted_manual_qa_pass",
     "file": "schemas/candidate_ledger/v1.schema.json, docs/research/candidate-ledger-v1.md, docs/research/candidate-ledger-architecture.md, research/candidate_ledger/, scripts/candidate_ledger_*.py, scripts/candidate_replay_evaluate.py, tests/test_candidate_ledger_*.py, tests/conftest.py, docs/buglog/pm_candidate_ledger_replay_foundation_phase1a_20260715.md",
-    "passes": false,
-    "accepted": false,
+    "passes": true,
+    "accepted": true,
     "validation_passed": true,
     "manual_qa_required": true,
-    "manual_qa_completed": false,
-    "manual_qa_status": "pending_operator_qa",
+    "manual_qa_completed": true,
+    "manual_qa_status": "PASS_operator_accepted",
+    "independent_review_status": "PASS",
+    "independent_review_proof_dir": "/tmp/proof_pm_candidate_ledger_replay_phase1a_independent_review_20260715T161040Z",
     "pushed": true,
     "commit": "c2dd1e080a4834c87ab0e01b6c9cb64014ba1e26",
+    "accepted_commit": "9c37bdf516ffc82fcd55c41ff3fa081f4208bfdc",
     "proof_dir": "/tmp/proof_pm_candidate_ledger_replay_foundation_phase1a_20260715T154301Z",
+    "persistent_proof_dir": "proofs/pm_updown_bot_bundle/proof_pm_candidate_ledger_replay_foundation_phase1a_20260715T154301Z",
+    "persistent_independent_review_proof_dir": "proofs/pm_updown_bot_bundle/proof_pm_candidate_ledger_replay_phase1a_independent_review_20260715T161040Z",
+    "production_capture_enabled": false,
+    "phase_1b_authorized": false,
     "description": "Offline-only QuantAgent-inspired candidate-ledger and deterministic replay foundation with no production capture, runner wiring, external API, GreedBot integration, or autonomous self-modification path.",
     "changes": [
       "Added a closed versioned v1 candidate schema with explicit secret-bearing-field prohibition",
@@ -26,10 +33,11 @@
       "PYTHONPATH=. pytest tests -q -> 609 passed, 1 pre-existing dependency warning",
       "./scripts/run_tests.sh -> STATUS: ALL GATES PASS",
       "direct local CLI init/validate/summary/replay deterministic smoke -> PASS",
-      "production-isolation tests -> PASS"
+      "production-isolation tests -> PASS",
+      "independent Claude safety/architecture review (proof_pm_candidate_ledger_replay_phase1a_independent_review_20260715T161040Z) -> PASS, re-ran all validation independently with matching results"
     ],
-    "result": "PASS_VALIDATION_MANUAL_QA_PENDING",
-    "notes": "Phase 1A foundation only. No production candidate capture, trading behavior, thresholds, cron, weather, service, secrets, external transmission, GreedBot integration, or self-modifying strategy path. Phase 1B requires separate approval."
+    "result": "PASS_OPERATOR_ACCEPTED",
+    "notes": "Phase 1A foundation only. No production candidate capture, trading behavior, thresholds, cron, weather, service, secrets, external transmission, GreedBot integration, or self-modifying strategy path. Operator accepted commit 9c37bdf516ffc82fcd55c41ff3fa081f4208bfdc after independent Claude review passed. Phase 1B requires separate explicit approval and remains unauthorized."
   },
   "pm_main_micro_live_gate_failure_kind_diagnostic_20260709": {
     "status": "built_validation_pass_manual_qa_pending",
