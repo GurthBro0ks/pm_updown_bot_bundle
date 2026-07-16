@@ -175,3 +175,85 @@ def test_capture_busy_failure_does_not_change_strategy_exit(monkeypatch, tmp_pat
         lock.rollback()
         lock.close()
     assert disabled == busy_capture == (0, 1, 1)
+
+
+def _failed_prior_validation() -> dict[str, object]:
+    return {
+        "passed": False,
+        "adjusted_prior": 0.70,
+        "confidence": 0.0,
+        "flags": ["synthetic"],
+        "reason": "synthetic prior rejection",
+    }
+
+
+def test_prior_failure_helpers_stay_behind_nearest_miss_guard(monkeypatch, tmp_path):
+    market = _market("KXPRIOR-GUARD-FALSE")
+    _configure_strategy(monkeypatch, tmp_path, [market])
+    monkeypatch.setenv("CANDIDATE_LEDGER_SHADOW_ENABLED", "false")
+    monkeypatch.delenv("CANDIDATE_LEDGER_DB_PATH", raising=False)
+    monkeypatch.setattr(kalshi_optimize, "validate_prior", lambda **_: _failed_prior_validation())
+    monkeypatch.setattr(kalshi_optimize, "make_nearest_miss", None)
+
+    def unexpected_helper(*_args, **_kwargs):
+        raise AssertionError("guarded edge helper was invoked")
+
+    monkeypatch.setattr(kalshi_optimize, "calculate_edge_pct", unexpected_helper)
+    monkeypatch.setattr(kalshi_optimize, "get_edge_after_fees", unexpected_helper)
+
+    result = kalshi_optimize.optimize_kalshi_strategy(
+        mode="shadow",
+        bankroll=100.0,
+        max_pos_usd=10.0,
+        dry_run=True,
+    )
+
+    assert result == (0, 1, 1)
+    assert not (tmp_path / "candidate-ledger.sqlite3").exists()
+    summary = json.loads((tmp_path / "nearest.json").read_text())
+    assert summary["SHADOW_CAPTURE_ENABLED"] == "false"
+    assert summary["SHADOW_CAPTURE_STATUS"] == "DISABLED"
+
+
+def test_prior_failure_helpers_run_inside_true_guard_without_decision_change(monkeypatch, tmp_path):
+    market = _market("KXPRIOR-GUARD-TRUE")
+    _configure_strategy(monkeypatch, tmp_path, [market])
+    database = tmp_path / "candidate-ledger.sqlite3"
+    monkeypatch.setenv("CANDIDATE_LEDGER_SHADOW_ENABLED", "true")
+    monkeypatch.setenv("CANDIDATE_LEDGER_DB_PATH", str(database))
+    monkeypatch.setattr(kalshi_optimize, "validate_prior", lambda **_: _failed_prior_validation())
+    calls = {"raw": 0, "fee": 0, "nearest": 0}
+    original_nearest = kalshi_optimize.make_nearest_miss
+
+    def raw_edge(*_args, **_kwargs):
+        calls["raw"] += 1
+        return 40.0
+
+    def fee_edge(*_args, **_kwargs):
+        calls["fee"] += 1
+        return 35.0
+
+    def nearest(**kwargs):
+        calls["nearest"] += 1
+        return original_nearest(**kwargs)
+
+    monkeypatch.setattr(kalshi_optimize, "calculate_edge_pct", raw_edge)
+    monkeypatch.setattr(kalshi_optimize, "get_edge_after_fees", fee_edge)
+    monkeypatch.setattr(kalshi_optimize, "make_nearest_miss", nearest)
+
+    result = kalshi_optimize.optimize_kalshi_strategy(
+        mode="shadow",
+        bankroll=100.0,
+        max_pos_usd=10.0,
+        dry_run=True,
+    )
+
+    assert result == (0, 1, 1)
+    assert calls == {"raw": 1, "fee": 1, "nearest": 1}
+    summary = json.loads((tmp_path / "nearest.json").read_text())
+    assert summary["SHADOW_CAPTURE_ENABLED"] == "true"
+    assert summary["SHADOW_CAPTURE_STATUS"] == "PASS"
+    with CandidateLedger.open_read_only(database) as ledger:
+        candidate = next(ledger.candidate_payloads())
+        assert candidate["decision"]["rejection_reason"] == "prior_validation_failed"
+        assert candidate["decision"]["order_intent_created"] is False

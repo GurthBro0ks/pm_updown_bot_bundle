@@ -8,7 +8,7 @@ import sqlite3
 from typing import Any, Iterable, Iterator, Mapping
 from urllib.parse import quote
 
-from .migrations import migrate, validate_migrations
+from .migrations import LATEST_MIGRATION, migrate, validate_migrations
 from .models import (
     SCHEMA_VERSION,
     AppendResult,
@@ -102,7 +102,7 @@ class CandidateLedger:
             row = self.connection.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()
         except sqlite3.DatabaseError as exc:
             raise ValidationError("database is not an initialized candidate ledger") from exc
-        if not row or int(row[0]) != 1:
+        if not row or int(row[0]) != LATEST_MIGRATION:
             raise ValidationError("database migration version is unsupported")
 
     def close(self) -> None:
@@ -114,12 +114,21 @@ class CandidateLedger:
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         self.close()
 
-    def _candidate_snapshot(self, candidate_id: str) -> Mapping[str, Any] | None:
+    def _candidate_snapshot(
+        self,
+        candidate_id: str,
+        cache: dict[str, Mapping[str, Any] | None] | None = None,
+    ) -> Mapping[str, Any] | None:
+        if cache is not None and candidate_id in cache:
+            return cache[candidate_id]
         row = self.connection.execute(
             "SELECT payload_json FROM candidate_events WHERE candidate_id=? AND event_type='candidate_observed'",
             (candidate_id,),
         ).fetchone()
-        return json.loads(row[0]) if row else None
+        snapshot = json.loads(row[0]) if row else None
+        if cache is not None:
+            cache[candidate_id] = snapshot
+        return snapshot
 
     def _existing_assignment(self, candidate_id: str, experiment_id: str) -> Mapping[str, Any] | None:
         rows = self.connection.execute(
@@ -139,12 +148,13 @@ class CandidateLedger:
         event_type: str,
         event_timestamp: str,
         payload: Mapping[str, Any],
+        candidate_snapshots: dict[str, Mapping[str, Any] | None] | None = None,
     ) -> None:
-        snapshot = self._candidate_snapshot(candidate_id)
         if event_type == "candidate_observed":
             if payload["identity"]["candidate_id"] != candidate_id:
                 raise ValidationError("candidate_id does not match candidate_observed payload")
             return
+        snapshot = self._candidate_snapshot(candidate_id, candidate_snapshots)
         if snapshot is None:
             raise ValidationError("candidate_observed must be appended before later events")
         run_time = parse_utc_timestamp(snapshot["identity"]["run_timestamp"], field="candidate.run_timestamp")
@@ -198,7 +208,7 @@ class CandidateLedger:
         )
         self.connection.execute("BEGIN IMMEDIATE")
         try:
-            result = self._append_prepared_event(prepared)
+            result = self._append_prepared_event(prepared, {})
             self.connection.commit()
             return result
         except Exception:
@@ -223,7 +233,11 @@ class CandidateLedger:
             return []
         self.connection.execute("BEGIN IMMEDIATE")
         try:
-            results = [self._append_prepared_event(event) for event in prepared]
+            candidate_snapshots: dict[str, Mapping[str, Any] | None] = {}
+            results = [
+                self._append_prepared_event(event, candidate_snapshots)
+                for event in prepared
+            ]
             self.connection.commit()
             return results
         except Exception:
@@ -268,7 +282,11 @@ class CandidateLedger:
             "event_id": resolved_event_id,
         }
 
-    def _append_prepared_event(self, event: Mapping[str, Any]) -> AppendResult:
+    def _append_prepared_event(
+        self,
+        event: Mapping[str, Any],
+        candidate_snapshots: dict[str, Mapping[str, Any] | None],
+    ) -> AppendResult:
         candidate_id = event["candidate_id"]
         event_type = event["event_type"]
         event_timestamp = event["event_timestamp"]
@@ -297,8 +315,11 @@ class CandidateLedger:
             event_type=event_type,
             event_timestamp=event_timestamp,
             payload=payload,
+            candidate_snapshots=candidate_snapshots,
         )
-        if event_type == "candidate_observed" and self._candidate_snapshot(candidate_id) is not None:
+        if event_type == "candidate_observed" and self._candidate_snapshot(
+            candidate_id, candidate_snapshots
+        ) is not None:
             raise DuplicateCandidateError("candidate snapshot already exists")
         cursor = self.connection.execute(
                 """
@@ -318,6 +339,8 @@ class CandidateLedger:
                     utc_now(),
                 ),
             )
+        if event_type == "candidate_observed":
+            candidate_snapshots[candidate_id] = payload
         return AppendResult(resolved_event_id, int(cursor.lastrowid), True)
 
     def history(self, candidate_id: str) -> list[StoredEvent]:
@@ -372,13 +395,16 @@ class CandidateLedger:
             "raw_candidates_included": False,
         }
 
-    def validate(self) -> dict[str, Any]:
-        """Validate migrations, hashes, event payloads, and candidate history."""
-
-        migration = validate_migrations(self.connection)
+    def _validate_rows(
+        self,
+        rows: Iterable[sqlite3.Row],
+        *,
+        exhaustive_relationships: bool = False,
+    ) -> tuple[int, list[str]]:
         checked = 0
         errors: list[str] = []
-        for row in self.connection.execute("SELECT * FROM candidate_events ORDER BY sequence"):
+        observed_candidates: set[str] = set()
+        for row in rows:
             checked += 1
             try:
                 payload = json.loads(row["payload_json"])
@@ -387,14 +413,80 @@ class CandidateLedger:
                 if row["schema_version"] != SCHEMA_VERSION:
                     raise ValidationError("unsupported stored schema version")
                 validate_event_payload(row["event_type"], payload)
-                if row["event_type"] == "candidate_observed" and payload["identity"]["candidate_id"] != row["candidate_id"]:
+                if (
+                    row["event_type"] == "candidate_observed"
+                    and payload["identity"]["candidate_id"] != row["candidate_id"]
+                ):
                     raise ValidationError("stored candidate id mismatch")
             except (json.JSONDecodeError, ValidationError) as exc:
                 errors.append(f"sequence {row['sequence']}: {exc}")
+            if exhaustive_relationships:
+                candidate_id = str(row["candidate_id"])
+                if row["event_type"] == "candidate_observed":
+                    observed_candidates.add(candidate_id)
+                elif candidate_id not in observed_candidates:
+                    errors.append(
+                        f"sequence {row['sequence']}: candidate_observed relationship missing or out of order"
+                    )
+        return checked, errors
+
+    def validate_quick(self, *, recent_event_limit: int = 100) -> dict[str, Any]:
+        """Validate structure and a bounded recent payload window."""
+
+        if type(recent_event_limit) is not int or not 1 <= recent_event_limit <= 1000:
+            raise ValidationError("recent_event_limit must be an integer from 1 to 1000")
+        migration = validate_migrations(self.connection)
+        rows = self.connection.execute(
+            "SELECT * FROM candidate_events ORDER BY sequence DESC LIMIT ?",
+            (recent_event_limit,),
+        ).fetchall()
+        checked, errors = self._validate_rows(rows)
+        checked_relationships: set[str] = set()
+        for row in rows:
+            candidate_id = str(row["candidate_id"])
+            if row["event_type"] == "candidate_observed" or candidate_id in checked_relationships:
+                continue
+            checked_relationships.add(candidate_id)
+            snapshot = self.connection.execute(
+                "SELECT 1 FROM candidate_events "
+                "WHERE candidate_id=? AND event_type='candidate_observed' LIMIT 1",
+                (candidate_id,),
+            ).fetchone()
+            if snapshot is None:
+                errors.append(
+                    f"sequence {row['sequence']}: candidate_observed relationship missing"
+                )
         return {
             "valid": bool(migration["valid"]) and not errors,
+            "validation_mode": "quick",
             "migration": migration,
             "events_checked": checked,
+            "recent_event_limit": recent_event_limit,
+            "historical_payloads_fully_validated": False,
+            "scope": "structural integrity plus bounded recent payload and relationship checks",
             "error_count": len(errors),
             "errors": errors[:20],
         }
+
+    def validate_deep(self) -> dict[str, Any]:
+        """Exhaustively validate all payloads and candidate/event relationships."""
+
+        migration = validate_migrations(self.connection)
+        rows = self.connection.execute("SELECT * FROM candidate_events ORDER BY sequence")
+        checked, errors = self._validate_rows(rows, exhaustive_relationships=True)
+        return {
+            "valid": bool(migration["valid"]) and not errors,
+            "validation_mode": "deep",
+            "migration": migration,
+            "events_checked": checked,
+            "recent_event_limit": None,
+            "historical_payloads_fully_validated": True,
+            "scope": "exhaustive historical payload, hash, schema, and relationship checks",
+            "error_count": len(errors),
+            "errors": errors[:20],
+        }
+
+    def validate(self) -> dict[str, Any]:
+        """Backward-compatible exhaustive validation alias."""
+
+        return self.validate_deep()

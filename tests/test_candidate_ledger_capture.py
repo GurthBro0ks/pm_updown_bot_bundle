@@ -257,6 +257,25 @@ def test_capture_uses_one_append_batch(tmp_path, monkeypatch):
     assert calls == [5]
 
 
+def test_capture_reuses_candidate_snapshot_within_append_batch(tmp_path, monkeypatch):
+    database = tmp_path / "snapshot-cache.sqlite3"
+    cache_misses = 0
+    original = CandidateLedger._candidate_snapshot
+
+    def tracked(self, candidate_id, cache=None):
+        nonlocal cache_misses
+        if cache is None or candidate_id not in cache:
+            cache_misses += 1
+        return original(self, candidate_id, cache)
+
+    monkeypatch.setattr(CandidateLedger, "_candidate_snapshot", tracked)
+    runtime = _runtime(database)
+    assert _record(runtime, market=_market("KXONE"))
+    assert _record(runtime, market=_market("KXTWO"), order_intent=True)
+    assert runtime.flush().status == "PASS"
+    assert cache_misses == 2
+
+
 def test_status_cli_direct_invocation_is_bounded(tmp_path):
     database = tmp_path / "status.sqlite3"
     runtime = _runtime(database)

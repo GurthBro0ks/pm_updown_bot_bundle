@@ -31,8 +31,15 @@ def _fields(database: Path) -> tuple[dict[str, object], int]:
         "OFFLINE_OR_SHADOW_ONLY": "true",
         "DATABASE_EXISTS": "yes" if database.is_file() else "no",
         "SCHEMA_VERSION": "",
+        "MIGRATION_VERSION": 0,
         "MIGRATION_VALID": "false",
         "APPEND_ONLY_ENFORCED": "false",
+        "SCHEMA_METADATA_VALID": "false",
+        "REQUIRED_INDEXES_PRESENT": "false",
+        "INTEGRITY_STATUS": "unknown",
+        "VALIDATION_MODE": "quick",
+        "HISTORICAL_PAYLOADS_FULLY_VALIDATED": "false",
+        "RECENT_EVENTS_CHECKED": 0,
         "LATEST_RUN_ID": "none",
         "LATEST_RUN_TIMESTAMP": "none",
         "CANDIDATE_OBSERVED_COUNT": 0,
@@ -50,10 +57,19 @@ def _fields(database: Path) -> tuple[dict[str, object], int]:
     try:
         with CandidateLedger.open_read_only(database) as ledger:
             summary = ledger.summary()
-            validation = ledger.validate()
+            validation = ledger.validate_quick()
             output["SCHEMA_VERSION"] = summary["schema_version"]
+            output["MIGRATION_VERSION"] = int(validation["migration"]["migration_version"])
             output["MIGRATION_VALID"] = str(bool(validation["migration"]["migration_current"])).lower()
             output["APPEND_ONLY_ENFORCED"] = str(bool(validation["migration"]["append_only_enforced"])).lower()
+            output["SCHEMA_METADATA_VALID"] = str(
+                bool(validation["migration"]["schema_metadata_valid"])
+            ).lower()
+            output["REQUIRED_INDEXES_PRESENT"] = str(
+                bool(validation["migration"]["required_indexes_present"])
+            ).lower()
+            output["INTEGRITY_STATUS"] = str(validation["migration"]["integrity"])
+            output["RECENT_EVENTS_CHECKED"] = int(validation["events_checked"])
             for event_type, field_name in EVENT_FIELD_NAMES.items():
                 output[field_name] = int(summary["event_counts"].get(event_type, 0))
             row = ledger.connection.execute(

@@ -1260,9 +1260,9 @@ def optimize_kalshi_strategy(
                 )
 
             if not val_result["passed"]:
-                prior_raw_edge = calculate_edge_pct(true_price, yes_price, market_id)
-                prior_fee_edge = get_edge_after_fees(market, true_price=true_price)
                 if make_nearest_miss is not None:
+                    prior_raw_edge = calculate_edge_pct(true_price, yes_price, market_id)
+                    prior_fee_edge = get_edge_after_fees(market, true_price=true_price)
                     nearest_misses.append(make_nearest_miss(
                         market=market,
                         side="yes",
@@ -1273,20 +1273,20 @@ def optimize_kalshi_strategy(
                         required_threshold=risk_caps["edge_after_fees_pct"],
                         rejection_reason="prior_validation_failed",
                     ))
-                _record_shadow_candidate(
-                    capture_runtime,
-                    market=market,
-                    observed_price=yes_price,
-                    ai_prior=true_price,
-                    fallback_prior_used=bool(market.get("_ai_prior_is_fallback")),
-                    raw_edge=prior_raw_edge,
-                    fee_adjusted_edge=prior_fee_edge,
-                    required_threshold=risk_caps["edge_after_fees_pct"],
-                    rejection_reason="prior_validation_failed",
-                    gate_failure_kinds=["prior_validation"],
-                    order_intent_created=False,
-                    expected_value=prior_fee_edge,
-                )
+                    _record_shadow_candidate(
+                        capture_runtime,
+                        market=market,
+                        observed_price=yes_price,
+                        ai_prior=true_price,
+                        fallback_prior_used=bool(market.get("_ai_prior_is_fallback")),
+                        raw_edge=prior_raw_edge,
+                        fee_adjusted_edge=prior_fee_edge,
+                        required_threshold=risk_caps["edge_after_fees_pct"],
+                        rejection_reason="prior_validation_failed",
+                        gate_failure_kinds=["prior_validation"],
+                        order_intent_created=False,
+                        expected_value=prior_fee_edge,
+                    )
                 continue
 
             # Use adjusted prior for sizing if validation passed

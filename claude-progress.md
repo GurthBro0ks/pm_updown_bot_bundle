@@ -1514,3 +1514,44 @@ database path is supplied.
 - Independent safety/architecture review and operator manual QA.
 - Production shadow-capture activation requires a separate fresh exact-bounded
   approval and remains unauthorized.
+# 2026-07-16 (pm_candidate_ledger_shadow_capture_phase1b_accumulated_readpath_optimization — PASS, QA Pending)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / candidate ledger Phase 1B hardening
+**Type:** Disabled-by-default local source/test/read-path optimization
+**Proof:** `/tmp/proof_pm_candidate_ledger_shadow_capture_phase1b_accumulated_readpath_optimization_20260716T154139Z`
+**Manual QA:** pending_operator_qa
+
+### Summary
+
+Resolved the accumulated-ledger read-path blocker with migration v2, one
+query-plan-justified composite index, truthful quick versus exhaustive deep
+validation, and transaction-local candidate snapshot reuse. Preserved the
+prior helper-control-flow fix and accumulated benchmark tooling.
+
+### Verified
+
+- Preflight matched the exact five-file prior WARN handoff at
+  `HEAD == origin == 35622c7d02ae6dc65ea49830b4b76f992d77b166`.
+- Focused ledger/capture/read-path suite: 84 passed.
+- Full repository suite: 651 passed with one pre-existing dependency warning.
+- `./scripts/run_tests.sh`: exit 0, `STATUS: ALL GATES PASS`.
+- Full accumulated benchmark at 0/1k/10k/50k candidates: `PASS_BOUNDED` for
+  capture, reads, and overall readiness.
+- At 50k/176,262 events: capture p95/p99 181.676/183.899 ms; status p95
+  1,870.418 ms; quick validation p95 1,533.832 ms; deep validation p95
+  32,903.771 ms; populated migration 2,291.014 ms; DB 262,238,208 bytes.
+- Append-only triggers, v1-to-v2 history preservation, migration rollback,
+  future-version fail-closed behavior, busy-lock isolation, disabled no-DB,
+  behavior equivalence, redacted output, and no-network tests passed.
+- Sanitized cron/source checks: max-days 3, capture flag/path absent, cron
+  wrappers unchanged, capture disabled, no production candidate-ledger DB.
+
+### Safety and remaining work
+
+No capture activation, live/manual run, order action, trading/weather/category/
+threshold change, cron/runtime/service/Caddy/DNS/systemd/timer/tmux change,
+external data, or secret output. Network-backed Kalshi health/inventory tools
+were intentionally skipped because this phase prohibited external APIs.
+Independent targeted review and operator manual QA remain pending; runtime
+activation still requires separate approval.

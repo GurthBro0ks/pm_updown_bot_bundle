@@ -7,7 +7,28 @@ import sqlite3
 from .models import EVENT_TYPES, utc_now
 
 
-LATEST_MIGRATION = 1
+LATEST_MIGRATION = 2
+
+EXPECTED_EVENT_COLUMNS = (
+    "sequence",
+    "event_id",
+    "candidate_id",
+    "event_type",
+    "event_timestamp",
+    "schema_version",
+    "payload_json",
+    "payload_sha256",
+    "created_at",
+)
+EXPECTED_APPEND_ONLY_TRIGGERS = {
+    "candidate_events_no_update",
+    "candidate_events_no_delete",
+}
+EXPECTED_INDEXES = {
+    "one_candidate_snapshot",
+    "candidate_event_history",
+    "candidate_event_type_time",
+}
 
 
 def _apply_v1(connection: sqlite3.Connection) -> None:
@@ -53,6 +74,13 @@ def _apply_v1(connection: sqlite3.Connection) -> None:
     )
 
 
+def _apply_v2(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        "CREATE INDEX candidate_event_type_time "
+        "ON candidate_events(event_type, event_timestamp DESC, sequence DESC)"
+    )
+
+
 def migrate(connection: sqlite3.Connection) -> int:
     """Apply all migrations transactionally and return the current version."""
 
@@ -73,6 +101,13 @@ def migrate(connection: sqlite3.Connection) -> int:
                 (1, utc_now()),
             )
             current = 1
+        if current < 2:
+            _apply_v2(connection)
+            connection.execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                (2, utc_now()),
+            )
+            current = 2
         connection.commit()
         return current
     except Exception:
@@ -81,7 +116,7 @@ def migrate(connection: sqlite3.Connection) -> int:
 
 
 def validate_migrations(connection: sqlite3.Connection) -> dict[str, object]:
-    """Validate migration version, append-only triggers, and SQLite integrity."""
+    """Validate versioned schema metadata, append-only triggers, and integrity."""
 
     row = connection.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations").fetchone()
     version = int(row[0])
@@ -91,13 +126,34 @@ def validate_migrations(connection: sqlite3.Connection) -> dict[str, object]:
             "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='candidate_events'"
         )
     }
+    indexes = {
+        row[0]
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='candidate_events'"
+        )
+    }
+    columns = tuple(
+        str(row[1]) for row in connection.execute("PRAGMA table_info(candidate_events)")
+    )
     integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
-    expected = {"candidate_events_no_update", "candidate_events_no_delete"}
+    append_only_enforced = EXPECTED_APPEND_ONLY_TRIGGERS.issubset(triggers)
+    required_indexes_present = EXPECTED_INDEXES.issubset(indexes)
+    schema_metadata_valid = columns == EXPECTED_EVENT_COLUMNS
     return {
         "migration_version": version,
         "migration_current": version == LATEST_MIGRATION,
         "append_only_triggers": sorted(triggers),
-        "append_only_enforced": expected.issubset(triggers),
+        "append_only_enforced": append_only_enforced,
+        "indexes": sorted(indexes),
+        "required_indexes_present": required_indexes_present,
+        "schema_columns": list(columns),
+        "schema_metadata_valid": schema_metadata_valid,
         "integrity": integrity,
-        "valid": version == LATEST_MIGRATION and expected.issubset(triggers) and integrity == "ok",
+        "valid": (
+            version == LATEST_MIGRATION
+            and append_only_enforced
+            and required_indexes_present
+            and schema_metadata_valid
+            and integrity == "ok"
+        ),
     }
