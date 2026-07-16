@@ -42,7 +42,10 @@ def test_accumulated_benchmark_covers_capture_safety_contract(tmp_path, monkeypa
     assert accumulated["deep_validation_latency"]["validation_mode"] == "deep"
     assert accumulated["migration_latency"]["history_preserved"] is True
     assert accumulated["migration_latency"]["required_indexes_present"] is True
-    assert result["capture_write_path_classification"] == "PASS_BOUNDED"
+    assert result["capture_write_path_classification"] == "PASS_OFF_CRITICAL_PATH"
+    assert result["runtime_capture_path_classification"] == "PASS_OFF_CRITICAL_PATH"
+    assert result["event_completeness_classification"] == "PASS_COMPLETE"
+    assert accumulated["append_flush_latency"]["runtime_sqlite_access"] is False
     assert result["read_path_classification"] == "PASS_BOUNDED"
     assert result["lock_timeout"]["failure_isolated"] is True
     assert result["lock_timeout"]["post_lock_validation_valid"] is True

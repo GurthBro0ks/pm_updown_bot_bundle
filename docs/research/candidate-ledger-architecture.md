@@ -4,8 +4,9 @@
    snapshot. New evidence is another event.
 2. **Standard library only.** SQLite, JSON, hashing, datetime, and CLI handling
    use Python standard-library modules. There is no network dependency.
-3. **Single writer.** `BEGIN IMMEDIATE` makes the bounded writer contract
-   explicit. Read-only tools open SQLite with `mode=ro`.
+3. **Runtime spool, offline SQLite writer.** Runtime capture publishes one
+   immutable local batch and never opens SQLite. The explicit offline ingest
+   tool uses `BEGIN IMMEDIATE`; read-only tools open SQLite with `mode=ro`.
 4. **Fees are inputs.** Missing maker/taker fees remain unknown; the replay
    layer never invents exchange constants.
 5. **Chronology is an invariant.** UTC cutoffs are ordered and assignments are
@@ -17,9 +18,13 @@
    the adapter never returns ledger data to the decision path.
 7. **Bounded summaries.** CLIs emit counts and aggregate metrics, never raw
    candidate payloads by default.
-8. **Failure is non-authoritative.** Configuration, validation, lock, migration,
-   and write failures are reduced to redacted status counts and cannot change
-   trading decisions or process exit status.
-9. **Activation is separate.** Source support is disabled by default, no
-   database path is tracked, and installed cron activation requires a distinct
-   exact-bounded approval.
+8. **Failure is non-authoritative.** Configuration, validation, spool capacity,
+   lock, corruption, migration, and ingest failures are reduced to redacted
+   status counts and cannot change trading decisions or process exit status.
+9. **Durability is bounded and honest.** A batch is durable only after atomic
+   local publication. Spool bytes, batch count, candidates, events, and batch
+   size are bounded. No runtime deletion or rotation can discard history.
+   Offline ingest is atomic and idempotent and retains source batches.
+10. **Activation is separate.** Source support is disabled by default, no spool
+    or database path is tracked, and installed cron activation requires a
+    distinct exact-bounded approval.

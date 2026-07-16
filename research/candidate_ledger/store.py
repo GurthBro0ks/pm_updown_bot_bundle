@@ -245,6 +245,64 @@ class CandidateLedger:
                 self.connection.rollback()
             raise
 
+    def ingest_spool_batch(
+        self,
+        *,
+        batch_id: str,
+        body_sha256: str,
+        events: Iterable[Mapping[str, Any]],
+    ) -> tuple[str, list[AppendResult]]:
+        """Atomically append an immutable spool batch and its idempotency marker."""
+
+        if self.read_only:
+            raise ValidationError("read-only ledger cannot ingest a spool batch")
+        prepared = [
+            self._prepare_event(
+                candidate_id=event["candidate_id"],
+                event_type=event["event_type"],
+                event_timestamp=event["event_timestamp"],
+                payload=event["payload"],
+                event_id=event.get("event_id"),
+            )
+            for event in events
+        ]
+        if not prepared:
+            raise ValidationError("spool batch must contain events")
+        if not batch_id.startswith("batch_") or len(batch_id) > 128:
+            raise ValidationError("spool batch id is invalid")
+        if len(body_sha256) != 64:
+            raise ValidationError("spool batch checksum is invalid")
+        self.connection.execute("BEGIN IMMEDIATE")
+        try:
+            existing = self.connection.execute(
+                "SELECT body_sha256,event_count FROM candidate_spool_batches WHERE batch_id=?",
+                (batch_id,),
+            ).fetchone()
+            if existing:
+                if (
+                    existing["body_sha256"] == body_sha256
+                    and int(existing["event_count"]) == len(prepared)
+                ):
+                    self.connection.commit()
+                    return "already_present", []
+                raise DuplicateEventError("spool batch id already exists with different content")
+            candidate_snapshots: dict[str, Mapping[str, Any] | None] = {}
+            results = [
+                self._append_prepared_event(event, candidate_snapshots)
+                for event in prepared
+            ]
+            self.connection.execute(
+                "INSERT INTO candidate_spool_batches(batch_id,body_sha256,event_count,ingested_at) "
+                "VALUES (?,?,?,?)",
+                (batch_id, body_sha256, len(prepared), utc_now()),
+            )
+            self.connection.commit()
+            return "ingested", results
+        except Exception:
+            if self.connection.in_transaction:
+                self.connection.rollback()
+            raise
+
     def _prepare_event(
         self,
         *,

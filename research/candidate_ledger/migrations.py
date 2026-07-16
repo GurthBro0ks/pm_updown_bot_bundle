@@ -7,7 +7,7 @@ import sqlite3
 from .models import EVENT_TYPES, utc_now
 
 
-LATEST_MIGRATION = 2
+LATEST_MIGRATION = 3
 
 EXPECTED_EVENT_COLUMNS = (
     "sequence",
@@ -23,6 +23,8 @@ EXPECTED_EVENT_COLUMNS = (
 EXPECTED_APPEND_ONLY_TRIGGERS = {
     "candidate_events_no_update",
     "candidate_events_no_delete",
+    "candidate_spool_batches_no_update",
+    "candidate_spool_batches_no_delete",
 }
 EXPECTED_INDEXES = {
     "one_candidate_snapshot",
@@ -81,6 +83,37 @@ def _apply_v2(connection: sqlite3.Connection) -> None:
     )
 
 
+def _apply_v3(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE candidate_spool_batches (
+            batch_id TEXT PRIMARY KEY,
+            body_sha256 TEXT NOT NULL,
+            event_count INTEGER NOT NULL,
+            ingested_at TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER candidate_spool_batches_no_update
+        BEFORE UPDATE ON candidate_spool_batches
+        BEGIN
+            SELECT RAISE(ABORT, 'candidate_spool_batches is append-only');
+        END
+        """
+    )
+    connection.execute(
+        """
+        CREATE TRIGGER candidate_spool_batches_no_delete
+        BEFORE DELETE ON candidate_spool_batches
+        BEGIN
+            SELECT RAISE(ABORT, 'candidate_spool_batches is append-only');
+        END
+        """
+    )
+
+
 def migrate(connection: sqlite3.Connection) -> int:
     """Apply all migrations transactionally and return the current version."""
 
@@ -108,6 +141,13 @@ def migrate(connection: sqlite3.Connection) -> int:
                 (2, utc_now()),
             )
             current = 2
+        if current < 3:
+            _apply_v3(connection)
+            connection.execute(
+                "INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)",
+                (3, utc_now()),
+            )
+            current = 3
         connection.commit()
         return current
     except Exception:
@@ -123,7 +163,7 @@ def validate_migrations(connection: sqlite3.Connection) -> dict[str, object]:
     triggers = {
         row[0]
         for row in connection.execute(
-            "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name='candidate_events'"
+            "SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name IN ('candidate_events','candidate_spool_batches')"
         )
     }
     indexes = {

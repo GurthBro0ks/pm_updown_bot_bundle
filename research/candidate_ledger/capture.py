@@ -8,63 +8,110 @@ from typing import Any, Mapping
 
 from .models import canonical_json
 from .schema import validate_candidate_payload, validate_event_payload
-from .store import CandidateLedger, validate_database_path
+from .spool import (
+    DEFAULT_MAX_BATCH_BYTES,
+    DEFAULT_MAX_EVENTS_PER_BATCH,
+    DEFAULT_MAX_SPOOL_BATCHES,
+    DEFAULT_MAX_SPOOL_BYTES,
+    MAX_BATCH_BYTES,
+    MAX_EVENTS_PER_BATCH,
+    MAX_SPOOL_BATCHES,
+    MAX_SPOOL_BYTES,
+    SpoolError,
+    write_batch,
+)
 
 
 DEFAULT_CAPTURE_MAX_PER_RUN = 100
-DEFAULT_SQLITE_TIMEOUT_MS = 250
 MAX_CAPTURE_MAX_PER_RUN = 1000
-MAX_SQLITE_TIMEOUT_MS = 2000
 
 
 @dataclass(frozen=True)
 class CaptureConfig:
     enabled: bool = False
-    database_path: str | None = None
+    spool_path: str | None = None
     max_per_run: int = DEFAULT_CAPTURE_MAX_PER_RUN
-    sqlite_timeout_ms: int = DEFAULT_SQLITE_TIMEOUT_MS
+    max_events_per_batch: int = DEFAULT_MAX_EVENTS_PER_BATCH
+    max_batch_bytes: int = DEFAULT_MAX_BATCH_BYTES
+    max_spool_bytes: int = DEFAULT_MAX_SPOOL_BYTES
+    max_spool_batches: int = DEFAULT_MAX_SPOOL_BATCHES
     warning_codes: tuple[str, ...] = ()
 
     @property
     def ready(self) -> bool:
-        return self.enabled and not self.warning_codes and bool(self.database_path)
+        return self.enabled and not self.warning_codes and bool(self.spool_path)
+
+    @property
+    def runtime_mode(self) -> str:
+        return "spool" if self.enabled else "disabled"
 
     @classmethod
     def from_environment(cls, environment: Mapping[str, str] | None = None) -> "CaptureConfig":
         values = os.environ if environment is None else environment
         enabled = str(values.get("CANDIDATE_LEDGER_SHADOW_ENABLED", "false")).strip().lower() == "true"
-        database_path = str(values.get("CANDIDATE_LEDGER_DB_PATH", "")).strip() or None
+        spool_path = str(values.get("CANDIDATE_LEDGER_SPOOL_PATH", "")).strip() or None
         warnings: list[str] = []
 
         max_per_run = DEFAULT_CAPTURE_MAX_PER_RUN
-        timeout_ms = DEFAULT_SQLITE_TIMEOUT_MS
+        max_events = DEFAULT_MAX_EVENTS_PER_BATCH
+        max_batch_bytes = DEFAULT_MAX_BATCH_BYTES
+        max_spool_bytes = DEFAULT_MAX_SPOOL_BYTES
+        max_spool_batches = DEFAULT_MAX_SPOOL_BATCHES
         if enabled:
-            if database_path is None:
-                warnings.append("database_path_required")
-            try:
-                max_per_run = int(
-                    str(values.get("CANDIDATE_LEDGER_CAPTURE_MAX_PER_RUN", DEFAULT_CAPTURE_MAX_PER_RUN))
-                )
-                if not 1 <= max_per_run <= MAX_CAPTURE_MAX_PER_RUN:
-                    raise ValueError
-            except (TypeError, ValueError):
-                max_per_run = DEFAULT_CAPTURE_MAX_PER_RUN
-                warnings.append("capture_limit_invalid")
-            try:
-                timeout_ms = int(
-                    str(values.get("CANDIDATE_LEDGER_SQLITE_TIMEOUT_MS", DEFAULT_SQLITE_TIMEOUT_MS))
-                )
-                if not 1 <= timeout_ms <= MAX_SQLITE_TIMEOUT_MS:
-                    raise ValueError
-            except (TypeError, ValueError):
-                timeout_ms = DEFAULT_SQLITE_TIMEOUT_MS
-                warnings.append("sqlite_timeout_invalid")
+            if spool_path is None:
+                warnings.append("spool_path_required")
+
+            def bounded_int(name: str, default: int, minimum: int, maximum: int) -> int:
+                try:
+                    result = int(str(values.get(name, default)))
+                    if not minimum <= result <= maximum:
+                        raise ValueError
+                    return result
+                except (TypeError, ValueError):
+                    warnings.append(f"{name.lower()}_invalid")
+                    return default
+
+            max_per_run = bounded_int(
+                "CANDIDATE_LEDGER_CAPTURE_MAX_PER_RUN",
+                DEFAULT_CAPTURE_MAX_PER_RUN,
+                1,
+                MAX_CAPTURE_MAX_PER_RUN,
+            )
+            max_events = bounded_int(
+                "CANDIDATE_LEDGER_SPOOL_MAX_EVENTS_PER_BATCH",
+                DEFAULT_MAX_EVENTS_PER_BATCH,
+                2,
+                MAX_EVENTS_PER_BATCH,
+            )
+            max_batch_bytes = bounded_int(
+                "CANDIDATE_LEDGER_SPOOL_MAX_BATCH_BYTES",
+                DEFAULT_MAX_BATCH_BYTES,
+                4096,
+                MAX_BATCH_BYTES,
+            )
+            max_spool_bytes = bounded_int(
+                "CANDIDATE_LEDGER_SPOOL_MAX_BYTES",
+                DEFAULT_MAX_SPOOL_BYTES,
+                max_batch_bytes,
+                MAX_SPOOL_BYTES,
+            )
+            max_spool_batches = bounded_int(
+                "CANDIDATE_LEDGER_SPOOL_MAX_BATCHES",
+                DEFAULT_MAX_SPOOL_BATCHES,
+                1,
+                MAX_SPOOL_BATCHES,
+            )
+            if max_events < max_per_run * 3:
+                warnings.append("spool_event_limit_too_small")
 
         return cls(
             enabled=enabled,
-            database_path=database_path,
+            spool_path=spool_path,
             max_per_run=max_per_run,
-            sqlite_timeout_ms=timeout_ms,
+            max_events_per_batch=max_events,
+            max_batch_bytes=max_batch_bytes,
+            max_spool_bytes=max_spool_bytes,
+            max_spool_batches=max_spool_batches,
             warning_codes=tuple(warnings),
         )
 
@@ -74,6 +121,8 @@ class CaptureStatus:
     enabled: bool
     attempted: bool = False
     written_count: int = 0
+    batch_written: bool = False
+    batch_bytes: int = 0
     dropped_count: int = 0
     warning_count: int = 0
     status: str = "DISABLED"
@@ -87,6 +136,10 @@ class CaptureStatus:
             "SHADOW_CAPTURE_DROPPED_COUNT": self.dropped_count,
             "SHADOW_CAPTURE_WARNING_COUNT": self.warning_count,
             "SHADOW_CAPTURE_STATUS": self.status,
+            "RUNTIME_CAPTURE_MODE": "spool" if self.enabled else "disabled",
+            "RUNTIME_BATCH_WRITTEN": str(self.batch_written).lower(),
+            "RUNTIME_BATCH_DROPPED": int(self.attempted and not self.batch_written and self.dropped_count > 0),
+            "RUNTIME_WARNING_COUNT": self.warning_count,
         }
 
 
@@ -211,30 +264,31 @@ class ShadowCaptureBuffer:
             return self._flushed_status
 
         try:
-            path = validate_database_path(self.config.database_path or "")
-            exists = path.exists()
-            if not exists:
-                descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-                os.close(descriptor)
-            ledger_factory = CandidateLedger if exists else CandidateLedger.initialize
-            if exists:
-                ledger = ledger_factory(path, timeout_ms=self.config.sqlite_timeout_ms)
-            else:
-                ledger = ledger_factory(path, timeout_ms=self.config.sqlite_timeout_ms)
-            with ledger:
-                results = ledger.append_events(flattened)
-            written = sum(1 for result in results if result.appended)
+            result = write_batch(
+                self.config.spool_path or "",
+                flattened,
+                max_events=self.config.max_events_per_batch,
+                max_batch_bytes=self.config.max_batch_bytes,
+                max_spool_bytes=self.config.max_spool_bytes,
+                max_spool_batches=self.config.max_spool_batches,
+                prevalidated=True,
+            )
             self._flushed_status = CaptureStatus(
                 enabled=True,
                 attempted=True,
-                written_count=written,
+                written_count=len(flattened) if result.written else 0,
+                batch_written=result.written,
+                batch_bytes=result.batch_bytes,
                 dropped_count=self._dropped_count,
                 warning_count=len(self._warning_codes),
                 status="PASS" if not self._warning_codes else "WARN",
                 warning_codes=tuple(self._warning_codes),
             )
-        except Exception:
-            warning_codes = tuple([*self._warning_codes, "database_write_failed"])
+        except Exception as exc:
+            warning_code = "spool_write_failed"
+            if isinstance(exc, SpoolError) and "capacity" in str(exc):
+                warning_code = "spool_capacity_reached"
+            warning_codes = tuple([*self._warning_codes, warning_code])
             self._flushed_status = CaptureStatus(
                 enabled=True,
                 attempted=True,

@@ -1555,3 +1555,39 @@ external data, or secret output. Network-backed Kalshi health/inventory tools
 were intentionally skipped because this phase prohibited external APIs.
 Independent targeted review and operator manual QA remain pending; runtime
 activation still requires separate approval.
+# 2026-07-16 (pm_candidate_ledger_shadow_capture_phase1b_event_completeness_and_headroom_repair — PASS, QA Pending)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / disabled Phase 1B candidate capture
+**Type:** Source/test-only event-completeness and runtime persistence repair
+**Proof:** `/tmp/proof_pm_candidate_ledger_shadow_capture_phase1b_event_completeness_and_headroom_repair_20260716T171821Z`
+**Manual QA:** pending_operator_qa
+
+### Summary
+
+Moved the `prior_validation_failed` observational record outside the optional
+nearest-miss helper guard while keeping both diagnostic edge helpers guarded.
+Replaced runtime direct-SQLite capture with one bounded immutable local spool
+batch and added an explicit offline idempotent spool-ingest CLI. Capture remains
+disabled and no installed cron/runtime path was activated.
+
+### Verified
+
+- Exact hard gate: clean `HEAD == origin == 003d50f22ffbd4e8131eae572b40ecf68aeae66d`.
+- Exact compile command: PASS.
+- Candidate-ledger tests: 86 passed.
+- Full repository tests: 653 passed, one pre-existing dependency warning.
+- `./scripts/run_tests.sh`: `STATUS: ALL GATES PASS`.
+- Guard-false enabled regression: candidate/gate/order-intent counts `1/1/0`; disabled/enabled strategy result equivalent.
+- Failure injection: missing/unwritable/full spool, partial/malformed/version/checksum records, duplicate/conflict, SQLite lock, future migration, and missing status path all fail safely.
+- Final 100-candidate runtime benchmark, 20 repeats: p50/p95/p99/max `37.108/41.413/41.535/41.566 ms`, zero drops/timeouts, one file, zero SQLite transactions.
+- 50k accumulated status/read targets passed; optional 100k not practical after 50k took 682.098 seconds and 262,877,184 bytes.
+- Sanitized installed cron/wrapper/filesystem/unit/timer checks: zero capture references or production spool/ledger files.
+
+### Safety and remaining work
+
+No live/manual runner, order action, trading/threshold/category/sizing/weather
+change, external API, secret access/output, cron/runtime/service/Caddy/DNS/
+systemd/timer/tmux change, GreedBot integration, or self-modification. Independent
+post-repair review and operator manual QA remain pending. Do not set
+`passes=true`; activation requires separate exact-bounded approval.

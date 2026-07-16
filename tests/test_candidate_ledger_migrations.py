@@ -18,10 +18,12 @@ def test_initialize_and_reopen_are_migration_idempotent(tmp_path):
         second = validate_migrations(ledger.connection)
     assert first == second
     assert second["valid"] is True
-    assert second["migration_version"] == 2
+    assert second["migration_version"] == 3
     assert second["append_only_enforced"] is True
     assert second["required_indexes_present"] is True
     assert "candidate_event_type_time" in second["indexes"]
+    assert "candidate_spool_batches_no_update" in second["append_only_triggers"]
+    assert "candidate_spool_batches_no_delete" in second["append_only_triggers"]
 
 
 def test_database_path_must_be_explicit_local_file(tmp_path):
@@ -74,8 +76,8 @@ def test_v2_index_migration_is_idempotent_and_preserves_populated_history(tmp_pa
     path = tmp_path / "populated-v1.sqlite3"
     connection = _create_v1_database(path, rows=25)
     try:
-        assert migrations.migrate(connection) == 2
-        assert migrations.migrate(connection) == 2
+        assert migrations.migrate(connection) == 3
+        assert migrations.migrate(connection) == 3
         assert connection.execute("SELECT COUNT(*) FROM candidate_events").fetchone()[0] == 25
         validation = validate_migrations(connection)
         assert validation["valid"] is True

@@ -78,6 +78,7 @@ def test_installed_runner_wrappers_do_not_activate_capture():
         text = (ROOT / relative).read_text()
         assert "CANDIDATE_LEDGER_SHADOW_ENABLED" not in text
         assert "CANDIDATE_LEDGER_DB_PATH" not in text
+        assert "CANDIDATE_LEDGER_SPOOL_PATH" not in text
 
 
 def test_capture_has_no_greedbot_or_self_modification_path():

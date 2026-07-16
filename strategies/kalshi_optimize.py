@@ -1260,6 +1260,14 @@ def optimize_kalshi_strategy(
                 )
 
             if not val_result["passed"]:
+                # Capture must remain complete even when the optional nearest-miss
+                # helper import is unavailable.  This fallback is observational
+                # only; the guarded helpers below still own diagnostic precision.
+                prior_raw_edge = max(
+                    0.0,
+                    min(MAX_EDGE_PCT, ((true_price - yes_price) / yes_price) * 100.0),
+                )
+                prior_fee_edge = None
                 if make_nearest_miss is not None:
                     prior_raw_edge = calculate_edge_pct(true_price, yes_price, market_id)
                     prior_fee_edge = get_edge_after_fees(market, true_price=true_price)
@@ -1273,20 +1281,20 @@ def optimize_kalshi_strategy(
                         required_threshold=risk_caps["edge_after_fees_pct"],
                         rejection_reason="prior_validation_failed",
                     ))
-                    _record_shadow_candidate(
-                        capture_runtime,
-                        market=market,
-                        observed_price=yes_price,
-                        ai_prior=true_price,
-                        fallback_prior_used=bool(market.get("_ai_prior_is_fallback")),
-                        raw_edge=prior_raw_edge,
-                        fee_adjusted_edge=prior_fee_edge,
-                        required_threshold=risk_caps["edge_after_fees_pct"],
-                        rejection_reason="prior_validation_failed",
-                        gate_failure_kinds=["prior_validation"],
-                        order_intent_created=False,
-                        expected_value=prior_fee_edge,
-                    )
+                _record_shadow_candidate(
+                    capture_runtime,
+                    market=market,
+                    observed_price=yes_price,
+                    ai_prior=true_price,
+                    fallback_prior_used=bool(market.get("_ai_prior_is_fallback")),
+                    raw_edge=prior_raw_edge,
+                    fee_adjusted_edge=prior_fee_edge,
+                    required_threshold=risk_caps["edge_after_fees_pct"],
+                    rejection_reason="prior_validation_failed",
+                    gate_failure_kinds=["prior_validation"],
+                    order_intent_created=False,
+                    expected_value=prior_fee_edge,
+                )
                 continue
 
             # Use adjusted prior for sizing if validation passed
