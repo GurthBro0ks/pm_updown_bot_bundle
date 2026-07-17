@@ -1,4 +1,16 @@
 {
+  "pm_expanded_shadow_scanner_no_markets_return_contract_repair_20260717": {
+    "status": "built_validation_pass_manual_qa_pending",
+    "file": "strategies/kalshi_optimize.py, tests/test_expanded_shadow_return_contract.py, docs/buglog/pm_expanded_shadow_scanner_no_markets_return_contract_repair_20260717.md, claude-progress.md, feature_list.json",
+    "passes": false,
+    "manual_qa_required": true,
+    "pushed": true,
+    "commit": "self_commit_final_sha_reported_in_closeout",
+    "proof_dir": "/tmp/proof_pm_expanded_shadow_scanner_no_markets_return_contract_repair_20260717T121841Z",
+    "description": "Repair the direct Expanded Shadow Scanner no-markets return shape so every normal optimize_kalshi_strategy path returns the canonical three-value tuple.",
+    "result": "PASS_VALIDATION_MANUAL_QA_PENDING",
+    "notes": "Source/test/docs/state only. Production candidate capture remains disabled; installed cron is unchanged at the restored baseline fingerprint; no live runner, external API, order action, weather change, runtime SQLite access, spool batch, or service change."
+  },
   "pm_candidate_ledger_shadow_capture_phase1b_20260715": {
     "status": "accepted_manual_qa_pass",
     "file": "research/candidate_ledger/capture.py, research/candidate_ledger/runtime_adapter.py, research/candidate_ledger/store.py, research/candidate_ledger/schema.py, strategies/kalshi_optimize.py, utils/edge_nearest_miss.py, scripts/main_run_gate_summary_redacted.py, scripts/candidate_capture_status_redacted.py, scripts/candidate_capture_spool_ingest.py, research/candidate_ledger/spool.py, tests/test_candidate_ledger_capture.py, tests/test_candidate_ledger_capture_integration.py, tests/test_candidate_ledger_production_isolation.py, docs/research/candidate-ledger-v1.md, docs/research/candidate-ledger-architecture.md, docs/buglog/pm_candidate_ledger_shadow_capture_phase1b_20260715.md, docs/buglog/pm_candidate_ledger_phase1b_event_completeness_spool_repair_20260716.md, manual_qa_checklist.md",

@@ -1625,3 +1625,37 @@ post-repair review and operator manual QA remain pending. Do not set
   `MAX_DAYS_TO_EXPIRY` unchanged at 3.
 - Next: production shadow-capture activation requires a separate explicit exact-bounded approval; not
   authorized by this closeout.
+# 2026-07-17 (pm_expanded_shadow_scanner_no_markets_return_contract_repair — Source Fix Built)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / direct Expanded Shadow Scanner
+**Type:** Narrow source/test return-contract repair
+**Proof:** `/tmp/proof_pm_expanded_shadow_scanner_no_markets_return_contract_repair_20260717T121841Z`
+**Manual QA:** pending_targeted_independent_review
+
+### Summary
+Repaired the pre-existing no-markets return-shape mismatch in
+`optimize_kalshi_strategy()`. The no-markets branch now returns the same
+three-value tuple as the successful path, so the direct CLI can log its normal
+exit marker and exit zero when no markets are available.
+
+### Changes
+1. Changed only the faulty normal return from scalar `0` to `(0, 0, 0)`.
+2. Added the existing canonical tuple return annotation and corrected the
+   docstring to name exit code, candidates processed, and total markets.
+3. Added synthetic tests for the function contract, direct CLI behavior,
+   capture-disabled and capture-enabled zero-event behavior, zero spool/SQLite
+   access, and AST enforcement that every normal return is a three-item tuple.
+4. Added buglog
+   `docs/buglog/pm_expanded_shadow_scanner_no_markets_return_contract_repair_20260717.md`.
+
+### Safety
+- No installed cron or runtime activation change; production capture remains
+  disabled and the empty owner-only spool parent is preserved.
+- No live scanner/trading/weather run, external API, order action, market
+  selection, prior, gate, threshold, sizing, price, category, max-days,
+  capture architecture, spool format, offline ingest, service, or secret change.
+
+### Remaining
+- Targeted independent review and a separately authorized Phase 1C activation
+  retry after this source repair is accepted.

@@ -820,7 +820,7 @@ def optimize_kalshi_strategy(
     scratchpad=None,
     stage_budget=None,
     cursor=None,
-):
+) -> tuple[int, int, int]:
     """
     Main function for Phase 1 Kalshi optimization
 
@@ -837,7 +837,7 @@ def optimize_kalshi_strategy(
                       breaks with whatever priors were collected.
 
     Returns:
-        Number of orders placed
+        A three-value tuple of exit code, candidates processed, and total markets.
     """
     
     logger.info("=" * 60)
@@ -890,7 +890,7 @@ def optimize_kalshi_strategy(
     if not markets:
         logger.warning("No markets fetched")
         _flush_shadow_candidates(capture_runtime)
-        return 0
+        return 0, 0, 0
     
     logger.info(f"Fetched {len(markets)} markets")
     
