@@ -1591,3 +1591,37 @@ change, external API, secret access/output, cron/runtime/service/Caddy/DNS/
 systemd/timer/tmux change, GreedBot integration, or self-modification. Independent
 post-repair review and operator manual QA remain pending. Do not set
 `passes=true`; activation requires separate exact-bounded approval.
+
+## 2026-07-17 - Candidate Ledger Phase 1B Accepted (Final Closeout)
+
+- Independent Claude safety/architecture review re-ran the repair commit's validation independently (86/86
+  focused, 653/653 full suite, spool attacks 22/22, append-only PASS, offline ingest PASS, behavior
+  equivalence PASS, production non-activation PASS, three independent 20-run benchmark series classified
+  `PASS_OFF_CRITICAL_PATH`, independently reproduced 0/1k/10k accumulated scale) with results matching the
+  implementation's claims. `INDEPENDENT_REVIEW_STATUS=PASS`. Proof:
+  `/tmp/proof_pm_candidate_ledger_shadow_capture_phase1b_spool_repair_independent_review_20260716T175307Z`.
+- Live operator manual QA independently re-reproduced fresh evidence (not relayed from prior proof dirs) for
+  all 9 mandated task areas — affected-branch event completeness (`candidate_observed=1, gate_evaluated=1,
+  order_intent_created=0`), helper-guard true/false call behavior, runtime spool (one bounded batch, format
+  v1, checksum present, raw payload absent), zero-SQLite runtime path (0 `sqlite3.connect` calls, monkeypatch
+  counted), offline ingest (dry-run non-mutating, idempotent, append-only `IntegrityError` enforced),
+  failure isolation (11/11), fresh 86/86 and 653/653 suite reproduction, fresh 0/1k/10k benchmark
+  reproduction (50k/100k remains implementer-reported for this commit), sanitized production non-activation
+  (zero `CANDIDATE_LEDGER_*` references in installed cron, no production spool/DB), and trading/weather
+  invariants (`MAX_DAYS_TO_EXPIRY=3`, categories/thresholds unchanged, no order action, no network calls).
+  Operator selected `PASS_operator_accepted` for commit `70d6a7213208dd3960a91c96c6fd2bbd626c8fd2`. Proof:
+  `/tmp/proof_pm_candidate_ledger_shadow_capture_phase1b_operator_qa_20260717T090845Z`.
+- All three proof directories (implementation, independent review, operator QA) verified to contain zero
+  actual secret findings via the same purpose-built redacted scan used for the Phase 1A closeout, and
+  persisted byte-for-byte outside `/tmp` under `proofs/pm_updown_bot_bundle/` (gitignored; tree-hash verified
+  identical to source, no content exposed). See
+  `proofs/pm_updown_bot_bundle/pm_candidate_ledger_shadow_capture_phase1b_persistence_manifest.md`.
+- `feature_list.json` entry `pm_candidate_ledger_shadow_capture_phase1b_20260715` updated in place:
+  `passes=true`, `accepted=true`, `manual_qa_completed=true`, `manual_qa_status=PASS_operator_accepted`,
+  `independent_review_status=PASS`, `commit=70d6a7213208dd3960a91c96c6fd2bbd626c8fd2`,
+  `production_capture_enabled=false`, `phase_1b_activation_authorized=false`, `result=PASS_OPERATOR_ACCEPTED`.
+- No production candidate capture enabled, no cron/runtime/service/Caddy/DNS/systemd/timer/tmux change, no
+  trading/weather/threshold/category/sizing change, no GreedBot integration, no secret access/print.
+  `MAX_DAYS_TO_EXPIRY` unchanged at 3.
+- Next: production shadow-capture activation requires a separate explicit exact-bounded approval; not
+  authorized by this closeout.
