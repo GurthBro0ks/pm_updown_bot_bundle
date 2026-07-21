@@ -95,6 +95,11 @@ def test_pipeline_captures_edge_rejection_and_existing_order_intent(monkeypatch,
     assert redacted_summary["SHADOW_CAPTURE_ENABLED"] == "true"
     assert redacted_summary["SHADOW_CAPTURE_STATUS"] == "PASS"
     assert redacted_summary["SHADOW_CAPTURE_WRITTEN_COUNT"] == 5
+    assert redacted_summary["CANDIDATE_OBSERVED_COUNT"] == 2
+    assert redacted_summary["GATE_EVALUATED_COUNT"] == 2
+    assert redacted_summary["ORDER_INTENT_COUNT"] == 1
+    assert redacted_summary["ORDER_ATTEMPT_COUNT"] == 0
+    assert redacted_summary["ORDER_RESULT_COUNT"] == 0
     with CandidateLedger.open_read_only(database) as ledger:
         summary = ledger.summary()
         assert summary["event_counts"] == {

@@ -1,4 +1,16 @@
 {
+  "pm_phase1c_observer_completion_telemetry_contract_20260721": {
+    "status": "built_validation_pass_manual_qa_pending",
+    "file": "research/candidate_ledger/run_observation.py, research/candidate_ledger/capture.py, scripts/expanded_shadow_run_status_redacted.py, strategies/kalshi_optimize.py, tests/test_expanded_shadow_run_observation.py, tests/test_expanded_shadow_return_contract.py, tests/test_candidate_ledger_capture_integration.py, docs/ops/expanded_shadow_one_shot_observation.md, docs/buglog/pm_phase1c_observer_completion_telemetry_contract_20260721.md, claude-progress.md, feature_list.json",
+    "passes": false,
+    "manual_qa_required": true,
+    "pushed": true,
+    "commit": "self_commit_final_sha_reported_in_closeout",
+    "proof_dir": "/tmp/proof_pm_phase1c_observer_completion_telemetry_contract_diagnosis_and_repair_20260721T100002Z",
+    "description": "Replace unattributed scanner log-tail inference with one atomic redacted status record per expected Expanded Shadow Scanner invocation.",
+    "result": "PASS_VALIDATION_MANUAL_QA_PENDING",
+    "notes": "MULTIPLE_CAUSES proven: the 18:00 scanner did not enter Python because the capture-enabled assignment was treated as a command, and the observer falsely called arbitrary post-baseline bytes a start. The repaired contract distinguishes missing, running, zero-market, zero-candidate, captured, failed, stale, and wrong-run states without polling or raw log/payload inspection. Production capture remains disabled; installed cron remains at the baseline fingerprint; no live run, database, ingest, external call, order action, weather change, or service change occurred."
+  },
   "pm_expanded_shadow_scanner_no_markets_return_contract_repair_20260717": {
     "status": "built_validation_pass_manual_qa_pending",
     "file": "strategies/kalshi_optimize.py, tests/test_expanded_shadow_return_contract.py, docs/buglog/pm_expanded_shadow_scanner_no_markets_return_contract_repair_20260717.md, claude-progress.md, feature_list.json",

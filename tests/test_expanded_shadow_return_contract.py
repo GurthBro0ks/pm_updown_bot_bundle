@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import json
 import logging
 from pathlib import Path
 import runpy
@@ -116,6 +117,73 @@ def test_direct_cli_no_markets_capture_enabled_exits_normally(
     assert "[SHADOW_CAPTURE] RUNTIME_CAPTURE_MODE=spool" in caplog.text
     assert scan_spool(spool).batch_count == 0
     assert list(spool.iterdir()) == []
+
+
+def test_direct_cli_no_markets_writes_attributed_terminal_status(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    status_dir = tmp_path / "run-status"
+    status_dir.mkdir()
+    spool = tmp_path / "direct-cli-spool"
+    spool.mkdir()
+    monkeypatch.setattr(kalshi_api, "fetch_kalshi_markets", lambda: [])
+    monkeypatch.setenv("CANDIDATE_LEDGER_SHADOW_ENABLED", "true")
+    monkeypatch.setenv("CANDIDATE_LEDGER_SPOOL_PATH", str(spool))
+    monkeypatch.setenv("EXPANDED_SHADOW_RUN_ID", "expanded-shadow-20260721T120000Z")
+    monkeypatch.setenv("EXPANDED_SHADOW_EXPECTED_SCHEDULED_AT", "2026-07-21T12:00:00Z")
+    monkeypatch.setenv("EXPANDED_SHADOW_RUN_STATUS_DIR", str(status_dir))
+    monkeypatch.setattr(sys, "argv", [str(STRATEGY_PATH), "--mode", "shadow"])
+
+    with caplog.at_level(logging.INFO), pytest.raises(SystemExit) as exc_info:
+        runpy.run_path(str(STRATEGY_PATH), run_name="__main__")
+
+    assert exc_info.value.code == 0
+    record = json.loads(
+        (status_dir / "expanded-shadow-20260721T120000Z.json").read_text()
+    )
+    assert record["state"] == "COMPLETED"
+    assert record["normal_exit_marker"] is True
+    assert record["exit_code"] == 0
+    assert record["candidates_processed"] == 0
+    assert record["total_markets"] == 0
+    assert record["capture_mode"] == "spool"
+    assert record["candidate_observed_count"] == 0
+    assert record["capture_warning_count"] == 0
+    assert record["capture_drop_count"] == 0
+    assert record["runtime_sqlite_access"] == "none"
+    assert scan_spool(spool).batch_count == 0
+    assert "TypeError" not in caplog.text
+    assert "Traceback" not in caplog.text
+
+
+def test_direct_cli_exception_writes_failure_and_reraises(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    status_dir = tmp_path / "run-status"
+    status_dir.mkdir()
+    monkeypatch.setattr(
+        kalshi_api,
+        "fetch_kalshi_markets",
+        lambda: (_ for _ in ()).throw(RuntimeError("synthetic scanner failure")),
+    )
+    monkeypatch.setenv("CANDIDATE_LEDGER_SHADOW_ENABLED", "false")
+    monkeypatch.setenv("EXPANDED_SHADOW_RUN_ID", "expanded-shadow-20260721T120000Z")
+    monkeypatch.setenv("EXPANDED_SHADOW_EXPECTED_SCHEDULED_AT", "2026-07-21T12:00:00Z")
+    monkeypatch.setenv("EXPANDED_SHADOW_RUN_STATUS_DIR", str(status_dir))
+    monkeypatch.setattr(sys, "argv", [str(STRATEGY_PATH), "--mode", "shadow"])
+
+    with pytest.raises(RuntimeError, match="synthetic scanner failure"):
+        runpy.run_path(str(STRATEGY_PATH), run_name="__main__")
+
+    record = json.loads(
+        (status_dir / "expanded-shadow-20260721T120000Z.json").read_text()
+    )
+    assert record["state"] == "FAILED"
+    assert record["normal_exit_marker"] is False
+    assert record["traceback_present"] is True
 
 
 def test_all_normal_strategy_returns_are_three_value_tuples() -> None:

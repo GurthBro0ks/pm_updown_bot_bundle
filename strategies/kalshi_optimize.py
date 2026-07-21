@@ -153,6 +153,17 @@ def _flush_shadow_candidates(capture_runtime):
         logger.info("[SHADOW_CAPTURE] %s=%s", name, value)
     return fallback
 
+
+def _record_run_observation_capture(run_observation, summary):
+    """Publish redacted telemetry without affecting strategy behavior."""
+
+    if run_observation is None:
+        return
+    try:
+        run_observation.record_capture_summary(summary)
+    except Exception:
+        logger.warning("[RUN_OBSERVATION] capture summary unavailable")
+
 # Expiry filters (configurable via env)
 MAX_DAYS_TO_EXPIRY = float(os.getenv("MAX_DAYS_TO_EXPIRY", "14") or "14")
 MAX_LONG_TERM_DAYS = float(os.getenv("MAX_LONG_TERM_DAYS", "30") or "30")
@@ -820,6 +831,7 @@ def optimize_kalshi_strategy(
     scratchpad=None,
     stage_budget=None,
     cursor=None,
+    run_observation=None,
 ) -> tuple[int, int, int]:
     """
     Main function for Phase 1 Kalshi optimization
@@ -889,7 +901,8 @@ def optimize_kalshi_strategy(
     
     if not markets:
         logger.warning("No markets fetched")
-        _flush_shadow_candidates(capture_runtime)
+        shadow_capture_summary = _flush_shadow_candidates(capture_runtime)
+        _record_run_observation_capture(run_observation, shadow_capture_summary)
         return 0, 0, 0
     
     logger.info(f"Fetched {len(markets)} markets")
@@ -1874,6 +1887,7 @@ def optimize_kalshi_strategy(
     })
 
     shadow_capture_summary = _flush_shadow_candidates(capture_runtime)
+    _record_run_observation_capture(run_observation, shadow_capture_summary)
 
     should_write_edge_summary = bool(os.getenv("MAIN_EDGE_NEAREST_MISS_PATH")) or mode == "micro-live"
     if (
@@ -1939,12 +1953,33 @@ if __name__ == "__main__":
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
     
-    exit_code, _, _ = optimize_kalshi_strategy(
-        mode=args.mode,
-        bankroll=args.bankroll,
-        max_pos_usd=args.max_pos,
-        dry_run=(args.mode == "shadow")
+    from research.candidate_ledger.run_observation import ExpandedShadowRunObservation
+
+    run_observation = (
+        ExpandedShadowRunObservation.from_environment()
+        if args.mode == "shadow"
+        else ExpandedShadowRunObservation()
     )
+    if run_observation.configuration_warning_count:
+        logger.warning("[RUN_OBSERVATION] start status unavailable")
+    try:
+        exit_code, candidates_processed, total_markets = optimize_kalshi_strategy(
+            mode=args.mode,
+            bankroll=args.bankroll,
+            max_pos_usd=args.max_pos,
+            dry_run=(args.mode == "shadow"),
+            run_observation=run_observation,
+        )
+    except Exception as exc:
+        run_observation.fail(exc)
+        raise
+
+    if not run_observation.complete(
+        exit_code=exit_code,
+        candidates_processed=candidates_processed,
+        total_markets=total_markets,
+    ):
+        logger.warning("[RUN_OBSERVATION] completion status unavailable")
     
     logger.info(f"Exit code: {exit_code}")
     sys.exit(exit_code)

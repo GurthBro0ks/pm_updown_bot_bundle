@@ -127,6 +127,11 @@ class CaptureStatus:
     warning_count: int = 0
     status: str = "DISABLED"
     warning_codes: tuple[str, ...] = ()
+    candidate_observed_count: int = 0
+    gate_evaluated_count: int = 0
+    order_intent_count: int = 0
+    order_attempt_count: int = 0
+    order_result_count: int = 0
 
     def summary_fields(self) -> dict[str, str | int]:
         return {
@@ -140,6 +145,11 @@ class CaptureStatus:
             "RUNTIME_BATCH_WRITTEN": str(self.batch_written).lower(),
             "RUNTIME_BATCH_DROPPED": int(self.attempted and not self.batch_written and self.dropped_count > 0),
             "RUNTIME_WARNING_COUNT": self.warning_count,
+            "CANDIDATE_OBSERVED_COUNT": self.candidate_observed_count,
+            "GATE_EVALUATED_COUNT": self.gate_evaluated_count,
+            "ORDER_INTENT_COUNT": self.order_intent_count,
+            "ORDER_ATTEMPT_COUNT": self.order_attempt_count,
+            "ORDER_RESULT_COUNT": self.order_result_count,
         }
 
 
@@ -252,6 +262,13 @@ class ShadowCaptureBuffer:
             for candidate_events in self._events_by_candidate.values()
             for event in candidate_events
         ]
+        candidate_count = len(self._events_by_candidate)
+        gate_count = sum(
+            event["event_type"] == "gate_evaluated" for event in flattened
+        )
+        order_intent_count = sum(
+            event["event_type"] == "order_intent_created" for event in flattened
+        )
         if not flattened:
             self._flushed_status = CaptureStatus(
                 enabled=True,
@@ -260,6 +277,9 @@ class ShadowCaptureBuffer:
                 warning_count=len(self._warning_codes),
                 status="PASS",
                 warning_codes=tuple(self._warning_codes),
+                candidate_observed_count=candidate_count,
+                gate_evaluated_count=gate_count,
+                order_intent_count=order_intent_count,
             )
             return self._flushed_status
 
@@ -283,6 +303,9 @@ class ShadowCaptureBuffer:
                 warning_count=len(self._warning_codes),
                 status="PASS" if not self._warning_codes else "WARN",
                 warning_codes=tuple(self._warning_codes),
+                candidate_observed_count=candidate_count,
+                gate_evaluated_count=gate_count,
+                order_intent_count=order_intent_count,
             )
         except Exception as exc:
             warning_code = "spool_write_failed"
@@ -296,6 +319,9 @@ class ShadowCaptureBuffer:
                 warning_count=len(warning_codes),
                 status="WARN",
                 warning_codes=warning_codes,
+                candidate_observed_count=candidate_count,
+                gate_evaluated_count=gate_count,
+                order_intent_count=order_intent_count,
             )
         return self._flushed_status
 

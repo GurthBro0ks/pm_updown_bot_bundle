@@ -1,3 +1,66 @@
+# 2026-07-21 (pm_phase1c_observer_completion_telemetry_contract — Source Repair Built)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Expanded Shadow Scanner observation
+**Type:** Source/tooling/test/docs repair
+**Proof:** `/tmp/proof_pm_phase1c_observer_completion_telemetry_contract_diagnosis_and_repair_20260721T100002Z`
+**Manual QA:** pending_targeted_independent_review
+
+### Summary
+Independently re-derived the unattended 18:00/18:15 Phase 1C failure and
+replaced unattributed log-tail inference with a disabled-by-default atomic run
+status contract. The one-shot reader now distinguishes not started, running,
+successful zero-market/zero-candidate, nonzero capture, exception, warning/drop,
+stale, and wrong-invocation states without polling or raw log/spool inspection.
+
+### Root cause
+- `MULTIPLE_CAUSES`: `SCANNER_DID_NOT_RUN` plus `RUN_ATTRIBUTION_GAP`.
+- The expected date-expanded log path was correct. The 18:00 cron attempt wrote
+  one bounded shell error: the `CANDIDATE_LEDGER_SHADOW_ENABLED` assignment was
+  treated as a command and was not found. Python never emitted an 18:00 start,
+  fetch, capture summary, exception, or exit marker.
+- The observer defined “started” as any post-baseline bytes, so that shell error
+  became a false start. It had no run ID or expected-schedule attribution.
+- This was not a zero-event telemetry gap. The prior no-markets repair already
+  emitted the full zero capture summary and exit-zero log marker.
+
+### Changes
+1. Added `research/candidate_ledger/run_observation.py` for owner-only atomic
+   start/terminal records bound to an explicit run ID and expected UTC schedule.
+2. Added `scripts/expanded_shadow_run_status_redacted.py`, a bounded 23-field
+   one-shot reader with stale/wrong-run rejection and no log-tail polling.
+3. Extended existing capture summaries with candidate, gate, intent, attempt,
+   and result counts; Phase 1B truthfully reports zero for unimplemented order
+   attempt/result capture rather than inventing events.
+4. Wired only the direct scanner CLI to start/complete/fail observation when all
+   three explicit observation variables are present. Exceptions are recorded
+   redacted and re-raised; scanner return/trading behavior is unchanged.
+5. Added the future unattended retry runbook with `/usr/bin/env` assignment
+   placement, exact run attribution, one-shot observer, fail-safe, and sunset.
+
+### Verified
+- Clean baseline before edits: `HEAD == origin == 2b6b629976e9f0d7ea64416ce6e04d7af091669f`; Phase 1B ancestor present.
+- `python3 -m py_compile` on touched Python: PASS.
+- Focused scanner/capture/status tests: 54 passed.
+- Phase 1A/1B plus Expanded Shadow tests: 106 passed.
+- Local one-shot status CLI: attributable synthetic capture PASS; missing record
+  returned `NOT_STARTED` with exit 3.
+- `PYTHONPATH=. pytest tests`: 674 passed, 1 pre-existing warning.
+- `./scripts/run_tests.sh`: `STATUS: ALL GATES PASS`.
+- Sanitized production checks before/after: capture disabled in direct,
+  micro-live, phase-all, and weather lanes; offline ingest unscheduled; no
+  temporary Phase 1C entries; no production database; spool parent owner slimy
+  mode 0700; cron fingerprint unchanged at
+  `632b808247f0d62a23790bf75f3b2e95898864a8e4b872f59aefdf3f81e3bad1`.
+
+### Safety and remaining work
+- No live scanner/trading/weather run, API call, external transmission, order
+  action, cron mutation, capture activation, ingest, database, spool payload
+  read, service restart, Caddy/DNS/systemd/timer/tmux change, or secret access.
+- Targeted independent safety review and fresh approval are required before an
+  unattended one-shot activation retry. Project `passes` remains false pending
+  that review and operator QA.
+
 # 2026-07-09 (pm_main_micro_live_gate_failure_kind_diagnostic — Source Fix Built)
 
 **Agent:** Codex (SlimyAI NUC1)
