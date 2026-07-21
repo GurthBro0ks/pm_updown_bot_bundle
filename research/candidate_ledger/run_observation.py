@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -15,9 +15,21 @@ STATUS_VERSION = "expanded-shadow-run-status.v1"
 MAX_STATUS_BYTES = 16 * 1024
 RUN_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
+SCHEDULE_CADENCE_ID = "utc-even-hours-v1"
+SCHEDULE_CADENCE_SECONDS = 2 * 60 * 60
+DEFAULT_SCHEDULE_GRACE_SECONDS = 15 * 60
+MAX_SCHEDULE_GRACE_SECONDS = 30 * 60
+CLAIM_STALE_SECONDS = 6 * 60 * 60
+
 ENV_RUN_ID = "EXPANDED_SHADOW_RUN_ID"
 ENV_EXPECTED_AT = "EXPANDED_SHADOW_EXPECTED_SCHEDULED_AT"
 ENV_STATUS_DIR = "EXPANDED_SHADOW_RUN_STATUS_DIR"
+ENV_DYNAMIC_ATTRIBUTION = "EXPANDED_SHADOW_DYNAMIC_ATTRIBUTION"
+ENV_STATUS_ROOT = "EXPANDED_SHADOW_RUN_STATUS_ROOT"
+ENV_SCHEDULE_GRACE_SECONDS = "EXPANDED_SHADOW_SCHEDULE_GRACE_SECONDS"
+
+_TRUE_VALUES = {"1", "true", "yes", "on"}
+_FALSE_VALUES = {"", "0", "false", "no", "off"}
 
 CAPTURE_FIELDS = {
     "SHADOW_CAPTURE_ENABLED",
@@ -48,10 +60,66 @@ def parse_utc(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+@dataclass(frozen=True)
+class NaturalRunAttribution:
+    """Deterministic attribution for one natural UTC schedule slot."""
+
+    scheduled_at: datetime
+    expected_scheduled_at: str
+    run_id: str
+    delay_seconds: float
+
+
+class UnscheduledInvocationError(ValueError):
+    """Raised when a start cannot truthfully belong to a natural slot."""
+
+
+def run_id_for_schedule(scheduled_at: datetime) -> str:
+    """Return the canonical ID for an exact even-hour UTC schedule slot."""
+
+    if scheduled_at.tzinfo is None:
+        raise ValueError("scheduled timestamp must include a timezone")
+    slot = scheduled_at.astimezone(timezone.utc)
+    if slot.minute or slot.second or slot.microsecond or slot.hour % 2:
+        raise ValueError("scheduled timestamp is not an even-hour UTC slot")
+    return f"expanded-shadow-{slot.strftime('%Y%m%dT%H%M%SZ')}"
+
+
+def derive_natural_run_attribution(
+    started_at: datetime,
+    *,
+    grace_seconds: int = DEFAULT_SCHEDULE_GRACE_SECONDS,
+) -> NaturalRunAttribution:
+    """Derive the preceding natural slot without ever rounding into the future."""
+
+    if started_at.tzinfo is None:
+        raise ValueError("invocation timestamp must include a timezone")
+    if not 0 <= grace_seconds <= MAX_SCHEDULE_GRACE_SECONDS:
+        raise ValueError("schedule grace is outside the supported bound")
+    started_utc = started_at.astimezone(timezone.utc)
+    slot = started_utc.replace(minute=0, second=0, microsecond=0)
+    slot -= timedelta(hours=slot.hour % 2)
+    delay_seconds = (started_utc - slot).total_seconds()
+    if delay_seconds < 0 or delay_seconds > grace_seconds:
+        raise UnscheduledInvocationError("invocation is outside the natural-slot grace window")
+    return NaturalRunAttribution(
+        scheduled_at=slot,
+        expected_scheduled_at=utc_text(slot),
+        run_id=run_id_for_schedule(slot),
+        delay_seconds=delay_seconds,
+    )
+
+
 def status_path(status_dir: Path, run_id: str) -> Path:
     if not RUN_ID_PATTERN.fullmatch(run_id):
         raise ValueError("invalid run id")
     return status_dir / f"{run_id}.json"
+
+
+def claim_path(status_dir: Path, run_id: str) -> Path:
+    if not RUN_ID_PATTERN.fullmatch(run_id):
+        raise ValueError("invalid run id")
+    return status_dir / f"{run_id}.claim"
 
 
 def _nonnegative(value: object) -> int:
@@ -69,10 +137,14 @@ class ExpandedShadowRunObservation:
     run_id: str = ""
     expected_scheduled_at: str = ""
     output_path: Path | None = None
+    claim_file: Path | None = None
     now: Callable[[], datetime] = utc_now
     configuration_warning_count: int = 0
+    configuration_status: str = "DISABLED"
+    blocks_scanner: bool = False
     started_at: str = ""
     capture: dict[str, object] = field(default_factory=dict)
+    terminal_written: bool = False
 
     @classmethod
     def from_environment(
@@ -82,33 +154,169 @@ class ExpandedShadowRunObservation:
         now: Callable[[], datetime] = utc_now,
     ) -> "ExpandedShadowRunObservation":
         values = os.environ if environment is None else environment
+        dynamic_value = str(values.get(ENV_DYNAMIC_ATTRIBUTION, "")).strip().lower()
         run_id = str(values.get(ENV_RUN_ID, "")).strip()
         expected_at = str(values.get(ENV_EXPECTED_AT, "")).strip()
         directory = str(values.get(ENV_STATUS_DIR, "")).strip()
+        status_root_value = str(values.get(ENV_STATUS_ROOT, "")).strip()
+        grace_value = str(values.get(ENV_SCHEDULE_GRACE_SECONDS, "")).strip()
+
+        if dynamic_value not in _TRUE_VALUES | _FALSE_VALUES:
+            return cls(
+                now=now,
+                configuration_warning_count=1,
+                configuration_status="INVALID_DYNAMIC_CONFIGURATION",
+                blocks_scanner=True,
+            )
+        dynamic_enabled = dynamic_value in _TRUE_VALUES
+        if dynamic_enabled:
+            if any((run_id, expected_at, directory)) or not status_root_value:
+                return cls(
+                    now=now,
+                    configuration_warning_count=1,
+                    configuration_status="AMBIGUOUS_DYNAMIC_CONFIGURATION",
+                    blocks_scanner=True,
+                )
+            try:
+                grace_seconds = (
+                    DEFAULT_SCHEDULE_GRACE_SECONDS if not grace_value else int(grace_value)
+                )
+                started = now()
+                attribution = derive_natural_run_attribution(
+                    started,
+                    grace_seconds=grace_seconds,
+                )
+                return cls._start(
+                    run_id=attribution.run_id,
+                    expected_at=attribution.expected_scheduled_at,
+                    directory=status_root_value,
+                    started=started,
+                    now=now,
+                )
+            except UnscheduledInvocationError:
+                return cls(
+                    now=now,
+                    configuration_warning_count=1,
+                    configuration_status="UNSCHEDULED",
+                    blocks_scanner=True,
+                )
+            except (OSError, TypeError, ValueError):
+                return cls(
+                    now=now,
+                    configuration_warning_count=1,
+                    configuration_status="INVALID_DYNAMIC_CONFIGURATION",
+                    blocks_scanner=True,
+                )
+
         if not any((run_id, expected_at, directory)):
             return cls(now=now)
         if not all((run_id, expected_at, directory)):
             return cls(now=now, configuration_warning_count=1)
         try:
-            if not RUN_ID_PATTERN.fullmatch(run_id):
-                raise ValueError("invalid run id")
-            expected_at = utc_text(parse_utc(expected_at))
-            status_dir = Path(directory).expanduser().resolve()
-            status_dir.mkdir(mode=0o700, parents=False, exist_ok=True)
-            os.chmod(status_dir, 0o700)
-            observation = cls(
-                enabled=True,
+            return cls._start(
                 run_id=run_id,
-                expected_scheduled_at=expected_at,
-                output_path=status_path(status_dir, run_id),
+                expected_at=expected_at,
+                directory=directory,
+                started=now(),
                 now=now,
             )
-            observation.started_at = utc_text(now())
-            if not observation._write("STARTED"):
-                return cls(now=now, configuration_warning_count=1)
-            return observation
         except (OSError, ValueError):
             return cls(now=now, configuration_warning_count=1)
+
+    @classmethod
+    def _start(
+        cls,
+        *,
+        run_id: str,
+        expected_at: str,
+        directory: str,
+        started: datetime,
+        now: Callable[[], datetime],
+    ) -> "ExpandedShadowRunObservation":
+        if not RUN_ID_PATTERN.fullmatch(run_id):
+            raise ValueError("invalid run id")
+        expected_at = utc_text(parse_utc(expected_at))
+        configured = Path(directory).expanduser()
+        if not configured.is_absolute():
+            raise ValueError("status root must be absolute")
+        status_dir = configured.resolve()
+        status_dir.mkdir(mode=0o700, parents=False, exist_ok=True)
+        os.chmod(status_dir, 0o700)
+        observation = cls(
+            enabled=True,
+            run_id=run_id,
+            expected_scheduled_at=expected_at,
+            output_path=status_path(status_dir, run_id),
+            claim_file=claim_path(status_dir, run_id),
+            now=now,
+            configuration_status="ACTIVE",
+        )
+        observation.started_at = utc_text(started)
+        claim_status = observation._claim(started)
+        if claim_status != "CLAIMED":
+            return cls(
+                now=now,
+                configuration_warning_count=1,
+                configuration_status=claim_status,
+                blocks_scanner=True,
+            )
+        if not observation._write("STARTED"):
+            return cls(
+                now=now,
+                configuration_warning_count=1,
+                configuration_status="START_WRITE_FAILED",
+                blocks_scanner=True,
+            )
+        return observation
+
+    def _claim(self, started: datetime) -> str:
+        if self.claim_file is None or self.output_path is None:
+            return "CLAIM_FAILED"
+        if os.path.lexists(self.output_path):
+            return self._existing_status_classification()
+        flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            descriptor = os.open(self.claim_file, flags, 0o600)
+            try:
+                os.fchmod(descriptor, 0o600)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+            return "CLAIMED"
+        except FileExistsError:
+            if os.path.lexists(self.output_path):
+                return self._existing_status_classification()
+            try:
+                age = started.astimezone(timezone.utc).timestamp() - self.claim_file.stat().st_mtime
+                return "STALE_CLAIM" if age > CLAIM_STALE_SECONDS else "DUPLICATE_RUNNING"
+            except OSError:
+                return "CLAIM_FAILED"
+        except OSError:
+            return "CLAIM_FAILED"
+
+    def _existing_status_classification(self) -> str:
+        if self.output_path is None or self.output_path.is_symlink():
+            return "MALFORMED_EXISTING_STATUS"
+        try:
+            if self.output_path.stat().st_size > MAX_STATUS_BYTES:
+                return "MALFORMED_EXISTING_STATUS"
+            record = json.loads(self.output_path.read_text(encoding="utf-8"))
+            if (
+                not isinstance(record, dict)
+                or record.get("schema_version") != STATUS_VERSION
+                or record.get("run_id") != self.run_id
+                or record.get("expected_scheduled_at") != self.expected_scheduled_at
+            ):
+                return "MALFORMED_EXISTING_STATUS"
+            return {
+                "STARTED": "DUPLICATE_RUNNING",
+                "COMPLETED": "DUPLICATE_COMPLETED",
+                "FAILED": "DUPLICATE_FAILED",
+            }.get(str(record.get("state")), "MALFORMED_EXISTING_STATUS")
+        except (OSError, UnicodeError, ValueError, TypeError, json.JSONDecodeError):
+            return "MALFORMED_EXISTING_STATUS"
 
     def record_capture_summary(self, summary: Mapping[str, object]) -> None:
         if not self.enabled:
@@ -124,7 +332,9 @@ class ExpandedShadowRunObservation:
     ) -> bool:
         if not self.enabled:
             return self.configuration_warning_count == 0
-        return self._write(
+        if self.terminal_written:
+            return False
+        written = self._write(
             "COMPLETED",
             completed_at=utc_text(self.now()),
             exit_code=int(exit_code),
@@ -132,11 +342,15 @@ class ExpandedShadowRunObservation:
             total_markets=_nonnegative(total_markets),
             normal_exit_marker=int(exit_code) == 0,
         )
+        self.terminal_written = written
+        return written
 
     def fail(self, error: Exception) -> bool:
         if not self.enabled:
             return self.configuration_warning_count == 0
-        return self._write(
+        if self.terminal_written:
+            return False
+        written = self._write(
             "FAILED",
             completed_at=utc_text(self.now()),
             exit_code=1,
@@ -146,6 +360,8 @@ class ExpandedShadowRunObservation:
             type_error_present=isinstance(error, TypeError),
             traceback_present=True,
         )
+        self.terminal_written = written
+        return written
 
     def _record(self, state: str, **terminal: object) -> dict[str, object]:
         capture_enabled = str(self.capture.get("SHADOW_CAPTURE_ENABLED", "false")).lower()
@@ -190,8 +406,12 @@ class ExpandedShadowRunObservation:
             return False
         temporary = self.output_path.with_suffix(".tmp")
         try:
-            with temporary.open("wb") as handle:
-                os.chmod(temporary, 0o600)
+            flags = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            descriptor = os.open(temporary, flags, 0o600)
+            with os.fdopen(descriptor, "wb") as handle:
+                os.fchmod(handle.fileno(), 0o600)
                 handle.write(encoded)
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -245,9 +465,11 @@ def read_run_status(
         "VALUES_PRINTED": "no_secret_values",
     }
     path = status_path(status_dir.expanduser().resolve(), expected_run_id)
-    if not path.is_file():
+    if not os.path.lexists(path):
         return base
     try:
+        if path.is_symlink() or not path.is_file():
+            raise ValueError("invalid status path")
         if path.stat().st_size > MAX_STATUS_BYTES:
             raise ValueError("oversized status")
         record = json.loads(path.read_text(encoding="utf-8"))

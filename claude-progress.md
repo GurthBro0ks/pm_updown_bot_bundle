@@ -1,3 +1,55 @@
+# 2026-07-21 (pm_phase1c_dynamic_per_invocation_run_attribution — Source Implementation Built)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Expanded Shadow Scanner attribution
+**Type:** Source/test/docs implementation
+**Proof:** `/tmp/proof_pm_phase1c_dynamic_per_invocation_run_attribution_implementation_20260721T154003Z`
+**Manual QA:** pending_targeted_independent_review
+
+### Summary
+Replaced the natural scanner's per-run cron-binding requirement with an
+optional dynamic UTC attribution mode. One stable flag and one stable status
+root now derive a deterministic even-hour schedule, run ID, status record, and
+persistent exclusive claim for every invocation. Production remains disabled.
+
+### Design and behavior
+- Selected integration in the existing scanner CLI/run-observation module;
+  rejected a shell wrapper and cron-composed attribution helper as larger and
+  more failure-prone boundaries.
+- Natural cadence is `utc-even-hours-v1` at minute zero every two hours in UTC.
+  The inclusive default startup grace is 900 seconds, bounded configurability
+  is 0 through 1800 seconds, and slot derivation never rounds forward.
+- Exact, delayed-in-window natural starts derive
+  `expanded-shadow-YYYYMMDDTHHMMSSZ`; early, odd-hour, and late starts are
+  `UNSCHEDULED` and exit before scanner logic.
+- Atomic persistent claim files block concurrent, running, completed, failed,
+  stale-claim, and malformed-record duplicates without overwriting evidence.
+  Legacy explicit attribution remains available for disposable synthetic QA.
+- The redacted observer can independently derive the current slot from one
+  stable root, performs one exact lookup, and exits without logs or polling.
+
+### Verified
+- Clean baseline: `HEAD == origin == edffe5d83355b8065e464dfbaaafb0628b90664e`;
+  required Phase 1B and no-markets repair ancestry present.
+- Focused dynamic/status/return tests: 55 passed.
+- Expanded Phase 1A/1B capture/isolation set: 88 passed.
+- `PYTHONPATH=. pytest tests`: 708 passed, 1 pre-existing dependency warning.
+- `./scripts/run_tests.sh`: `STATUS: ALL GATES PASS`.
+- Python compilation and JSON validation: PASS; no shell file was changed.
+- Sanitized production preflight and postflight: exact disabled cron fingerprint
+  `632b808247f0d62a23790bf75f3b2e95898864a8e4b872f59aefdf3f81e3bad1`;
+  dynamic/legacy attribution fields absent; capture disabled in direct scanner,
+  micro-live, phase-all, and weather; offline ingest unscheduled; runtime SQLite
+  and production database absent; empty spool parent preserved as slimy/0700.
+
+### Safety and remaining work
+- No production scanner, live trading, weather, ingest, external API, spool or
+  status payload read, cron mutation, database, service restart, timer, tmux,
+  Caddy, DNS, or order action occurred.
+- Production adoption still requires targeted independent review and fresh
+  exact-bounded activation approval. Project `passes` remains false until that
+  review and operator QA complete.
+
 # 2026-07-21 (pm_phase1c_observer_completion_telemetry_contract — Source Repair Built)
 
 **Agent:** Codex (SlimyAI NUC1)

@@ -1961,7 +1961,13 @@ if __name__ == "__main__":
         else ExpandedShadowRunObservation()
     )
     if run_observation.configuration_warning_count:
-        logger.warning("[RUN_OBSERVATION] start status unavailable")
+        logger.warning(
+            "[RUN_OBSERVATION] start status unavailable: %s",
+            run_observation.configuration_status,
+        )
+    if run_observation.blocks_scanner:
+        logger.error("[RUN_OBSERVATION] scanner blocked by attribution contract")
+        sys.exit(2)
     try:
         exit_code, candidates_processed, total_markets = optimize_kalshi_strategy(
             mode=args.mode,

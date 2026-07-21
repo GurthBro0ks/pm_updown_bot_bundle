@@ -1,4 +1,16 @@
 {
+  "pm_phase1c_dynamic_per_invocation_run_attribution_20260721": {
+    "status": "built_validation_pass_manual_qa_pending",
+    "file": "research/candidate_ledger/run_observation.py, scripts/expanded_shadow_run_status_redacted.py, strategies/kalshi_optimize.py, tests/test_expanded_shadow_dynamic_attribution.py, docs/ops/expanded_shadow_dynamic_attribution.md, docs/ops/expanded_shadow_one_shot_observation.md, docs/buglog/pm_phase1c_dynamic_per_invocation_run_attribution_20260721.md, claude-progress.md, feature_list.json",
+    "passes": false,
+    "manual_qa_required": true,
+    "pushed": true,
+    "commit": "self_commit_final_sha_reported_in_closeout",
+    "proof_dir": "/tmp/proof_pm_phase1c_dynamic_per_invocation_run_attribution_implementation_20260721T154003Z",
+    "description": "Derive one deterministic UTC run ID and stable-root status path for every natural Expanded Shadow Scanner invocation without per-run cron rebinding.",
+    "result": "PASS_VALIDATION_MANUAL_QA_PENDING",
+    "notes": "Source/test/docs only. Dynamic attribution is disabled by default; production capture and installed cron remain unchanged. Independent review and fresh activation approval remain required."
+  },
   "pm_phase1c_observer_completion_telemetry_contract_20260721": {
     "status": "built_validation_pass_manual_qa_pending",
     "file": "research/candidate_ledger/run_observation.py, research/candidate_ledger/capture.py, scripts/expanded_shadow_run_status_redacted.py, strategies/kalshi_optimize.py, tests/test_expanded_shadow_run_observation.py, tests/test_expanded_shadow_return_contract.py, tests/test_candidate_ledger_capture_integration.py, docs/ops/expanded_shadow_one_shot_observation.md, docs/buglog/pm_phase1c_observer_completion_telemetry_contract_20260721.md, claude-progress.md, feature_list.json",
