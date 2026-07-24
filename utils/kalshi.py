@@ -7,11 +7,14 @@ import os
 import requests
 import time
 import logging
+from dataclasses import dataclass, replace
 from datetime import datetime
+from enum import Enum
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import hashes
 import base64
+from typing import Callable, Mapping
 
 from utils.kalshi_normalize import normalize_kalshi_market
 
@@ -35,6 +38,166 @@ KALSHI_BLOCKED_CATEGORIES = {
 KALSHI_BLOCKED_PREFIXES = ()
 KALSHI_CANONICAL_BASE_URL = "https://api.elections.kalshi.com"
 KALSHI_MAIN_SUPPLEMENTAL_SERIES = ("KXNASDAQ100U",)
+MAX_DISCOVERY_PAGES = 100
+
+
+class DiscoveryOutcome(str, Enum):
+    """Closed, redacted result taxonomy for diagnostic market discovery."""
+
+    SUCCESS_NONEMPTY = "SUCCESS_NONEMPTY"
+    SUCCESS_EMPTY = "SUCCESS_EMPTY"
+    AUTH_CONFIGURATION_MISSING = "AUTH_CONFIGURATION_MISSING"
+    AUTH_REJECTED = "AUTH_REJECTED"
+    NETWORK_TIMEOUT = "NETWORK_TIMEOUT"
+    NETWORK_ERROR = "NETWORK_ERROR"
+    HTTP_ERROR = "HTTP_ERROR"
+    JSON_PARSE_ERROR = "JSON_PARSE_ERROR"
+    SCHEMA_ERROR = "SCHEMA_ERROR"
+    PAGINATION_ERROR = "PAGINATION_ERROR"
+    INTERNAL_DISCOVERY_ERROR = "INTERNAL_DISCOVERY_ERROR"
+
+
+DISCOVERY_FAILURE_OUTCOMES = frozenset(
+    outcome
+    for outcome in DiscoveryOutcome
+    if outcome not in {
+        DiscoveryOutcome.SUCCESS_NONEMPTY,
+        DiscoveryOutcome.SUCCESS_EMPTY,
+    }
+)
+
+REQUEST_STATUS_CLASSES = frozenset(
+    {"NOT_ATTEMPTED", "2XX", "4XX", "5XX", "NETWORK_ERROR"}
+)
+DISCOVERY_ENDPOINT_LABELS = frozenset({"SERIES_AND_MARKETS"})
+
+
+@dataclass(frozen=True)
+class DiscoveryStageCounts:
+    """Nonnegative counts; ``None`` means the stage was not reached."""
+
+    request_attempted: int = 0
+    page_count: int = 0
+    raw_record_count: int | None = None
+    parsed_record_count: int | None = None
+    active_record_count: int | None = None
+    category_eligible_count: int | None = None
+    expiry_eligible_count: int | None = None
+    price_liquidity_eligible_count: int | None = None
+    final_eligible_count: int | None = None
+
+
+@dataclass(frozen=True)
+class KalshiDiscoveryResult:
+    """Structured discovery result with an explicit list compatibility adapter."""
+
+    outcome: DiscoveryOutcome
+    markets: tuple[dict, ...] = ()
+    counts: DiscoveryStageCounts = DiscoveryStageCounts()
+    request_status_class: str = "NOT_ATTEMPTED"
+    endpoint_label: str = "SERIES_AND_MARKETS"
+
+    @property
+    def failure_present(self) -> bool:
+        return self.outcome in DISCOVERY_FAILURE_OUTCOMES
+
+    def market_list(self) -> list[dict]:
+        """Return the legacy mutable list shape without exposing diagnostics."""
+
+        return list(self.markets)
+
+    def with_strategy_counts(
+        self,
+        *,
+        expiry_eligible_count: int,
+        category_eligible_count: int,
+        final_eligible_count: int,
+    ) -> "KalshiDiscoveryResult":
+        """Attach scanner-stage counts without changing the discovered records."""
+
+        if self.failure_present:
+            return self
+        final_count = max(0, int(final_eligible_count))
+        return replace(
+            self,
+            outcome=(
+                DiscoveryOutcome.SUCCESS_NONEMPTY
+                if final_count
+                else DiscoveryOutcome.SUCCESS_EMPTY
+            ),
+            counts=replace(
+                self.counts,
+                expiry_eligible_count=max(0, int(expiry_eligible_count)),
+                category_eligible_count=max(0, int(category_eligible_count)),
+                final_eligible_count=final_count,
+            ),
+        )
+
+    def status_fields(self) -> dict[str, object]:
+        """Return only bounded enums, booleans, and integer telemetry."""
+
+        def count(value: int | None) -> int:
+            return -1 if value is None else max(0, int(value))
+
+        return {
+            "DISCOVERY_OUTCOME": self.outcome.value,
+            "DISCOVERY_REQUEST_ATTEMPTED": int(bool(self.counts.request_attempted)),
+            "DISCOVERY_PAGE_COUNT": count(self.counts.page_count),
+            "DISCOVERY_RAW_RECORD_COUNT": count(self.counts.raw_record_count),
+            "DISCOVERY_PARSED_RECORD_COUNT": count(self.counts.parsed_record_count),
+            "DISCOVERY_ACTIVE_RECORD_COUNT": count(self.counts.active_record_count),
+            "DISCOVERY_CATEGORY_ELIGIBLE_COUNT": count(
+                self.counts.category_eligible_count
+            ),
+            "DISCOVERY_EXPIRY_ELIGIBLE_COUNT": count(
+                self.counts.expiry_eligible_count
+            ),
+            "DISCOVERY_PRICE_LIQUIDITY_ELIGIBLE_COUNT": count(
+                self.counts.price_liquidity_eligible_count
+            ),
+            "DISCOVERY_FINAL_ELIGIBLE_COUNT": count(
+                self.counts.final_eligible_count
+            ),
+            "DISCOVERY_FAILURE_PRESENT": self.failure_present,
+        }
+
+
+class _DiscoveryFailure(RuntimeError):
+    """Internal control flow carrying only the bounded failure taxonomy."""
+
+    def __init__(
+        self,
+        outcome: DiscoveryOutcome,
+        request_status_class: str,
+    ) -> None:
+        super().__init__(outcome.value)
+        self.outcome = outcome
+        self.request_status_class = request_status_class
+
+
+@dataclass
+class _DiscoveryProgress:
+    request_attempted: int = 0
+    page_count: int = 0
+    raw_record_count: int | None = None
+    parsed_record_count: int | None = None
+    active_record_count: int | None = None
+    category_eligible_count: int | None = None
+    price_liquidity_eligible_count: int | None = None
+    final_eligible_count: int | None = None
+
+    def counts(self) -> DiscoveryStageCounts:
+        return DiscoveryStageCounts(
+            request_attempted=self.request_attempted,
+            page_count=self.page_count,
+            raw_record_count=self.raw_record_count,
+            parsed_record_count=self.parsed_record_count,
+            active_record_count=self.active_record_count,
+            category_eligible_count=self.category_eligible_count,
+            expiry_eligible_count=None,
+            price_liquidity_eligible_count=self.price_liquidity_eligible_count,
+            final_eligible_count=self.final_eligible_count,
+        )
 
 
 def _safe_float(value, default=0.0):
@@ -47,10 +210,11 @@ def _safe_float(value, default=0.0):
         return float(default)
 
 
-def _candidate_kalshi_base_urls():
+def _candidate_kalshi_base_urls(environment: Mapping[str, str] | None = None):
     """Resolve configured Kalshi API URL with canonical fallback."""
+    values = os.environ if environment is None else environment
     configured = (
-        os.getenv("KALSHI_BASE_URL", KALSHI_CANONICAL_BASE_URL)
+        values.get("KALSHI_BASE_URL", KALSHI_CANONICAL_BASE_URL)
         .strip()
         .rstrip("/")
     )
@@ -267,6 +431,439 @@ def fetch_markets_for_series(series_ticker, api_key, private_key):
     except Exception as e:
         logger.debug(f"Error fetching markets for {series_ticker}: {e}")
         return []
+
+
+def _request_status_class(status_code: int) -> str:
+    if 200 <= status_code < 300:
+        return "2XX"
+    if 400 <= status_code < 500:
+        return "4XX"
+    return "5XX"
+
+
+def _request_discovery_page(
+    *,
+    path: str,
+    params: dict[str, object],
+    api_key: str,
+    private_key: object,
+    request_get: Callable,
+    header_factory: Callable,
+    environment: Mapping[str, str],
+    progress: _DiscoveryProgress,
+) -> tuple[dict, str]:
+    try:
+        headers = header_factory("GET", path, api_key, private_key)
+    except Exception as exc:
+        raise _DiscoveryFailure(
+            DiscoveryOutcome.AUTH_CONFIGURATION_MISSING,
+            "NOT_ATTEMPTED",
+        ) from exc
+
+    response = None
+    progress.request_attempted = 1
+    try:
+        for base_url in _candidate_kalshi_base_urls(environment):
+            candidate = request_get(
+                f"{base_url}/trade-api/v2{path}",
+                headers=headers,
+                params=params,
+                timeout=15,
+            )
+            response = candidate
+            if 200 <= int(candidate.status_code) < 300:
+                break
+    except requests.exceptions.Timeout as exc:
+        raise _DiscoveryFailure(
+            DiscoveryOutcome.NETWORK_TIMEOUT,
+            "NETWORK_ERROR",
+        ) from exc
+    except (requests.exceptions.ConnectionError, requests.exceptions.RequestException) as exc:
+        raise _DiscoveryFailure(
+            DiscoveryOutcome.NETWORK_ERROR,
+            "NETWORK_ERROR",
+        ) from exc
+
+    if response is None:
+        raise _DiscoveryFailure(
+            DiscoveryOutcome.NETWORK_ERROR,
+            "NETWORK_ERROR",
+        )
+    status_code = int(response.status_code)
+    status_class = _request_status_class(status_code)
+    if not 200 <= status_code < 300:
+        outcome = (
+            DiscoveryOutcome.AUTH_REJECTED
+            if status_code in {401, 403}
+            else DiscoveryOutcome.HTTP_ERROR
+        )
+        raise _DiscoveryFailure(outcome, status_class)
+    try:
+        payload = response.json()
+    except (ValueError, requests.exceptions.JSONDecodeError) as exc:
+        raise _DiscoveryFailure(
+            DiscoveryOutcome.JSON_PARSE_ERROR,
+            status_class,
+        ) from exc
+    if not isinstance(payload, dict):
+        raise _DiscoveryFailure(DiscoveryOutcome.SCHEMA_ERROR, status_class)
+    return payload, status_class
+
+
+def _fetch_paginated_collection(
+    *,
+    path: str,
+    collection_field: str,
+    params: dict[str, object],
+    api_key: str,
+    private_key: object,
+    request_get: Callable,
+    header_factory: Callable,
+    environment: Mapping[str, str],
+    progress: _DiscoveryProgress,
+    count_market_records: bool = False,
+    market_record_base: int = 0,
+) -> list[dict]:
+    records: list[dict] = []
+    cursor = ""
+    seen_cursors: set[str] = set()
+    for page_index in range(MAX_DISCOVERY_PAGES):
+        page_params = dict(params)
+        if cursor:
+            page_params["cursor"] = cursor
+        try:
+            payload, _status_class = _request_discovery_page(
+                path=path,
+                params=page_params,
+                api_key=api_key,
+                private_key=private_key,
+                request_get=request_get,
+                header_factory=header_factory,
+                environment=environment,
+                progress=progress,
+            )
+            if collection_field not in payload:
+                raise _DiscoveryFailure(
+                    DiscoveryOutcome.SCHEMA_ERROR,
+                    "2XX",
+                )
+            page_records = payload[collection_field]
+            if not isinstance(page_records, list) or not all(
+                isinstance(record, dict) for record in page_records
+            ):
+                raise _DiscoveryFailure(
+                    DiscoveryOutcome.SCHEMA_ERROR,
+                    "2XX",
+                )
+            next_cursor = payload.get("cursor", "")
+            if next_cursor is None:
+                next_cursor = ""
+            if not isinstance(next_cursor, str):
+                raise _DiscoveryFailure(
+                    DiscoveryOutcome.SCHEMA_ERROR,
+                    "2XX",
+                )
+        except _DiscoveryFailure as exc:
+            if page_index > 0:
+                raise _DiscoveryFailure(
+                    DiscoveryOutcome.PAGINATION_ERROR,
+                    exc.request_status_class,
+                ) from exc
+            raise
+
+        records.extend(page_records)
+        progress.page_count += 1
+        if count_market_records:
+            progress.raw_record_count = market_record_base + len(records)
+        cursor = next_cursor.strip()
+        if not cursor:
+            return records
+        if cursor in seen_cursors:
+            raise _DiscoveryFailure(
+                DiscoveryOutcome.PAGINATION_ERROR,
+                "2XX",
+            )
+        seen_cursors.add(cursor)
+    raise _DiscoveryFailure(
+        DiscoveryOutcome.PAGINATION_ERROR,
+        "2XX",
+    )
+
+
+def _discovery_failure_result(
+    failure: _DiscoveryFailure,
+    progress: _DiscoveryProgress,
+) -> KalshiDiscoveryResult:
+    return KalshiDiscoveryResult(
+        outcome=failure.outcome,
+        counts=progress.counts(),
+        request_status_class=(
+            failure.request_status_class
+            if failure.request_status_class in REQUEST_STATUS_CLASSES
+            else "NETWORK_ERROR"
+        ),
+    )
+
+
+def fetch_kalshi_markets_diagnostic(
+    *,
+    environment: Mapping[str, str] | None = None,
+    api_key: str | None = None,
+    private_key: object | None = None,
+    request_get: Callable | None = None,
+    header_factory: Callable = get_kalshi_headers,
+    normalizer: Callable[[dict], dict] = normalize_kalshi_market,
+) -> KalshiDiscoveryResult:
+    """Fetch markets with bounded redacted diagnostics and complete pagination.
+
+    This is intentionally separate from :func:`fetch_kalshi_markets`, whose
+    list-returning behavior remains available to existing trading callers.
+    """
+
+    values = os.environ if environment is None else environment
+    progress = _DiscoveryProgress()
+    request_get = request_get or requests.get
+    configured_api_key = api_key or str(values.get("KALSHI_KEY", "")).strip()
+    if not configured_api_key:
+        return KalshiDiscoveryResult(
+            outcome=DiscoveryOutcome.AUTH_CONFIGURATION_MISSING,
+            counts=progress.counts(),
+        )
+    if private_key is None:
+        secret_file = str(
+            values.get("KALSHI_SECRET_FILE", "./kalshi_private_key.pem")
+        ).strip()
+        if not secret_file:
+            return KalshiDiscoveryResult(
+                outcome=DiscoveryOutcome.AUTH_CONFIGURATION_MISSING,
+                counts=progress.counts(),
+            )
+        try:
+            with open(secret_file, "rb") as handle:
+                private_key = serialization.load_pem_private_key(
+                    handle.read(),
+                    password=None,
+                )
+        except (OSError, TypeError, ValueError):
+            return KalshiDiscoveryResult(
+                outcome=DiscoveryOutcome.AUTH_CONFIGURATION_MISSING,
+                counts=progress.counts(),
+            )
+
+    try:
+        try:
+            series_limit = int(values.get("KALSHI_SERIES_LIMIT", "50") or "50")
+        except (TypeError, ValueError):
+            series_limit = 50
+        try:
+            min_liquidity_usd = float(
+                values.get("KALSHI_FETCH_MIN_LIQUIDITY_USD", "0") or "0"
+            )
+        except (TypeError, ValueError):
+            min_liquidity_usd = 0.0
+        include_categories_raw = str(
+            values.get("KALSHI_FETCH_INCLUDE_CATEGORIES", "")
+        ).strip()
+        include_categories = (
+            {
+                category.strip().lower()
+                for category in include_categories_raw.split(",")
+                if category.strip()
+            }
+            if include_categories_raw
+            else None
+        )
+
+        target_series = _fetch_paginated_collection(
+            path="/series",
+            collection_field="series",
+            params={"include_volume": "true"},
+            api_key=configured_api_key,
+            private_key=private_key,
+            request_get=request_get,
+            header_factory=header_factory,
+            environment=values,
+            progress=progress,
+        )
+        if not all(str(series.get("ticker") or "").strip() for series in target_series):
+            raise _DiscoveryFailure(DiscoveryOutcome.SCHEMA_ERROR, "2XX")
+        target_series = [
+            series
+            for series in target_series
+            if not any(
+                _series_ticker(series).startswith(prefix)
+                for prefix in KALSHI_BLOCKED_PREFIXES
+            )
+            and series.get("category", "") not in KALSHI_BLOCKED_CATEGORIES
+        ]
+        selected_series, supplemental_added = _select_series_for_fetch(
+            target_series,
+            series_limit,
+        )
+
+        raw_markets: list[dict] = []
+        progress.raw_record_count = 0
+        for series in selected_series:
+            series_ticker = _series_ticker(series)
+            series_markets = _fetch_paginated_collection(
+                path="/markets",
+                collection_field="markets",
+                params={
+                    "series_ticker": series_ticker,
+                    "status": "open",
+                    "limit": 100,
+                },
+                api_key=configured_api_key,
+                private_key=private_key,
+                request_get=request_get,
+                header_factory=header_factory,
+                environment=values,
+                progress=progress,
+                count_market_records=True,
+                market_record_base=len(raw_markets),
+            )
+            for market in series_markets:
+                market = dict(market)
+                market["series_ticker"] = series_ticker
+                market["series_category"] = series.get("category")
+                market["fee_multiplier"] = series.get("fee_multiplier", 0.07)
+                market["series_volume"] = series.get("volume", 0)
+                market["_kalshi_fetch_source"] = (
+                    "supplemental_series"
+                    if series_ticker in supplemental_added
+                    else "top_series"
+                )
+                raw_markets.append(market)
+            progress.raw_record_count = len(raw_markets)
+
+        parsed: list[tuple[dict, dict]] = []
+        for market in raw_markets:
+            if not str(market.get("ticker") or market.get("id") or "").strip():
+                raise _DiscoveryFailure(DiscoveryOutcome.SCHEMA_ERROR, "2XX")
+            try:
+                normalized = normalizer(market)
+            except Exception as exc:
+                raise _DiscoveryFailure(
+                    DiscoveryOutcome.SCHEMA_ERROR,
+                    "2XX",
+                ) from exc
+            if not isinstance(normalized, dict) or not str(
+                normalized.get("ticker") or normalized.get("id") or ""
+            ).strip():
+                raise _DiscoveryFailure(DiscoveryOutcome.SCHEMA_ERROR, "2XX")
+            normalized["series_ticker"] = market.get("series_ticker")
+            normalized["series_category"] = market.get("series_category")
+            normalized["kalshi_fetch_source"] = market.get("_kalshi_fetch_source")
+            normalized["fee_multiplier"] = _safe_float(
+                market.get("fee_multiplier", 1),
+                1.0,
+            )
+            normalized["fee_type"] = (
+                "quadratic"
+                if _safe_float(market.get("fee_multiplier", 1), 1.0) < 1
+                else "standard"
+            )
+            parsed.append((market, normalized))
+        progress.parsed_record_count = len(parsed)
+
+        active = [
+            pair
+            for pair in parsed
+            if str(pair[0].get("status", "active") or "active").lower()
+            in {"active", "open"}
+        ]
+        progress.active_record_count = len(active)
+
+        price_liquidity: list[tuple[dict, dict]] = []
+        for raw, normalized in active:
+            yes_bid_price = _market_price_value(
+                raw,
+                "yes_bid_dollars",
+                "yes_bid",
+            )
+            yes_ask_price = _market_price_value(
+                raw,
+                "yes_ask_dollars",
+                "yes_ask",
+            )
+            if yes_ask_price is None or yes_ask_price <= 0:
+                yes_ask_price = _market_price_value(
+                    raw,
+                    "last_price_dollars",
+                    "last_price",
+                )
+                if yes_ask_price is None or yes_ask_price <= 0:
+                    continue
+            yes_price = (
+                (yes_bid_price + yes_ask_price) / 2.0
+                if yes_bid_price is not None and yes_bid_price > 0
+                else yes_ask_price
+            )
+            reported_liquidity_usd = _safe_float(
+                raw.get("liquidity_dollars", 0),
+                0.0,
+            )
+            open_interest_units = _safe_float(
+                raw.get("open_interest_fp", raw.get("open_interest", 0)),
+                0.0,
+            )
+            liquidity_usd = (
+                reported_liquidity_usd
+                if reported_liquidity_usd > 0
+                else open_interest_units * yes_price
+            )
+            if min_liquidity_usd > 0 and liquidity_usd < min_liquidity_usd:
+                continue
+            price_liquidity.append((raw, normalized))
+        progress.price_liquidity_eligible_count = len(price_liquidity)
+
+        if include_categories is None:
+            category_eligible = price_liquidity
+        else:
+            category_eligible = [
+                pair
+                for pair in price_liquidity
+                if str(pair[0].get("series_category", "")).strip().lower()
+                in include_categories
+            ]
+        progress.category_eligible_count = len(category_eligible)
+
+        final_pairs = [
+            pair
+            for pair in category_eligible
+            if not any(
+                str(pair[0].get("ticker") or "").upper().startswith(prefix)
+                for prefix in KALSHI_BLOCKED_PREFIXES
+            )
+        ]
+        final_pairs.sort(
+            key=lambda pair: -_safe_float(
+                pair[0].get("volume_24h_fp", pair[0].get("volume_24h", 0)),
+                0.0,
+            )
+        )
+        markets = tuple(normalized for _raw, normalized in final_pairs)
+        progress.final_eligible_count = len(markets)
+        return KalshiDiscoveryResult(
+            outcome=(
+                DiscoveryOutcome.SUCCESS_NONEMPTY
+                if markets
+                else DiscoveryOutcome.SUCCESS_EMPTY
+            ),
+            markets=markets,
+            counts=progress.counts(),
+            request_status_class="2XX",
+        )
+    except _DiscoveryFailure as failure:
+        return _discovery_failure_result(failure, progress)
+    except Exception:
+        return KalshiDiscoveryResult(
+            outcome=DiscoveryOutcome.INTERNAL_DISCOVERY_ERROR,
+            counts=progress.counts(),
+            request_status_class=(
+                "2XX" if progress.request_attempted else "NOT_ATTEMPTED"
+            ),
+        )
 
 
 def fetch_kalshi_markets():

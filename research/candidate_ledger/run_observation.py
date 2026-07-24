@@ -44,6 +44,45 @@ CAPTURE_FIELDS = {
     "ORDER_RESULT_COUNT",
 }
 
+DISCOVERY_OUTCOMES = {
+    "SUCCESS_NONEMPTY",
+    "SUCCESS_EMPTY",
+    "AUTH_CONFIGURATION_MISSING",
+    "AUTH_REJECTED",
+    "NETWORK_TIMEOUT",
+    "NETWORK_ERROR",
+    "HTTP_ERROR",
+    "JSON_PARSE_ERROR",
+    "SCHEMA_ERROR",
+    "PAGINATION_ERROR",
+    "INTERNAL_DISCOVERY_ERROR",
+    "NOT_REACHED",
+    "LEGACY_UNAVAILABLE",
+}
+DISCOVERY_FAILURE_OUTCOMES = {
+    "AUTH_CONFIGURATION_MISSING",
+    "AUTH_REJECTED",
+    "NETWORK_TIMEOUT",
+    "NETWORK_ERROR",
+    "HTTP_ERROR",
+    "JSON_PARSE_ERROR",
+    "SCHEMA_ERROR",
+    "PAGINATION_ERROR",
+    "INTERNAL_DISCOVERY_ERROR",
+}
+DISCOVERY_COUNT_FIELDS = {
+    "DISCOVERY_REQUEST_ATTEMPTED",
+    "DISCOVERY_PAGE_COUNT",
+    "DISCOVERY_RAW_RECORD_COUNT",
+    "DISCOVERY_PARSED_RECORD_COUNT",
+    "DISCOVERY_ACTIVE_RECORD_COUNT",
+    "DISCOVERY_CATEGORY_ELIGIBLE_COUNT",
+    "DISCOVERY_EXPIRY_ELIGIBLE_COUNT",
+    "DISCOVERY_PRICE_LIQUIDITY_ELIGIBLE_COUNT",
+    "DISCOVERY_FINAL_ELIGIBLE_COUNT",
+}
+MAX_DISCOVERY_COUNT = 2_147_483_647
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -129,6 +168,14 @@ def _nonnegative(value: object) -> int:
         return 0
 
 
+def _discovery_count(value: object) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return -1
+    return min(MAX_DISCOVERY_COUNT, max(-1, parsed))
+
+
 @dataclass
 class ExpandedShadowRunObservation:
     """In-memory run state with an optional atomic status-file sink."""
@@ -144,6 +191,7 @@ class ExpandedShadowRunObservation:
     blocks_scanner: bool = False
     started_at: str = ""
     capture: dict[str, object] = field(default_factory=dict)
+    discovery: dict[str, object] = field(default_factory=dict)
     terminal_written: bool = False
 
     @classmethod
@@ -323,6 +371,28 @@ class ExpandedShadowRunObservation:
             return
         self.capture = {name: summary[name] for name in CAPTURE_FIELDS if name in summary}
 
+    def record_discovery_result(self, result: Mapping[str, object]) -> None:
+        """Record only the closed discovery taxonomy and bounded stage counts."""
+
+        if not self.enabled:
+            return
+        outcome = str(result.get("DISCOVERY_OUTCOME", "INTERNAL_DISCOVERY_ERROR"))
+        if outcome not in DISCOVERY_OUTCOMES:
+            outcome = "INTERNAL_DISCOVERY_ERROR"
+        fields: dict[str, object] = {
+            "DISCOVERY_OUTCOME": outcome,
+            "DISCOVERY_FAILURE_PRESENT": (
+                bool(result.get("DISCOVERY_FAILURE_PRESENT"))
+                or outcome in DISCOVERY_FAILURE_OUTCOMES
+            ),
+        }
+        for name in DISCOVERY_COUNT_FIELDS:
+            fields[name] = _discovery_count(result.get(name, -1))
+        fields["DISCOVERY_REQUEST_ATTEMPTED"] = (
+            1 if fields["DISCOVERY_REQUEST_ATTEMPTED"] > 0 else 0
+        )
+        self.discovery = fields
+
     def complete(
         self,
         *,
@@ -334,13 +404,19 @@ class ExpandedShadowRunObservation:
             return self.configuration_warning_count == 0
         if self.terminal_written:
             return False
+        discovery_failure = bool(
+            self.discovery.get("DISCOVERY_FAILURE_PRESENT", False)
+        )
+        terminal_failure = int(exit_code) != 0 or discovery_failure
         written = self._write(
-            "COMPLETED",
+            "FAILED" if terminal_failure else "COMPLETED",
             completed_at=utc_text(self.now()),
             exit_code=int(exit_code),
             candidates_processed=_nonnegative(candidates_processed),
-            total_markets=_nonnegative(total_markets),
-            normal_exit_marker=int(exit_code) == 0,
+            total_markets=(
+                None if discovery_failure else _nonnegative(total_markets)
+            ),
+            normal_exit_marker=not terminal_failure,
         )
         self.terminal_written = written
         return written
@@ -368,6 +444,20 @@ class ExpandedShadowRunObservation:
         capture_mode = str(self.capture.get("RUNTIME_CAPTURE_MODE", "disabled"))
         if capture_mode not in {"disabled", "spool"}:
             capture_mode = "disabled" if capture_enabled != "true" else "spool"
+        discovery = {
+            "DISCOVERY_OUTCOME": "NOT_REACHED",
+            "DISCOVERY_REQUEST_ATTEMPTED": 0,
+            "DISCOVERY_PAGE_COUNT": -1,
+            "DISCOVERY_RAW_RECORD_COUNT": -1,
+            "DISCOVERY_PARSED_RECORD_COUNT": -1,
+            "DISCOVERY_ACTIVE_RECORD_COUNT": -1,
+            "DISCOVERY_CATEGORY_ELIGIBLE_COUNT": -1,
+            "DISCOVERY_EXPIRY_ELIGIBLE_COUNT": -1,
+            "DISCOVERY_PRICE_LIQUIDITY_ELIGIBLE_COUNT": -1,
+            "DISCOVERY_FINAL_ELIGIBLE_COUNT": -1,
+            "DISCOVERY_FAILURE_PRESENT": False,
+        }
+        discovery.update(self.discovery)
         record: dict[str, object] = {
             "schema_version": STATUS_VERSION,
             "run_id": self.run_id,
@@ -379,6 +469,35 @@ class ExpandedShadowRunObservation:
             "exit_code": None,
             "candidates_processed": None,
             "total_markets": None,
+            "discovery_outcome": discovery["DISCOVERY_OUTCOME"],
+            "discovery_request_attempted": discovery[
+                "DISCOVERY_REQUEST_ATTEMPTED"
+            ],
+            "discovery_page_count": discovery["DISCOVERY_PAGE_COUNT"],
+            "discovery_raw_record_count": discovery[
+                "DISCOVERY_RAW_RECORD_COUNT"
+            ],
+            "discovery_parsed_record_count": discovery[
+                "DISCOVERY_PARSED_RECORD_COUNT"
+            ],
+            "discovery_active_record_count": discovery[
+                "DISCOVERY_ACTIVE_RECORD_COUNT"
+            ],
+            "discovery_category_eligible_count": discovery[
+                "DISCOVERY_CATEGORY_ELIGIBLE_COUNT"
+            ],
+            "discovery_expiry_eligible_count": discovery[
+                "DISCOVERY_EXPIRY_ELIGIBLE_COUNT"
+            ],
+            "discovery_price_liquidity_eligible_count": discovery[
+                "DISCOVERY_PRICE_LIQUIDITY_ELIGIBLE_COUNT"
+            ],
+            "discovery_final_eligible_count": discovery[
+                "DISCOVERY_FINAL_ELIGIBLE_COUNT"
+            ],
+            "discovery_failure_present": discovery[
+                "DISCOVERY_FAILURE_PRESENT"
+            ],
             "capture_mode": capture_mode,
             "candidate_observed_count": _nonnegative(self.capture.get("CANDIDATE_OBSERVED_COUNT", 0)),
             "gate_evaluated_count": _nonnegative(self.capture.get("GATE_EVALUATED_COUNT", 0)),
@@ -449,6 +568,17 @@ def read_run_status(
         "EXIT_CODE": "",
         "CANDIDATES_PROCESSED": "",
         "TOTAL_MARKETS": "",
+        "DISCOVERY_OUTCOME": "LEGACY_UNAVAILABLE",
+        "DISCOVERY_REQUEST_ATTEMPTED": -1,
+        "DISCOVERY_PAGE_COUNT": -1,
+        "DISCOVERY_RAW_RECORD_COUNT": -1,
+        "DISCOVERY_PARSED_RECORD_COUNT": -1,
+        "DISCOVERY_ACTIVE_RECORD_COUNT": -1,
+        "DISCOVERY_CATEGORY_ELIGIBLE_COUNT": -1,
+        "DISCOVERY_EXPIRY_ELIGIBLE_COUNT": -1,
+        "DISCOVERY_PRICE_LIQUIDITY_ELIGIBLE_COUNT": -1,
+        "DISCOVERY_FINAL_ELIGIBLE_COUNT": -1,
+        "DISCOVERY_FAILURE_PRESENT": "no",
         "CAPTURE_MODE": "",
         "CANDIDATE_OBSERVED_COUNT": 0,
         "GATE_EVALUATED_COUNT": 0,
@@ -484,6 +614,15 @@ def read_run_status(
             base["EXPANDED_SHADOW_RUN_STATUS"] = "FAIL"
             base["STALE_STATUS_REJECTED"] = "yes"
             return base
+        discovery_outcome = str(
+            record.get("discovery_outcome", "LEGACY_UNAVAILABLE")
+        )
+        if discovery_outcome not in DISCOVERY_OUTCOMES:
+            discovery_outcome = "INTERNAL_DISCOVERY_ERROR"
+        discovery_failure = (
+            record.get("discovery_failure_present") is True
+            or discovery_outcome in DISCOVERY_FAILURE_OUTCOMES
+        )
         base.update(
             {
                 "STARTED_AT": utc_text(started),
@@ -492,6 +631,38 @@ def read_run_status(
                 "EXIT_CODE": "" if record.get("exit_code") is None else int(record["exit_code"]),
                 "CANDIDATES_PROCESSED": "" if record.get("candidates_processed") is None else _nonnegative(record["candidates_processed"]),
                 "TOTAL_MARKETS": "" if record.get("total_markets") is None else _nonnegative(record["total_markets"]),
+                "DISCOVERY_OUTCOME": discovery_outcome,
+                "DISCOVERY_REQUEST_ATTEMPTED": _discovery_count(
+                    record.get("discovery_request_attempted", -1)
+                ),
+                "DISCOVERY_PAGE_COUNT": _discovery_count(
+                    record.get("discovery_page_count", -1)
+                ),
+                "DISCOVERY_RAW_RECORD_COUNT": _discovery_count(
+                    record.get("discovery_raw_record_count", -1)
+                ),
+                "DISCOVERY_PARSED_RECORD_COUNT": _discovery_count(
+                    record.get("discovery_parsed_record_count", -1)
+                ),
+                "DISCOVERY_ACTIVE_RECORD_COUNT": _discovery_count(
+                    record.get("discovery_active_record_count", -1)
+                ),
+                "DISCOVERY_CATEGORY_ELIGIBLE_COUNT": _discovery_count(
+                    record.get("discovery_category_eligible_count", -1)
+                ),
+                "DISCOVERY_EXPIRY_ELIGIBLE_COUNT": _discovery_count(
+                    record.get("discovery_expiry_eligible_count", -1)
+                ),
+                "DISCOVERY_PRICE_LIQUIDITY_ELIGIBLE_COUNT": _discovery_count(
+                    record.get(
+                        "discovery_price_liquidity_eligible_count",
+                        -1,
+                    )
+                ),
+                "DISCOVERY_FINAL_ELIGIBLE_COUNT": _discovery_count(
+                    record.get("discovery_final_eligible_count", -1)
+                ),
+                "DISCOVERY_FAILURE_PRESENT": "yes" if discovery_failure else "no",
                 "CAPTURE_MODE": str(record.get("capture_mode") or ""),
                 "CANDIDATE_OBSERVED_COUNT": _nonnegative(record.get("candidate_observed_count", 0)),
                 "GATE_EVALUATED_COUNT": _nonnegative(record.get("gate_evaluated_count", 0)),
@@ -521,7 +692,7 @@ def read_run_status(
                 and _nonnegative(record.get("capture_drop_count", 0)) == 0
             )
             mode_ok = required_capture_mode is None or record.get("capture_mode") == required_capture_mode
-            if not normal:
+            if not normal or discovery_failure:
                 base["EXPANDED_SHADOW_RUN_STATUS"] = "FAIL"
             else:
                 base["EXPANDED_SHADOW_RUN_STATUS"] = "PASS" if capture_ok and mode_ok else "WARN"

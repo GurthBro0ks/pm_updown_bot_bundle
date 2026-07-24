@@ -397,7 +397,8 @@ def test_dynamic_observer_derives_one_exact_lookup_and_exits(
     assert result == 0
     assert f"RUN_ID={EXPECTED_RUN_ID}" in output
     assert f"EXPECTED_SCHEDULED_AT={EXPECTED_AT}" in output
-    assert len(output.splitlines()) == 23
+    assert "DISCOVERY_OUTCOME=NOT_REACHED" in output
+    assert len(output.splitlines()) == 34
 
 
 def test_dynamic_observer_rejects_late_unscheduled_lookup(tmp_path: Path) -> None:

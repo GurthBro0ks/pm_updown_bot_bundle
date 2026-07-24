@@ -16,7 +16,7 @@ sys.path.insert(0, '/opt/slimy/pm_updown_bot_bundle')
 
 # Local imports (avoid circular import)
 from utils.proof import generate_proof
-from utils.kalshi import fetch_kalshi_markets
+from utils.kalshi import fetch_kalshi_markets, fetch_kalshi_markets_diagnostic
 from utils.pnl_database import record_trade
 try:
     from utils.edge_nearest_miss import build_summary as build_edge_nearest_miss_summary
@@ -163,6 +163,18 @@ def _record_run_observation_capture(run_observation, summary):
         run_observation.record_capture_summary(summary)
     except Exception:
         logger.warning("[RUN_OBSERVATION] capture summary unavailable")
+
+
+def _record_run_observation_discovery(run_observation, discovery_result):
+    """Publish bounded discovery telemetry without affecting decision inputs."""
+
+    if run_observation is None:
+        return
+    try:
+        run_observation.record_discovery_result(discovery_result.status_fields())
+    except Exception:
+        logger.warning("[RUN_OBSERVATION] discovery telemetry unavailable")
+
 
 # Expiry filters (configurable via env)
 MAX_DAYS_TO_EXPIRY = float(os.getenv("MAX_DAYS_TO_EXPIRY", "14") or "14")
@@ -832,6 +844,7 @@ def optimize_kalshi_strategy(
     stage_budget=None,
     cursor=None,
     run_observation=None,
+    discovery_diagnostics: bool = False,
 ) -> tuple[int, int, int]:
     """
     Main function for Phase 1 Kalshi optimization
@@ -895,11 +908,33 @@ def optimize_kalshi_strategy(
         except Exception:
             logger.warning("[SHADOW_CAPTURE] adapter initialization failed safely")
     
-    # Fetch Kalshi markets
+    # Fetch Kalshi markets. Existing live/trading callers retain the legacy
+    # list-returning path; only the direct shadow scanner requests diagnostics.
     logger.info("Fetching Kalshi markets...")
-    markets = fetch_kalshi_markets()
+    discovery_result = None
+    if mode == "shadow" and discovery_diagnostics:
+        discovery_result = fetch_kalshi_markets_diagnostic()
+        markets = discovery_result.market_list()
+        if discovery_result.failure_present:
+            _record_run_observation_discovery(run_observation, discovery_result)
+            logger.error(
+                "[KALSHI_DISCOVERY] failed outcome=%s",
+                discovery_result.outcome.value,
+            )
+            shadow_capture_summary = _flush_shadow_candidates(capture_runtime)
+            _record_run_observation_capture(run_observation, shadow_capture_summary)
+            return 2, 0, 0
+    else:
+        markets = fetch_kalshi_markets()
     
     if not markets:
+        if discovery_result is not None:
+            discovery_result = discovery_result.with_strategy_counts(
+                expiry_eligible_count=0,
+                category_eligible_count=0,
+                final_eligible_count=0,
+            )
+            _record_run_observation_discovery(run_observation, discovery_result)
         logger.warning("No markets fetched")
         shadow_capture_summary = _flush_shadow_candidates(capture_runtime)
         _record_run_observation_capture(run_observation, shadow_capture_summary)
@@ -1050,6 +1085,13 @@ def optimize_kalshi_strategy(
         len(markets),
         ",".join(sorted(ALLOWED_CATEGORIES)),
     )
+    if discovery_result is not None:
+        discovery_result = discovery_result.with_strategy_counts(
+            expiry_eligible_count=before_cat,
+            category_eligible_count=len(markets),
+            final_eligible_count=len(markets),
+        )
+        _record_run_observation_discovery(run_observation, discovery_result)
 
     # Split premium into two volume-sorted buckets: short-term (<=7d) and long-term (>7d)
     # Each bucket gets up to 10 markets; together they form the 20-market AI premium tier
@@ -1975,6 +2017,7 @@ if __name__ == "__main__":
             max_pos_usd=args.max_pos,
             dry_run=(args.mode == "shadow"),
             run_observation=run_observation,
+            discovery_diagnostics=(args.mode == "shadow"),
         )
     except Exception as exc:
         run_observation.fail(exc)

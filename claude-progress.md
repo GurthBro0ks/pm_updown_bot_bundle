@@ -1,3 +1,51 @@
+# 2026-07-24 (pm_expanded_shadow_zero_event_discovery_observability_repair — Source Repair Built)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Expanded Shadow Scanner discovery
+**Type:** Source/test/docs implementation
+**Proof:** `/tmp/proof_pm_expanded_shadow_zero_event_discovery_observability_repair_20260724T145538Z`
+**Manual QA:** pending_targeted_independent_review
+
+### Summary
+Added a direct-shadow-only structured discovery result so legitimate zero
+responses, configuration/auth/network/HTTP/JSON/schema/parser/pagination
+failures, and filter-empty success no longer share one successful zero-market
+status. Added bounded stage counts to the exact-run status/observer and removed
+record-derived ticker samples from redacted inventory output.
+
+### Design and behavior
+- Preserved the legacy list-returning discovery function and all live/trading
+  and non-CLI shadow callers.
+- The direct shadow CLI explicitly opts into the diagnostic result, complete
+  series/market cursor pagination, and truthful nonzero/FAILED failure status.
+- `SUCCESS_EMPTY` remains exit zero/COMPLETED. Failures exit two/FAILED and
+  leave `total_markets` unavailable.
+- Added one purpose-built twelve-field redacted discovery command and a
+  separately approved future one-shot runbook; it was not executed live.
+- Existing 22 zero-event records remain untouched and their actual cause is
+  still unproven pending the separately approved one-shot check.
+
+### Verified
+- Clean baseline `HEAD == origin == 274d433d...`; required ancestry present.
+- Touched Python compilation: PASS.
+- Focused discovery/status/capture/dynamic suites: 161 passed.
+- `PYTHONPATH=. pytest -q tests`: 766 passed, one pre-existing dependency
+  deprecation warning.
+- `./scripts/run_tests.sh`: `STATUS: ALL GATES PASS`.
+- AST behavior-equivalence review: PASS for legacy discovery, filters,
+  category policy, fees, sizing, gates, and policy constants.
+- Changed-file secret/redaction scan: PASS.
+- Sanitized production postflight: cron fingerprint
+  `632b808247f0d62a23790bf75f3b2e95898864a8e4b872f59aefdf3f81e3bad1`;
+  all capture/attribution lanes disabled; no temporary jobs, ingest, runtime
+  SQLite, or production DB; status/spool metadata preserved.
+
+### Safety and remaining work
+- No live discovery, scanner, trading, weather, ingest, external API, order,
+  cron, service, timer, tmux, Caddy, DNS, database, or secret action occurred.
+- Independent review of taxonomy, compatibility, redaction, and adoption is
+  pending. A later one-shot redacted discovery requires separate approval.
+
 # 2026-07-21 (pm_phase1c_dynamic_per_invocation_run_attribution — Source Implementation Built)
 
 **Agent:** Codex (SlimyAI NUC1)

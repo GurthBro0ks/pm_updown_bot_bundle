@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Redacted read-only inventory for main Kalshi market candidates.
 
-The command prints only public market metadata summaries: counts, public
-categories, and public tickers. It does not place, cancel, or modify orders.
+The command prints only public market metadata summaries and counts. It does
+not print market identifiers or place, cancel, or modify orders.
 """
 
 from __future__ import annotations
@@ -310,8 +310,6 @@ def format_inventory(result: InventoryResult) -> str:
         f"{public_token(category)}:{count}"
         for category, count in result.category_counts.items()
     ) or "none"
-    allowed_sample = ",".join(result.sample_allowed_tickers) or "none"
-    disallowed_sample = ",".join(result.sample_disallowed_tickers) or "none"
     lines = [
         f"MARKET_INVENTORY={result.status}",
         "VALUES_PRINTED=no_secret_values",
@@ -326,8 +324,6 @@ def format_inventory(result: InventoryResult) -> str:
         f"SUPPLEMENTAL_SERIES_MARKET_COUNT={result.supplemental_series_market_count}",
         f"SUPPLEMENTAL_THREE_DAY_ALLOWED_COUNT={result.supplemental_three_day_allowed_count}",
         f"ZERO_CANDIDATE_REASON={result.zero_candidate_reason}",
-        f"SAMPLE_ALLOWED_TICKERS_PUBLIC={allowed_sample}",
-        f"SAMPLE_DISALLOWED_TICKERS_PUBLIC={disallowed_sample}",
     ]
     return "\n".join(lines) + "\n"
 

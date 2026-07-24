@@ -15,6 +15,11 @@ import pytest
 from strategies import kalshi_optimize
 from research.candidate_ledger.spool import scan_spool
 import utils.kalshi as kalshi_api
+from utils.kalshi import (
+    DiscoveryOutcome,
+    DiscoveryStageCounts,
+    KalshiDiscoveryResult,
+)
 
 
 STRATEGY_PATH = Path(kalshi_optimize.__file__).resolve()
@@ -43,7 +48,25 @@ def test_direct_cli_no_markets_exits_zero_and_writes_exit_marker(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    monkeypatch.setattr(kalshi_api, "fetch_kalshi_markets", lambda: [])
+    monkeypatch.setattr(
+        kalshi_api,
+        "fetch_kalshi_markets_diagnostic",
+        lambda: KalshiDiscoveryResult(
+            outcome=DiscoveryOutcome.SUCCESS_EMPTY,
+            counts=DiscoveryStageCounts(
+                request_attempted=1,
+                page_count=1,
+                raw_record_count=0,
+                parsed_record_count=0,
+                active_record_count=0,
+                category_eligible_count=0,
+                expiry_eligible_count=0,
+                price_liquidity_eligible_count=0,
+                final_eligible_count=0,
+            ),
+            request_status_class="2XX",
+        ),
+    )
     monkeypatch.setenv("CANDIDATE_LEDGER_SHADOW_ENABLED", "false")
     monkeypatch.delenv("CANDIDATE_LEDGER_SPOOL_PATH", raising=False)
     monkeypatch.setattr(sys, "argv", [str(STRATEGY_PATH), "--mode", "shadow"])
@@ -97,7 +120,25 @@ def test_direct_cli_no_markets_capture_enabled_exits_normally(
 ) -> None:
     spool = tmp_path / "direct-cli-spool"
     spool.mkdir()
-    monkeypatch.setattr(kalshi_api, "fetch_kalshi_markets", lambda: [])
+    monkeypatch.setattr(
+        kalshi_api,
+        "fetch_kalshi_markets_diagnostic",
+        lambda: KalshiDiscoveryResult(
+            outcome=DiscoveryOutcome.SUCCESS_EMPTY,
+            counts=DiscoveryStageCounts(
+                request_attempted=1,
+                page_count=1,
+                raw_record_count=0,
+                parsed_record_count=0,
+                active_record_count=0,
+                category_eligible_count=0,
+                expiry_eligible_count=0,
+                price_liquidity_eligible_count=0,
+                final_eligible_count=0,
+            ),
+            request_status_class="2XX",
+        ),
+    )
     monkeypatch.setenv("CANDIDATE_LEDGER_SHADOW_ENABLED", "true")
     monkeypatch.setenv("CANDIDATE_LEDGER_SPOOL_PATH", str(spool))
     monkeypatch.setattr(sys, "argv", [str(STRATEGY_PATH), "--mode", "shadow"])
@@ -128,7 +169,25 @@ def test_direct_cli_no_markets_writes_attributed_terminal_status(
     status_dir.mkdir()
     spool = tmp_path / "direct-cli-spool"
     spool.mkdir()
-    monkeypatch.setattr(kalshi_api, "fetch_kalshi_markets", lambda: [])
+    monkeypatch.setattr(
+        kalshi_api,
+        "fetch_kalshi_markets_diagnostic",
+        lambda: KalshiDiscoveryResult(
+            outcome=DiscoveryOutcome.SUCCESS_EMPTY,
+            counts=DiscoveryStageCounts(
+                request_attempted=1,
+                page_count=1,
+                raw_record_count=0,
+                parsed_record_count=0,
+                active_record_count=0,
+                category_eligible_count=0,
+                expiry_eligible_count=0,
+                price_liquidity_eligible_count=0,
+                final_eligible_count=0,
+            ),
+            request_status_class="2XX",
+        ),
+    )
     monkeypatch.setenv("CANDIDATE_LEDGER_SHADOW_ENABLED", "true")
     monkeypatch.setenv("CANDIDATE_LEDGER_SPOOL_PATH", str(spool))
     monkeypatch.setenv("EXPANDED_SHADOW_RUN_ID", "expanded-shadow-20260721T120000Z")
@@ -148,6 +207,10 @@ def test_direct_cli_no_markets_writes_attributed_terminal_status(
     assert record["exit_code"] == 0
     assert record["candidates_processed"] == 0
     assert record["total_markets"] == 0
+    assert record["discovery_outcome"] == "SUCCESS_EMPTY"
+    assert record["discovery_failure_present"] is False
+    assert record["discovery_raw_record_count"] == 0
+    assert record["discovery_final_eligible_count"] == 0
     assert record["capture_mode"] == "spool"
     assert record["candidate_observed_count"] == 0
     assert record["capture_warning_count"] == 0
@@ -166,7 +229,7 @@ def test_direct_cli_exception_writes_failure_and_reraises(
     status_dir.mkdir()
     monkeypatch.setattr(
         kalshi_api,
-        "fetch_kalshi_markets",
+        "fetch_kalshi_markets_diagnostic",
         lambda: (_ for _ in ()).throw(RuntimeError("synthetic scanner failure")),
     )
     monkeypatch.setenv("CANDIDATE_LEDGER_SHADOW_ENABLED", "false")
@@ -186,13 +249,58 @@ def test_direct_cli_exception_writes_failure_and_reraises(
     assert record["traceback_present"] is True
 
 
+def test_direct_cli_discovery_failure_exits_nonzero_and_writes_failed_status(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    status_dir = tmp_path / "run-status"
+    status_dir.mkdir()
+    monkeypatch.setattr(
+        kalshi_api,
+        "fetch_kalshi_markets_diagnostic",
+        lambda: KalshiDiscoveryResult(
+            outcome=DiscoveryOutcome.AUTH_REJECTED,
+            counts=DiscoveryStageCounts(
+                request_attempted=1,
+                page_count=0,
+            ),
+            request_status_class="4XX",
+        ),
+    )
+    monkeypatch.setenv("CANDIDATE_LEDGER_SHADOW_ENABLED", "false")
+    monkeypatch.setenv(
+        "EXPANDED_SHADOW_RUN_ID",
+        "expanded-shadow-20260721T120000Z",
+    )
+    monkeypatch.setenv(
+        "EXPANDED_SHADOW_EXPECTED_SCHEDULED_AT",
+        "2026-07-21T12:00:00Z",
+    )
+    monkeypatch.setenv("EXPANDED_SHADOW_RUN_STATUS_DIR", str(status_dir))
+    monkeypatch.setattr(sys, "argv", [str(STRATEGY_PATH), "--mode", "shadow"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        runpy.run_path(str(STRATEGY_PATH), run_name="__main__")
+
+    assert exc_info.value.code == 2
+    record = json.loads(
+        (status_dir / "expanded-shadow-20260721T120000Z.json").read_text()
+    )
+    assert record["state"] == "FAILED"
+    assert record["exit_code"] == 2
+    assert record["normal_exit_marker"] is False
+    assert record["total_markets"] is None
+    assert record["discovery_outcome"] == "AUTH_REJECTED"
+    assert record["discovery_failure_present"] is True
+
+
 def test_all_normal_strategy_returns_are_three_value_tuples() -> None:
     source = textwrap.dedent(inspect.getsource(kalshi_optimize.optimize_kalshi_strategy))
     function = ast.parse(source).body[0]
     assert isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef))
     returns = [node for node in ast.walk(function) if isinstance(node, ast.Return)]
 
-    assert len(returns) == 2
+    assert len(returns) == 3
     for return_node in returns:
         assert isinstance(return_node.value, ast.Tuple)
         assert len(return_node.value.elts) == 3

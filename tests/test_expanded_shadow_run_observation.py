@@ -16,6 +16,11 @@ from research.candidate_ledger.run_observation import (
 )
 from scripts.expanded_shadow_run_status_redacted import main as status_main
 from strategies import kalshi_optimize
+from utils.kalshi import (
+    DiscoveryOutcome,
+    DiscoveryStageCounts,
+    KalshiDiscoveryResult,
+)
 
 
 EXPECTED = "2026-07-21T12:00:00Z"
@@ -274,4 +279,87 @@ def test_redacted_reader_is_single_shot_and_bounded(
     assert "EXPANDED_SHADOW_RUN_STATUS=PASS" in output
     assert "RUNTIME_SQLITE_ACCESS=none" in output
     assert "RAW_CANDIDATES_INCLUDED=false" in output
-    assert len(output.splitlines()) == 23
+    assert "DISCOVERY_OUTCOME=NOT_REACHED" in output
+    assert len(output.splitlines()) == 34
+
+
+def test_success_empty_discovery_is_completed_and_passes_observer(
+    tmp_path: Path,
+) -> None:
+    observation = _observation(tmp_path)
+    observation.record_discovery_result(
+        KalshiDiscoveryResult(
+            outcome=DiscoveryOutcome.SUCCESS_EMPTY,
+            counts=DiscoveryStageCounts(
+                request_attempted=1,
+                page_count=1,
+                raw_record_count=0,
+                parsed_record_count=0,
+                active_record_count=0,
+                category_eligible_count=0,
+                expiry_eligible_count=0,
+                price_liquidity_eligible_count=0,
+                final_eligible_count=0,
+            ),
+            request_status_class="2XX",
+        ).status_fields()
+    )
+    assert observation.complete(exit_code=0, candidates_processed=0, total_markets=0)
+
+    record = json.loads(status_path(tmp_path, observation.run_id).read_text())
+    status = _read(tmp_path)
+    assert record["state"] == "COMPLETED"
+    assert record["discovery_outcome"] == "SUCCESS_EMPTY"
+    assert status["EXPANDED_SHADOW_RUN_STATUS"] == "PASS"
+    assert status["DISCOVERY_FAILURE_PRESENT"] == "no"
+    assert status["DISCOVERY_RAW_RECORD_COUNT"] == 0
+
+
+@pytest.mark.parametrize(
+    "outcome",
+    [
+        DiscoveryOutcome.AUTH_CONFIGURATION_MISSING,
+        DiscoveryOutcome.AUTH_REJECTED,
+        DiscoveryOutcome.NETWORK_TIMEOUT,
+        DiscoveryOutcome.NETWORK_ERROR,
+        DiscoveryOutcome.HTTP_ERROR,
+        DiscoveryOutcome.JSON_PARSE_ERROR,
+        DiscoveryOutcome.SCHEMA_ERROR,
+        DiscoveryOutcome.PAGINATION_ERROR,
+        DiscoveryOutcome.INTERNAL_DISCOVERY_ERROR,
+    ],
+)
+def test_discovery_failure_is_failed_and_visible_to_one_shot_observer(
+    tmp_path: Path,
+    outcome: DiscoveryOutcome,
+) -> None:
+    observation = _observation(tmp_path)
+    observation.record_discovery_result(
+        KalshiDiscoveryResult(
+            outcome=outcome,
+            counts=DiscoveryStageCounts(
+                request_attempted=(
+                    0
+                    if outcome is DiscoveryOutcome.AUTH_CONFIGURATION_MISSING
+                    else 1
+                ),
+                page_count=0,
+            ),
+            request_status_class=(
+                "NOT_ATTEMPTED"
+                if outcome is DiscoveryOutcome.AUTH_CONFIGURATION_MISSING
+                else "4XX"
+            ),
+        ).status_fields()
+    )
+    assert observation.complete(exit_code=2, candidates_processed=0, total_markets=0)
+
+    record = json.loads(status_path(tmp_path, observation.run_id).read_text())
+    status = _read(tmp_path)
+    assert record["state"] == "FAILED"
+    assert record["total_markets"] is None
+    assert record["normal_exit_marker"] is False
+    assert status["EXPANDED_SHADOW_RUN_STATUS"] == "FAIL"
+    assert status["DISCOVERY_OUTCOME"] == outcome.value
+    assert status["DISCOVERY_FAILURE_PRESENT"] == "yes"
+    assert status["TOTAL_MARKETS"] == ""
