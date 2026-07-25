@@ -91,6 +91,14 @@ the operator, outside the agent command.
 
    `python3 scripts/check_expanded_shadow_discovery_secret_boundary.py`
 
+   The gate resolves the reviewed constant-string `getattr`, import-alias,
+   simple-assignment, chained target, environment, file, subprocess, and
+   output indirection classes. It fails closed on unresolved dynamic
+   `getattr` for security-relevant or non-demonstrably-safe bases. Its scope
+   is this redacted command and the exact reviewed dependency closure; it does
+   not prove arbitrary Python metaprogramming universally safe. A passing
+   result remains one gate and does not replace source or independent review.
+
 4. Run the inherited-runtime-context preflight:
 
    `python3 scripts/expanded_shadow_discovery_auth_preflight_redacted.py`

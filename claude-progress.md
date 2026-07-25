@@ -1,3 +1,58 @@
+# 2026-07-25 (pm_expanded_shadow_secret_boundary_static_checker_getattr_hardening — Source Repair Built)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / redacted discovery static checker
+**Type:** Source/test/docs/state static-analysis hardening
+**Proof:** `/tmp/proof_pm_expanded_shadow_secret_boundary_static_checker_getattr_hardening_20260725T123344Z`
+**Manual QA:** pending_targeted_independent_review
+
+### Summary
+Reproduced both independently reported `getattr` bypasses against the clean
+baseline, then hardened only the purpose-built AST gate. The checker now
+resolves reviewed constant-string `getattr`, import aliases, from-imports,
+simple assignments, assigned call targets, and chained resolvable targets.
+Dynamic security-relevant or non-demonstrably-safe `getattr` fails closed.
+
+### Design and scope
+- Added bounded semantic labels for file, environment, Path, subprocess,
+  output/logging, dotenv, dynamic-import, network-at-import, exception, local
+  object, and unknown target classes.
+- Preserved all eighteen existing rule IDs and added
+  `UNRESOLVED_SECURITY_GETATTR` and `DYNAMIC_IMPORT_ACCESS`.
+- Added 44 unsafe fixture cases, 11 safe cases including the actual reviewed
+  closure, symlink refusal, and a rule-only bounded output test.
+- Documented conservative per-file union behavior and unsupported arbitrary
+  control flow, descriptors, mutation, reflection, and interprocedural
+  provenance. The checker is not presented as universally complete.
+- Left the redacted command, inherited credential boundary, discovery
+  taxonomy, pagination, stage counts, output contract, and runtime code
+  unchanged.
+
+### Verified
+- Baseline fixtures reproduced both bypasses as PASS with zero violations.
+- Repaired fixtures fail with `FILE_OPEN` and `RAW_ENVIRONMENT_ACCESS`.
+- Touched Python compilation and diff checks: PASS.
+- Static closure: PASS, 20 rules, zero violations.
+- Focused checker/discovery suite: 150 passed.
+- Expanded discovery/capture/dynamic/cron suite: 247 passed.
+- Guarded full suite: 869 passed with two pre-existing dependency warnings.
+- `./scripts/run_tests.sh`: `STATUS: ALL GATES PASS`.
+- Validation used an empty environment, no-network audit guard, dotenv no-op,
+  and a plain-text synthetic placeholder with an exact-sentinel parser stub;
+  no real credential value or secret-bearing file was used.
+- Sanitized cron fingerprint remained
+  `632b808247f0d62a23790bf75f3b2e95898864a8e4b872f59aefdf3f81e3bad1`;
+  all capture/attribution lanes and offline ingest remained disabled, with no
+  temporary jobs, runtime SQLite, production database, or live call.
+
+### Safety and remaining work
+- No production scanner, redacted live discovery, trading, weather, ingest,
+  external API, order, cron, database, service, timer, tmux, Caddy, DNS,
+  Discord command, or production-secret action occurred.
+- Targeted independent adversarial review of resolution, alias handling,
+  fail-closed behavior, false positives, and documented scope remains
+  mandatory. Any live discovery still requires separate fresh approval.
+
 # 2026-07-25 (pm_expanded_shadow_redacted_live_discovery_secret_boundary_repair — Source Repair Built)
 
 **Agent:** Codex (SlimyAI NUC1)
