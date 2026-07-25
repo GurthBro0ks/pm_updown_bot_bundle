@@ -75,6 +75,7 @@ def test_redacted_discovery_output_has_only_fixed_approved_fields() -> None:
     fields = {line.split("=", 1)[0] for line in output.splitlines()}
 
     assert fields == ALLOWED_FIELDS
+    assert cli.validate_discovery_output(output) is True
     assert "SYNTHETIC_SECRET_LOOKING" not in output
     assert "ticker" not in output.lower()
     assert "title" not in output.lower()
@@ -109,6 +110,14 @@ def test_invalid_bounded_labels_fail_closed_without_echo() -> None:
     assert "ENDPOINT_LABEL=SERIES_AND_MARKETS" in output
 
 
+def test_output_validator_rejects_unknown_extra_or_malformed_fields() -> None:
+    output = cli.format_discovery_result(_result())
+
+    assert cli.validate_discovery_output(output + "UNKNOWN_FIELD=value\n") is False
+    assert cli.validate_discovery_output(output.replace("PAGE_COUNT=2", "PAGE_COUNT=two")) is False
+    assert cli.validate_discovery_output(output.replace("AUTH_CHECK=PASS", "AUTH_CHECK=MAYBE")) is False
+
+
 def test_unexpected_argument_stops_before_fetch() -> None:
     called = False
 
@@ -117,8 +126,7 @@ def test_unexpected_argument_stops_before_fetch() -> None:
         called = True
         return _result()
 
-    with pytest.raises(SystemExit, match="accepts no arguments"):
-        cli.main(["--unexpected"], fetcher=fetcher)
+    assert cli.main(["--unexpected"], fetcher=fetcher) == 2
     assert called is False
 
 

@@ -1,3 +1,55 @@
+# 2026-07-25 (pm_expanded_shadow_redacted_live_discovery_secret_boundary_repair — Source Repair Built)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Expanded Shadow redacted discovery
+**Type:** Source/test/docs credential-boundary repair
+**Proof:** `/tmp/proof_pm_expanded_shadow_redacted_live_discovery_secret_boundary_repair_20260725T112027Z`
+**Manual QA:** pending_targeted_independent_review
+
+### Summary
+Repaired only the purpose-built redacted one-shot discovery credential boundary.
+The tracked CLI now uses an already-inherited in-memory runtime context or an
+injected client and never enters the established secret-file-loading wrapper.
+Missing or malformed inherited authentication fails closed as
+`AUTH_CONFIGURATION_MISSING` before any request.
+
+### Design and compatibility
+- Extracted the existing diagnostic discovery body into an authenticated core
+  without changing endpoint selection, signing calls, pagination, taxonomy,
+  parsing, filtering, or stage counts.
+- Preserved the existing file-based wrapper and its direct-shadow/legacy
+  callers unchanged.
+- Added a value-free six-field inherited-runtime preflight and a function-scoped
+  AST dependency-closure checker with fail-closed parsing and rule-only output.
+- The redacted CLI still accepts no arguments, emits the exact reviewed
+  twelve-field allowlist, and now validates its own output before writing it.
+- Updated the future runbook: static gate, preflight, stop WARN if unavailable,
+  fresh approval, exactly one call, no retry/polling, stderr discard, output
+  allowlist validation, and production-disabled postcheck.
+
+### Verified
+- Touched Python compilation: PASS.
+- Static dependency-closure gate: PASS, 18 rules, zero violations.
+- Focused boundary/discovery tests: 92 passed.
+- Expanded discovery/capture/dynamic/cron compatibility tests: 189 passed.
+- Guarded full suite: 811 passed, two pre-existing dependency warnings.
+- `./scripts/run_tests.sh`: `STATUS: ALL GATES PASS`.
+- Full-suite validation used an empty environment, no-network audit guard,
+  dotenv no-op, and a disposable synthetic test key only for three legacy
+  runner-import tests; no production credential file was opened.
+- Sanitized cron fingerprint remained
+  `632b808247f0d62a23790bf75f3b2e95898864a8e4b872f59aefdf3f81e3bad1`;
+  capture/attribution lanes and offline ingest remained disabled, temporary
+  jobs were absent, and runtime SQLite/production database counts were zero.
+
+### Safety and remaining work
+- No live discovery, scanner, trading, weather, ingest, external API, order,
+  cron, database, service, timer, tmux, Caddy, DNS, or production-secret action
+  occurred.
+- Targeted independent review of the repaired boundary and runbook remains
+  required. A live one-shot call still requires separate fresh exact-bounded
+  approval.
+
 # 2026-07-24 (pm_expanded_shadow_zero_event_discovery_observability_repair — Source Repair Built)
 
 **Agent:** Codex (SlimyAI NUC1)

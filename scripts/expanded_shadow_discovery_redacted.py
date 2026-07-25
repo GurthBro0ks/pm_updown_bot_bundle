@@ -16,9 +16,30 @@ from utils.kalshi import (  # noqa: E402
     DISCOVERY_ENDPOINT_LABELS,
     REQUEST_STATUS_CLASSES,
     DiscoveryOutcome,
+    DiscoveryStageCounts,
     KalshiDiscoveryResult,
-    fetch_kalshi_markets_diagnostic,
 )
+from utils.kalshi_redacted_discovery import (  # noqa: E402
+    DiscoveryClient,
+    InheritedEnvironmentDiscoveryClient,
+)
+
+
+OUTPUT_FIELDS = (
+    "AUTH_CHECK",
+    "REQUEST_STATUS_CLASS",
+    "DISCOVERY_OUTCOME",
+    "PAGE_COUNT",
+    "RAW_RECORD_COUNT",
+    "PARSED_RECORD_COUNT",
+    "ACTIVE_RECORD_COUNT",
+    "CATEGORY_ELIGIBLE_COUNT",
+    "EXPIRY_ELIGIBLE_COUNT",
+    "PRICE_LIQUIDITY_ELIGIBLE_COUNT",
+    "FINAL_ELIGIBLE_COUNT",
+    "ENDPOINT_LABEL",
+)
+COUNT_FIELDS = frozenset(OUTPUT_FIELDS[3:-1])
 
 
 def _count(value: int | None) -> int:
@@ -65,16 +86,78 @@ def format_discovery_result(result: KalshiDiscoveryResult) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _internal_error_result() -> KalshiDiscoveryResult:
+    return KalshiDiscoveryResult(
+        outcome=DiscoveryOutcome.INTERNAL_DISCOVERY_ERROR,
+        counts=DiscoveryStageCounts(),
+        request_status_class="NOT_ATTEMPTED",
+    )
+
+
+def validate_discovery_output(output: str) -> bool:
+    """Reject extra keys, malformed values, and unbounded output."""
+
+    if len(output.encode("utf-8")) >= 2048 or not output.endswith("\n"):
+        return False
+    lines = output.splitlines()
+    if len(lines) != len(OUTPUT_FIELDS):
+        return False
+    pairs: list[tuple[str, str]] = []
+    for line in lines:
+        if line.count("=") != 1:
+            return False
+        key, value = line.split("=", 1)
+        pairs.append((key, value))
+    if tuple(key for key, _value in pairs) != OUTPUT_FIELDS:
+        return False
+    values = dict(pairs)
+    if values["AUTH_CHECK"] not in {"PASS", "WARN", "FAIL"}:
+        return False
+    if values["REQUEST_STATUS_CLASS"] not in REQUEST_STATUS_CLASSES:
+        return False
+    if values["DISCOVERY_OUTCOME"] not in {
+        outcome.value for outcome in DiscoveryOutcome
+    }:
+        return False
+    if values["ENDPOINT_LABEL"] not in DISCOVERY_ENDPOINT_LABELS:
+        return False
+    for field in COUNT_FIELDS:
+        value = values[field]
+        if value == "-1":
+            continue
+        if not value.isdigit() or len(value) > 12:
+            return False
+    return True
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
-    fetcher: Callable[[], KalshiDiscoveryResult] = fetch_kalshi_markets_diagnostic,
+    client: DiscoveryClient | None = None,
+    fetcher: Callable[[], KalshiDiscoveryResult] | None = None,
 ) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args:
-        raise SystemExit("this command accepts no arguments")
-    result = fetcher()
-    print(format_discovery_result(result), end="")
+        return 2
+    if client is not None and fetcher is not None:
+        return 2
+    try:
+        if client is not None:
+            result = client.discover()
+        elif fetcher is not None:
+            result = fetcher()
+        else:
+            result = InheritedEnvironmentDiscoveryClient().discover()
+        output = format_discovery_result(result)
+    except Exception:
+        result = _internal_error_result()
+        output = format_discovery_result(result)
+    if not validate_discovery_output(output):
+        result = _internal_error_result()
+        output = format_discovery_result(result)
+        if not validate_discovery_output(output):
+            return 1
+    sys.stdout.write(output)
     return 1 if result.failure_present else 0
 
 

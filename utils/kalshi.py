@@ -605,50 +605,35 @@ def _discovery_failure_result(
     )
 
 
-def fetch_kalshi_markets_diagnostic(
+def _fetch_kalshi_markets_diagnostic_authenticated(
     *,
-    environment: Mapping[str, str] | None = None,
-    api_key: str | None = None,
-    private_key: object | None = None,
+    environment: Mapping[str, str],
+    api_key: str,
+    private_key: object,
     request_get: Callable | None = None,
     header_factory: Callable = get_kalshi_headers,
     normalizer: Callable[[dict], dict] = normalize_kalshi_market,
 ) -> KalshiDiscoveryResult:
-    """Fetch markets with bounded redacted diagnostics and complete pagination.
+    """Run diagnostic discovery with already-resolved authentication.
 
-    This is intentionally separate from :func:`fetch_kalshi_markets`, whose
-    list-returning behavior remains available to existing trading callers.
+    This core never opens credential files. Callers must resolve credentials
+    before entering it.
     """
 
-    values = os.environ if environment is None else environment
+    values = environment
     progress = _DiscoveryProgress()
     request_get = request_get or requests.get
-    configured_api_key = api_key or str(values.get("KALSHI_KEY", "")).strip()
+    configured_api_key = str(api_key).strip()
     if not configured_api_key:
         return KalshiDiscoveryResult(
             outcome=DiscoveryOutcome.AUTH_CONFIGURATION_MISSING,
             counts=progress.counts(),
         )
     if private_key is None:
-        secret_file = str(
-            values.get("KALSHI_SECRET_FILE", "./kalshi_private_key.pem")
-        ).strip()
-        if not secret_file:
-            return KalshiDiscoveryResult(
-                outcome=DiscoveryOutcome.AUTH_CONFIGURATION_MISSING,
-                counts=progress.counts(),
-            )
-        try:
-            with open(secret_file, "rb") as handle:
-                private_key = serialization.load_pem_private_key(
-                    handle.read(),
-                    password=None,
-                )
-        except (OSError, TypeError, ValueError):
-            return KalshiDiscoveryResult(
-                outcome=DiscoveryOutcome.AUTH_CONFIGURATION_MISSING,
-                counts=progress.counts(),
-            )
+        return KalshiDiscoveryResult(
+            outcome=DiscoveryOutcome.AUTH_CONFIGURATION_MISSING,
+            counts=progress.counts(),
+        )
 
     try:
         try:
@@ -864,6 +849,59 @@ def fetch_kalshi_markets_diagnostic(
                 "2XX" if progress.request_attempted else "NOT_ATTEMPTED"
             ),
         )
+
+
+def fetch_kalshi_markets_diagnostic(
+    *,
+    environment: Mapping[str, str] | None = None,
+    api_key: str | None = None,
+    private_key: object | None = None,
+    request_get: Callable | None = None,
+    header_factory: Callable = get_kalshi_headers,
+    normalizer: Callable[[dict], dict] = normalize_kalshi_market,
+) -> KalshiDiscoveryResult:
+    """Fetch markets with bounded diagnostics for established callers.
+
+    The existing file-based fallback remains here for compatibility. The
+    purpose-built redacted one-shot command bypasses this wrapper and enters
+    the authenticated core only after resolving inherited in-memory material.
+    """
+
+    values = os.environ if environment is None else environment
+    configured_api_key = api_key or str(values.get("KALSHI_KEY", "")).strip()
+    if not configured_api_key:
+        return KalshiDiscoveryResult(
+            outcome=DiscoveryOutcome.AUTH_CONFIGURATION_MISSING,
+            counts=_DiscoveryProgress().counts(),
+        )
+    if private_key is None:
+        secret_file = str(
+            values.get("KALSHI_SECRET_FILE", "./kalshi_private_key.pem")
+        ).strip()
+        if not secret_file:
+            return KalshiDiscoveryResult(
+                outcome=DiscoveryOutcome.AUTH_CONFIGURATION_MISSING,
+                counts=_DiscoveryProgress().counts(),
+            )
+        try:
+            with open(secret_file, "rb") as handle:
+                private_key = serialization.load_pem_private_key(
+                    handle.read(),
+                    password=None,
+                )
+        except (OSError, TypeError, ValueError):
+            return KalshiDiscoveryResult(
+                outcome=DiscoveryOutcome.AUTH_CONFIGURATION_MISSING,
+                counts=_DiscoveryProgress().counts(),
+            )
+    return _fetch_kalshi_markets_diagnostic_authenticated(
+        environment=values,
+        api_key=configured_api_key,
+        private_key=private_key,
+        request_get=request_get,
+        header_factory=header_factory,
+        normalizer=normalizer,
+    )
 
 
 def fetch_kalshi_markets():

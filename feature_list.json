@@ -1,4 +1,35 @@
 {
+  "pm_expanded_shadow_redacted_discovery_secret_boundary_repair_20260725": {
+    "status": "built_validation_pass_independent_review_pending",
+    "file": "utils/kalshi.py, utils/kalshi_redacted_discovery.py, scripts/expanded_shadow_discovery_redacted.py, scripts/expanded_shadow_discovery_auth_preflight_redacted.py, scripts/check_expanded_shadow_discovery_secret_boundary.py, tests/test_expanded_shadow_discovery_redacted.py, tests/test_expanded_shadow_discovery_secret_boundary.py, docs/ops/expanded_shadow_discovery_observability.md, docs/buglog/pm_expanded_shadow_redacted_discovery_secret_boundary_20260725.md, feature_list.json, claude-progress.md",
+    "passes": false,
+    "validation_passed": true,
+    "manual_qa_required": true,
+    "manual_qa_status": "pending_targeted_independent_review",
+    "pushed": true,
+    "commit": "self_commit_final_sha_reported_in_closeout",
+    "proof_dir": "/tmp/proof_pm_expanded_shadow_redacted_live_discovery_secret_boundary_repair_20260725T112027Z",
+    "description": "Remove secret-file access from the purpose-built redacted discovery CLI by requiring inherited in-memory authentication or an injected client, with a value-free runtime preflight and AST dependency-closure gate.",
+    "changes": [
+      "Preserved the established file-based diagnostic wrapper for direct shadow and legacy callers while extracting its behavior-identical authenticated core.",
+      "Added an inherited-environment-only redacted client using centralized required field names and no file, dotenv, shell, CLI, stdin, or global credential fallback.",
+      "Added a six-field no-network auth runtime preflight and a function-scoped AST checker that fails closed and emits rule names only.",
+      "Added synthetic missing, malformed, injected-client, taxonomy, pagination, redaction, unsafe-fixture, import-side-effect, no-network, no-file, and zero-SQLite coverage.",
+      "Repaired the future one-shot runbook with static gate, preflight, stop-WARN behavior, fresh approval, exactly one call, no retry/polling, stderr discard, allowlist validation, and production postcheck."
+    ],
+    "validation": [
+      "touched Python py_compile PASS",
+      "static secret-access dependency closure PASS with 18 rules and zero violations",
+      "focused secret-boundary/discovery suite PASS: 92 tests",
+      "expanded discovery/capture/dynamic/cron compatibility suite PASS: 189 tests",
+      "guarded full suite PASS: 811 tests, 2 pre-existing dependency warnings",
+      "./scripts/run_tests.sh PASS: STATUS ALL GATES PASS",
+      "sanitized cron fingerprint unchanged at 632b808247f0d62a23790bf75f3b2e95898864a8e4b872f59aefdf3f81e3bad1",
+      "production capture and attribution lanes disabled; no temporary jobs, runtime SQLite, production database, live request, or service change"
+    ],
+    "result": "PASS_VALIDATION_INDEPENDENT_REVIEW_PENDING",
+    "notes": "Source/test/docs only. No live Kalshi discovery, scanner, trading, weather, ingest, cron mutation, database action, service restart, timer/tmux/Caddy/DNS change, or production secret-file access. A targeted independent review and fresh exact-bounded approval remain required before one live redacted discovery call."
+  },
   "pm_phase1c_dynamic_per_invocation_run_attribution_20260721": {
     "status": "built_validation_pass_manual_qa_pending",
     "file": "research/candidate_ledger/run_observation.py, scripts/expanded_shadow_run_status_redacted.py, strategies/kalshi_optimize.py, tests/test_expanded_shadow_dynamic_attribution.py, docs/ops/expanded_shadow_dynamic_attribution.md, docs/ops/expanded_shadow_one_shot_observation.md, docs/buglog/pm_phase1c_dynamic_per_invocation_run_attribution_20260721.md, claude-progress.md, feature_list.json",
