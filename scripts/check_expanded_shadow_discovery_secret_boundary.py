@@ -21,18 +21,12 @@ ROOT = Path(__file__).resolve().parents[1]
 KALSHI_SOURCE = ROOT / "utils/kalshi.py"
 FULL_CLOSURE_FILES = (
     ROOT / "scripts/expanded_shadow_discovery_redacted.py",
-    ROOT / "scripts/expanded_shadow_discovery_auth_preflight_redacted.py",
     ROOT / "utils/kalshi_redacted_discovery.py",
     ROOT / "utils/kalshi_normalize.py",
 )
-KALSHI_SAFE_ENTRYPOINT = "_fetch_kalshi_markets_diagnostic_authenticated"
+KALSHI_SAFE_ENTRYPOINT = "_fetch_kalshi_markets_diagnostic_with_auth_headers"
 
-ALLOWED_AUTH_FIELD_LITERALS = frozenset(
-    {
-        "KALSHI_KEY",
-        "KALSHI_PRIVATE_KEY_PEM",
-    }
-)
+ALLOWED_AUTH_FIELD_LITERALS = frozenset()
 ALLOWED_NON_SECRET_ENVIRONMENT_LOOKUP_LITERALS = frozenset(
     {
         "KALSHI_BASE_URL",

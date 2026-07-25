@@ -445,15 +445,13 @@ def _request_discovery_page(
     *,
     path: str,
     params: dict[str, object],
-    api_key: str,
-    private_key: object,
+    auth_headers_factory: Callable[[str, str], Mapping[str, str]],
     request_get: Callable,
-    header_factory: Callable,
     environment: Mapping[str, str],
     progress: _DiscoveryProgress,
 ) -> tuple[dict, str]:
     try:
-        headers = header_factory("GET", path, api_key, private_key)
+        headers = auth_headers_factory("GET", path)
     except Exception as exc:
         raise _DiscoveryFailure(
             DiscoveryOutcome.AUTH_CONFIGURATION_MISSING,
@@ -515,10 +513,8 @@ def _fetch_paginated_collection(
     path: str,
     collection_field: str,
     params: dict[str, object],
-    api_key: str,
-    private_key: object,
+    auth_headers_factory: Callable[[str, str], Mapping[str, str]],
     request_get: Callable,
-    header_factory: Callable,
     environment: Mapping[str, str],
     progress: _DiscoveryProgress,
     count_market_records: bool = False,
@@ -535,10 +531,8 @@ def _fetch_paginated_collection(
             payload, _status_class = _request_discovery_page(
                 path=path,
                 params=page_params,
-                api_key=api_key,
-                private_key=private_key,
+                auth_headers_factory=auth_headers_factory,
                 request_get=request_get,
-                header_factory=header_factory,
                 environment=environment,
                 progress=progress,
             )
@@ -605,31 +599,22 @@ def _discovery_failure_result(
     )
 
 
-def _fetch_kalshi_markets_diagnostic_authenticated(
+def _fetch_kalshi_markets_diagnostic_with_auth_headers(
     *,
     environment: Mapping[str, str],
-    api_key: str,
-    private_key: object,
+    auth_headers_factory: Callable[[str, str], Mapping[str, str]],
     request_get: Callable | None = None,
-    header_factory: Callable = get_kalshi_headers,
     normalizer: Callable[[dict], dict] = normalize_kalshi_market,
 ) -> KalshiDiscoveryResult:
-    """Run diagnostic discovery with already-resolved authentication.
+    """Run diagnostic discovery through an injected authenticated boundary.
 
-    This core never opens credential files. Callers must resolve credentials
-    before entering it.
+    This core never opens credential files or receives credential values.
     """
 
     values = environment
     progress = _DiscoveryProgress()
     request_get = request_get or requests.get
-    configured_api_key = str(api_key).strip()
-    if not configured_api_key:
-        return KalshiDiscoveryResult(
-            outcome=DiscoveryOutcome.AUTH_CONFIGURATION_MISSING,
-            counts=progress.counts(),
-        )
-    if private_key is None:
+    if not callable(auth_headers_factory):
         return KalshiDiscoveryResult(
             outcome=DiscoveryOutcome.AUTH_CONFIGURATION_MISSING,
             counts=progress.counts(),
@@ -663,10 +648,8 @@ def _fetch_kalshi_markets_diagnostic_authenticated(
             path="/series",
             collection_field="series",
             params={"include_volume": "true"},
-            api_key=configured_api_key,
-            private_key=private_key,
+            auth_headers_factory=auth_headers_factory,
             request_get=request_get,
-            header_factory=header_factory,
             environment=values,
             progress=progress,
         )
@@ -698,10 +681,8 @@ def _fetch_kalshi_markets_diagnostic_authenticated(
                     "status": "open",
                     "limit": 100,
                 },
-                api_key=configured_api_key,
-                private_key=private_key,
+                auth_headers_factory=auth_headers_factory,
                 request_get=request_get,
-                header_factory=header_factory,
                 environment=values,
                 progress=progress,
                 count_market_records=True,
@@ -849,6 +830,35 @@ def _fetch_kalshi_markets_diagnostic_authenticated(
                 "2XX" if progress.request_attempted else "NOT_ATTEMPTED"
             ),
         )
+
+
+def _fetch_kalshi_markets_diagnostic_authenticated(
+    *,
+    environment: Mapping[str, str],
+    api_key: str,
+    private_key: object,
+    request_get: Callable | None = None,
+    header_factory: Callable = get_kalshi_headers,
+    normalizer: Callable[[dict], dict] = normalize_kalshi_market,
+) -> KalshiDiscoveryResult:
+    """Preserve the established value-based authenticated caller contract."""
+
+    configured_api_key = str(api_key).strip()
+    if not configured_api_key or private_key is None:
+        return KalshiDiscoveryResult(
+            outcome=DiscoveryOutcome.AUTH_CONFIGURATION_MISSING,
+            counts=_DiscoveryProgress().counts(),
+        )
+
+    def auth_headers_factory(method: str, path: str) -> Mapping[str, str]:
+        return header_factory(method, path, configured_api_key, private_key)
+
+    return _fetch_kalshi_markets_diagnostic_with_auth_headers(
+        environment=environment,
+        auth_headers_factory=auth_headers_factory,
+        request_get=request_get,
+        normalizer=normalizer,
+    )
 
 
 def fetch_kalshi_markets_diagnostic(

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import ast
-import builtins
 from pathlib import Path
 import sqlite3
 import subprocess
@@ -11,7 +10,6 @@ import pytest
 
 from utils import kalshi
 from scripts import check_expanded_shadow_discovery_secret_boundary as checker
-from scripts import expanded_shadow_discovery_auth_preflight_redacted as preflight
 from scripts import expanded_shadow_discovery_redacted as cli
 from utils.kalshi import (
     DiscoveryOutcome,
@@ -19,14 +17,7 @@ from utils.kalshi import (
     KalshiDiscoveryResult,
 )
 from utils.kalshi_redacted_discovery import (
-    AUTH_KEY_FIELD,
-    AUTH_PRIVATE_KEY_MATERIAL_FIELD,
-    FAIL,
-    InheritedEnvironmentDiscoveryClient,
-    PASS,
-    REQUIRED_AUTH_FIELD_NAMES,
-    WARN,
-    inspect_inherited_auth,
+    AuthenticationUnavailableDiscoveryClient,
 )
 
 
@@ -34,10 +25,6 @@ SYNTHETIC_KEY = "SYNTHETIC_DISPOSABLE_KEY_IDENTIFIER"
 SYNTHETIC_PRIVATE_MATERIAL = "SYNTHETIC_DISPOSABLE_PRIVATE_MATERIAL"
 SYNTHETIC_EXCEPTION = "SYNTHETIC_DISPOSABLE_EXCEPTION_TEXT"
 SYNTHETIC_RECORD = "SYNTHETIC_DISPOSABLE_RECORD_IDENTIFIER"
-
-
-class FakePrivateKey:
-    pass
 
 
 class FakeClient:
@@ -57,32 +44,6 @@ class FakeClient:
             raise self.error
         assert self.result is not None
         return self.result
-
-
-class FakeResponse:
-    def __init__(self, payload: dict, status_code: int = 200) -> None:
-        self.status_code = status_code
-        self._payload = payload
-
-    def json(self) -> dict:
-        return self._payload
-
-
-def _loader(_material: str) -> object:
-    return FakePrivateKey()
-
-
-def _invalid_loader(_material: str) -> object:
-    raise ValueError(SYNTHETIC_EXCEPTION)
-
-
-def _environment(**overrides: str) -> dict[str, str]:
-    values = {
-        AUTH_KEY_FIELD: SYNTHETIC_KEY,
-        AUTH_PRIVATE_KEY_MATERIAL_FIELD: SYNTHETIC_PRIVATE_MATERIAL,
-    }
-    values.update(overrides)
-    return values
 
 
 def _result(outcome: DiscoveryOutcome) -> KalshiDiscoveryResult:
@@ -119,47 +80,20 @@ def _result(outcome: DiscoveryOutcome) -> KalshiDiscoveryResult:
     )
 
 
-@pytest.mark.parametrize(
-    ("environment", "expected_missing"),
-    [
-        ({}, 2),
-        ({AUTH_KEY_FIELD: SYNTHETIC_KEY}, 1),
-        ({AUTH_PRIVATE_KEY_MATERIAL_FIELD: SYNTHETIC_PRIVATE_MATERIAL}, 1),
-        ({AUTH_KEY_FIELD: "", AUTH_PRIVATE_KEY_MATERIAL_FIELD: ""}, 2),
-        ({AUTH_KEY_FIELD: " ", AUTH_PRIVATE_KEY_MATERIAL_FIELD: "\t"}, 2),
-    ],
-)
-def test_missing_inherited_auth_matrix_fails_closed(
-    environment: dict[str, str],
-    expected_missing: int,
-) -> None:
-    report = inspect_inherited_auth(environment, private_key_loader=_loader)
+def test_normal_cli_defaults_to_credential_blind_failure(capsys) -> None:
+    assert cli.main([]) == 1
+    captured = capsys.readouterr()
 
-    assert report.runtime_context == WARN
-    assert report.parse_status == WARN
-    assert report.missing_field_count == expected_missing
+    assert "DISCOVERY_OUTCOME=AUTH_CONFIGURATION_MISSING" in captured.out
+    assert "REQUEST_STATUS_CLASS=NOT_ATTEMPTED" in captured.out
+    assert captured.err == ""
 
 
-def test_malformed_inherited_key_material_fails_closed() -> None:
-    report = inspect_inherited_auth(
-        _environment(),
-        private_key_loader=_invalid_loader,
-    )
+def test_credential_blind_client_performs_no_runtime_resolution() -> None:
+    result = AuthenticationUnavailableDiscoveryClient().discover()
 
-    assert report.runtime_context == FAIL
-    assert report.parse_status == FAIL
-    assert report.missing_field_count == 0
-
-
-def test_all_synthetic_fields_present_passes_without_network() -> None:
-    report = inspect_inherited_auth(
-        _environment(),
-        private_key_loader=_loader,
-    )
-
-    assert report.runtime_context == PASS
-    assert report.parse_status == PASS
-    assert report.missing_field_count == 0
+    assert result.outcome is DiscoveryOutcome.AUTH_CONFIGURATION_MISSING
+    assert result.counts.request_attempted == 0
 
 
 @pytest.mark.parametrize(
@@ -195,114 +129,6 @@ def test_injected_client_preserves_every_discovery_outcome(
     )
 
 
-@pytest.mark.parametrize(
-    ("environment", "loader"),
-    [
-        ({}, _loader),
-        (_environment(), _invalid_loader),
-    ],
-)
-def test_auth_failure_performs_zero_network_calls(
-    environment: dict[str, str],
-    loader,
-) -> None:
-    request_count = 0
-
-    def request_get(*_args, **_kwargs):
-        nonlocal request_count
-        request_count += 1
-        raise AssertionError("synthetic request must not occur")
-
-    result = InheritedEnvironmentDiscoveryClient(
-        environment=environment,
-        private_key_loader=loader,
-        request_get=request_get,
-    ).discover()
-
-    assert result.outcome is DiscoveryOutcome.AUTH_CONFIGURATION_MISSING
-    assert result.counts.request_attempted == 0
-    assert request_count == 0
-
-
-def test_valid_inherited_auth_uses_authenticated_core_without_file_access(
-    monkeypatch,
-) -> None:
-    responses = [FakeResponse({"series": []})]
-    request_count = 0
-
-    def request_get(*_args, **_kwargs):
-        nonlocal request_count
-        request_count += 1
-        return responses.pop(0)
-
-    def forbidden_open(*_args, **_kwargs):
-        raise AssertionError("file access is forbidden")
-
-    monkeypatch.setattr(builtins, "open", forbidden_open)
-    result = InheritedEnvironmentDiscoveryClient(
-        environment=_environment(),
-        private_key_loader=_loader,
-        request_get=request_get,
-        header_factory=lambda *_args: {},
-    ).discover()
-
-    assert result.outcome is DiscoveryOutcome.SUCCESS_EMPTY
-    assert result.counts.request_attempted == 1
-    assert request_count == 1
-
-
-def test_inherited_client_preserves_endpoint_and_header_factory_semantics() -> None:
-    header_calls: list[tuple[str, str, str, object]] = []
-    request_calls: list[tuple[str, dict, dict]] = []
-    fake_private_key = FakePrivateKey()
-
-    def private_key_loader(_material: str) -> object:
-        return fake_private_key
-
-    def header_factory(method, path, api_key, private_key):
-        header_calls.append((method, path, api_key, private_key))
-        return {"SYNTHETIC": "REDACTED"}
-
-    def request_get(url, *, headers, params, timeout):
-        request_calls.append((url, headers, params))
-        assert timeout == 15
-        return FakeResponse({"series": []})
-
-    result = InheritedEnvironmentDiscoveryClient(
-        environment=_environment(),
-        private_key_loader=private_key_loader,
-        request_get=request_get,
-        header_factory=header_factory,
-    ).discover()
-
-    assert result.outcome is DiscoveryOutcome.SUCCESS_EMPTY
-    assert header_calls == [("GET", "/series", SYNTHETIC_KEY, fake_private_key)]
-    assert len(request_calls) == 1
-    assert request_calls[0][0].endswith("/trade-api/v2/series")
-    assert request_calls[0][1] == {"SYNTHETIC": "REDACTED"}
-    assert request_calls[0][2] == {"include_volume": "true"}
-
-
-def test_authenticated_core_result_matches_legacy_injected_path() -> None:
-    def request_get(*_args, **_kwargs):
-        return FakeResponse({"series": []})
-
-    legacy = kalshi.fetch_kalshi_markets_diagnostic(
-        environment={AUTH_KEY_FIELD: SYNTHETIC_KEY},
-        private_key=FakePrivateKey(),
-        request_get=request_get,
-        header_factory=lambda *_args: {},
-    )
-    isolated = InheritedEnvironmentDiscoveryClient(
-        environment=_environment(),
-        private_key_loader=_loader,
-        request_get=request_get,
-        header_factory=lambda *_args: {},
-    ).discover()
-
-    assert isolated == legacy
-
-
 def test_legacy_wrapper_and_direct_shadow_caller_remain_on_established_path() -> None:
     kalshi_tree = ast.parse(Path(kalshi.__file__).read_text(encoding="utf-8"))
     wrapper = next(
@@ -331,59 +157,6 @@ def test_legacy_wrapper_and_direct_shadow_caller_remain_on_established_path() ->
     assert "open" in call_names
     assert "_fetch_kalshi_markets_diagnostic_authenticated" in call_names
     assert "fetch_kalshi_markets_diagnostic" in strategy_calls
-
-
-def test_preflight_output_is_exact_bounded_and_value_free(capsys) -> None:
-    exit_code = preflight.main(
-        [],
-        environment=_environment(),
-        private_key_loader=_loader,
-    )
-    captured = capsys.readouterr()
-    lines = dict(line.split("=", 1) for line in captured.out.splitlines())
-
-    assert exit_code == 0
-    assert captured.err == ""
-    assert lines == {
-        "AUTH_RUNTIME_CONTEXT": "PASS",
-        "REQUIRED_AUTH_FIELD_NAMES": ",".join(REQUIRED_AUTH_FIELD_NAMES),
-        "MISSING_AUTH_FIELD_COUNT": "0",
-        "AUTH_PARSE_STATUS": "PASS",
-        "DIRECT_SECRET_FILE_ACCESS": "no",
-        "NETWORK_CALL_PERFORMED": "no",
-    }
-    assert SYNTHETIC_KEY not in captured.out
-    assert SYNTHETIC_PRIVATE_MATERIAL not in captured.out
-
-
-@pytest.mark.parametrize(
-    ("environment", "loader", "expected_context", "expected_exit"),
-    [
-        ({}, _loader, WARN, 2),
-        (_environment(), _invalid_loader, FAIL, 1),
-    ],
-)
-def test_preflight_failure_is_bounded_without_exception_text(
-    environment,
-    loader,
-    expected_context,
-    expected_exit,
-    capsys,
-) -> None:
-    assert (
-        preflight.main(
-            [],
-            environment=environment,
-            private_key_loader=loader,
-        )
-        == expected_exit
-    )
-    captured = capsys.readouterr()
-
-    assert f"AUTH_RUNTIME_CONTEXT={expected_context}" in captured.out
-    assert SYNTHETIC_EXCEPTION not in captured.out
-    assert SYNTHETIC_EXCEPTION not in captured.err
-    assert captured.err == ""
 
 
 def test_cli_rejects_all_arguments_before_client_use(capsys) -> None:
@@ -800,18 +573,6 @@ def test_static_checker_unsafe_indirection_matrix(
 
 SAFE_STATIC_FIXTURES = (
     (
-        "required_field_constants",
-        'AUTH_KEY_FIELD = "KALSHI_KEY"\n'
-        'AUTH_MATERIAL_FIELD = "KALSHI_PRIVATE_KEY_PEM"\n',
-    ),
-    (
-        "exact_presence_checks",
-        'import os\nAUTH_KEY_FIELD = "KALSHI_KEY"\n'
-        'AUTH_MATERIAL_FIELD = "KALSHI_PRIVATE_KEY_PEM"\n'
-        "key_present = AUTH_KEY_FIELD in os.environ\n"
-        "material_present = AUTH_MATERIAL_FIELD in os.environ\n",
-    ),
-    (
         "approved_bounded_output",
         "def format_discovery_result(value):\n"
         '    return f"STATUS={bool(value)}\\n"\n'
@@ -848,12 +609,6 @@ SAFE_STATIC_FIXTURES = (
         "class DiscoveryOutcome(Enum):\n"
         '    SUCCESS_EMPTY = "SUCCESS_EMPTY"\n'
         '    AUTH_REJECTED = "AUTH_REJECTED"\n',
-    ),
-    (
-        "fake_in_memory_environment",
-        'fake_environment = {"KALSHI_KEY": "synthetic", '
-        '"KALSHI_PRIVATE_KEY_PEM": "synthetic"}\n'
-        'key_present = fake_environment.get("KALSHI_KEY") is not None\n',
     ),
     (
         "reviewed_non_secret_environment_lookup",
@@ -992,11 +747,6 @@ def test_runtime_discovery_does_not_connect_to_sqlite(monkeypatch) -> None:
         raise AssertionError("runtime SQLite access is forbidden")
 
     monkeypatch.setattr(sqlite3, "connect", forbidden_connect)
-    result = InheritedEnvironmentDiscoveryClient(
-        environment=_environment(),
-        private_key_loader=_loader,
-        request_get=lambda *_args, **_kwargs: FakeResponse({"series": []}),
-        header_factory=lambda *_args: {},
-    ).discover()
+    result = AuthenticationUnavailableDiscoveryClient().discover()
 
-    assert result.outcome is DiscoveryOutcome.SUCCESS_EMPTY
+    assert result.outcome is DiscoveryOutcome.AUTH_CONFIGURATION_MISSING

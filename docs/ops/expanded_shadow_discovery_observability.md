@@ -76,68 +76,102 @@ discovery fields.
 This runbook is documentation only. Do not execute it without a separate,
 fresh, exact operator approval for one read-only external discovery call.
 
-The redacted command's credential source is
-`inherited_process_environment_or_injected_client_only`. Its tracked CLI uses
-only the already-inherited process environment. It does not load dotenv, open
-key material, source shell files, accept credential arguments or stdin, or
-delegate to a secret-loading wrapper. Credential provisioning is controlled by
-the operator, outside the agent command.
+The normal `expanded_shadow_discovery_redacted.py` CLI is credential-blind. It
+does not read environment variables, load dotenv, open files, parse keys,
+source shell files, accept credential arguments or stdin, or construct a
+production client. Without an injected client it fails closed before a
+request.
 
-1. Confirm the repository commit, branch, origin equality, and clean state.
-2. Confirm production capture, dynamic attribution, micro-live capture,
+The separate operator-only
+`expanded_shadow_discovery_production_auth.py` launcher reuses the established
+`KalshiOrderClient` construction boundary. That privileged constructor resolves
+the canonical production field names `KALSHI_KEY` and `KALSHI_SECRET_FILE`;
+the latter is a path source. The resulting authenticated client supplies only
+its signed-header callable to the credential-blind discovery core. No second
+private-key environment value or credential store is required.
+
+1. The operator confirms the existing production authentication configuration
+   is installed. The operator does not paste, export, duplicate, or edit
+   credentials for this workflow.
+2. Confirm the repository commit, branch, origin equality, and clean state.
+3. Confirm production capture, dynamic attribution, micro-live capture,
    phase-all capture, weather capture, and offline ingest remain disabled;
    confirm cron remains at the accepted disabled fingerprint.
-3. Run the static dependency-closure gate:
+4. Run only the two static gates:
 
    `python3 scripts/check_expanded_shadow_discovery_secret_boundary.py`
 
-   The gate resolves the reviewed constant-string `getattr`, import-alias,
-   simple-assignment, chained target, environment, file, subprocess, and
-   output indirection classes. It fails closed on unresolved dynamic
-   `getattr` for security-relevant or non-demonstrably-safe bases. Its scope
-   is this redacted command and the exact reviewed dependency closure; it does
-   not prove arbitrary Python metaprogramming universally safe. A passing
-   result remains one gate and does not replace source or independent review.
+   `python3 scripts/check_expanded_shadow_production_auth_bridge.py`
 
-4. Run the inherited-runtime-context preflight:
+   The first gate covers only the credential-blind redacted closure. The
+   second separately verifies the privileged launcher uses the reviewed
+   client factory, has no credential CLI/stdin path, has no order,
+   capture, cron, retry, or polling call, and is not mislabeled secret-blind.
+   Passing static results do not replace source review.
 
-   `python3 scripts/expanded_shadow_discovery_auth_preflight_redacted.py`
+5. The operator runs the launcher with no arguments. This is its default
+   no-network preflight:
+
+   `python3 scripts/expanded_shadow_discovery_production_auth.py`
 
    It may report only:
 
-   - `AUTH_RUNTIME_CONTEXT`
+   - `PRODUCTION_AUTH_CONTRACT`
+   - `AUTH_CLIENT_FACTORY_AVAILABLE`
    - `REQUIRED_AUTH_FIELD_NAMES`
-   - `MISSING_AUTH_FIELD_COUNT`
+   - `REQUIRED_AUTH_FIELD_COUNT`
+   - `AUTH_CONFIGURATION_PRESENT`
+   - `PRIVATE_KEY_SOURCE_TYPE`
+   - `PRIVATE_KEY_FILE_EXISTS`
+   - `PRIVATE_KEY_FILE_PERMISSION_STATUS`
    - `AUTH_PARSE_STATUS`
-   - `DIRECT_SECRET_FILE_ACCESS`
+   - `DIRECT_SECRET_VALUE_OUTPUT`
    - `NETWORK_CALL_PERFORMED`
 
-5. If the preflight is not `PASS`, stop without a request and report:
+   It emits no values, path, identifier, hash, exception, or traceback. The
+   default preflight checks only field presence and path metadata; parse status
+   remains `not_run` unless a separately reviewed synthetic checker is
+   injected.
+6. Require `PRODUCTION_AUTH_CONTRACT=PASS`,
+   `AUTH_CLIENT_FACTORY_AVAILABLE=yes`,
+   `AUTH_CONFIGURATION_PRESENT=yes`, and
+   `NETWORK_CALL_PERFORMED=no`. Otherwise stop without a request and report:
 
    `RESULT=WARN`
 
    `NEXT_STEP=operator_manual_secret_action_required`
 
-   The agent must not read or load an environment file, key file, or other
-   credential source to repair the shell context.
-6. Only after a fresh exact-bounded approval, run exactly once:
+7. Obtain fresh live-chat approval containing exactly:
 
-   `python3 scripts/expanded_shadow_discovery_redacted.py`
+   - `APPROVAL_SOURCE=live_chat_turn`
+   - `APPROVED_ACTION=<exact bounded label>`
+   - a fresh nonce
+   - issued and expiry timestamps
+   - `APPROVAL_DENIES`
+   - `APPROVAL_STATEMENT`
 
-7. Do not retry.
-8. Do not poll, sleep, tail logs, or run the production scanner.
-9. Discard stderr without inspection and do not persist it.
-10. Validate stdout against the exact twelve-field allowlist. Reject unknown
+   Do not persist the raw nonce in proof, reports, progress, or notifications.
+8. During the approval window, the operator or separately approved bounded
+   executor invokes exactly one discovery operation:
+
+   `python3 scripts/expanded_shadow_discovery_production_auth.py --execute-once 2>/dev/null`
+
+   The explicit action flag is mandatory. The launcher constructs the
+   production client once, invokes discovery once, permits zero retries, and
+   enforces a hard 60-second wall-clock timeout. It has no polling loop.
+9. Do not retry, poll, sleep, tail logs, or run the production scanner.
+10. Discard stderr without inspection and do not persist it.
+11. Validate stdout against the exact twelve-field allowlist. Reject unknown
     keys, malformed lines, raw response data, URLs, identifiers, record-derived
     values, or exception text.
-11. Reconfirm production remains disabled and cron remains at the accepted
+12. Reconfirm production remains disabled and cron remains at the accepted
     fingerprint.
 
 Credential values must never be pasted into an agent prompt, passed through CLI
-arguments or stdin, or recorded in shell history. If the current shell lacks
-the required inherited fields, only the operator may provision a new secure
-runtime context. The future live command executes once with zero retries and
-bounded redacted output.
+arguments or stdin, duplicated into a new environment variable, or recorded in
+shell history. This workflow does not instruct the operator to edit an
+environment file or key file. If the operator context lacks the established
+configuration, only the operator may repair that existing production boundary.
 
 Classification:
 

@@ -1,4 +1,35 @@
 {
+  "pm_expanded_shadow_existing_production_auth_bridge_implementation_20260725": {
+    "status": "built_validation_pass_independent_review_pending",
+    "file": "utils/kalshi.py, utils/kalshi_redacted_discovery.py, utils/kalshi_discovery_production_bridge.py, scripts/expanded_shadow_discovery_redacted.py, scripts/expanded_shadow_discovery_auth_preflight_redacted.py, scripts/expanded_shadow_discovery_production_auth.py, scripts/check_expanded_shadow_discovery_secret_boundary.py, scripts/check_expanded_shadow_production_auth_bridge.py, tests/test_expanded_shadow_discovery_secret_boundary.py, tests/test_expanded_shadow_production_auth_bridge.py, docs/ops/expanded_shadow_discovery_observability.md, docs/buglog/pm_expanded_shadow_existing_production_auth_bridge_20260725.md, feature_list.json, claude-progress.md",
+    "passes": false,
+    "validation_passed": true,
+    "manual_qa_required": true,
+    "manual_qa_status": "pending_targeted_independent_review",
+    "pushed": true,
+    "commit": "self_commit_final_sha_reported_in_closeout",
+    "proof_dir": "/tmp/proof_pm_expanded_shadow_existing_production_auth_bridge_implementation_20260725T172204Z",
+    "description": "Reuse the established path-based production Kalshi client boundary for operator-only redacted discovery without exposing credentials to the normal CLI or redacted core.",
+    "changes": [
+      "Proved canonical production authentication uses KALSHI_KEY plus the KALSHI_SECRET_FILE path source, while the prior diagnostic required an incompatible in-memory material field.",
+      "Added an authenticated-header injection seam while preserving the established value-based diagnostic wrapper and every production caller.",
+      "Made the normal redacted discovery module and CLI credential-blind and fail-closed without an injected client.",
+      "Added a no-network-default operator-only launcher and value-free production-auth preflight around the existing KalshiOrderClient constructor.",
+      "Added a separate privileged-bridge static gate, synthetic matrix, and future exact-bounded operator runbook."
+    ],
+    "validation": [
+      "touched Python py_compile PASS",
+      "unprivileged static dependency closure PASS with 20 rules and zero violations",
+      "privileged production-auth bridge static contract PASS with zero violations",
+      "focused bridge, discovery, compatibility, canary, client, capture, and cron suite PASS: 272 tests",
+      "empty-environment full suite PASS: 889 tests, 1 pre-existing dependency warning",
+      "./scripts/run_tests.sh PASS: STATUS ALL GATES PASS",
+      "sanitized cron fingerprint unchanged at 632b808247f0d62a23790bf75f3b2e95898864a8e4b872f59aefdf3f81e3bad1",
+      "production capture and attribution lanes disabled; no temporary jobs, runtime SQLite, production database, live request, credential load, or service change"
+    ],
+    "result": "PASS_VALIDATION_INDEPENDENT_REVIEW_PENDING",
+    "notes": "Source/test/docs/state only. No live Kalshi request, production client construction with real credentials, scanner, trading, weather, ingest, cron mutation, database action, order, service restart, timer/tmux/Caddy/DNS change, or unrelated hybrid-system access. Targeted independent review and fresh exact-bounded approval remain required before one live redacted discovery invocation."
+  },
   "pm_expanded_shadow_secret_boundary_static_checker_getattr_hardening_20260725": {
     "status": "built_validation_pass_independent_review_pending",
     "file": "scripts/check_expanded_shadow_discovery_secret_boundary.py, tests/test_expanded_shadow_discovery_secret_boundary.py, docs/ops/expanded_shadow_discovery_observability.md, docs/buglog/pm_expanded_shadow_secret_boundary_static_checker_getattr_hardening_20260725.md, feature_list.json, claude-progress.md",

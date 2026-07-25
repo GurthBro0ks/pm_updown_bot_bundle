@@ -20,8 +20,8 @@ from utils.kalshi import (  # noqa: E402
     KalshiDiscoveryResult,
 )
 from utils.kalshi_redacted_discovery import (  # noqa: E402
+    AuthenticationUnavailableDiscoveryClient,
     DiscoveryClient,
-    InheritedEnvironmentDiscoveryClient,
 )
 
 
@@ -147,7 +147,7 @@ def main(
         elif fetcher is not None:
             result = fetcher()
         else:
-            result = InheritedEnvironmentDiscoveryClient().discover()
+            result = AuthenticationUnavailableDiscoveryClient().discover()
         output = format_discovery_result(result)
     except Exception:
         result = _internal_error_result()

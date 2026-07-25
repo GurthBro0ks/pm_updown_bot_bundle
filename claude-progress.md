@@ -1,3 +1,60 @@
+# 2026-07-25 (pm_expanded_shadow_existing_production_auth_bridge_implementation — Source Bridge Built)
+
+**Agent:** Codex (SlimyAI NUC1)
+**Project:** pm_updown_bot_bundle / Expanded Shadow production-auth bridge
+**Type:** Source/test/docs/state authentication-boundary reconciliation
+**Proof:** `/tmp/proof_pm_expanded_shadow_existing_production_auth_bridge_implementation_20260725T172204Z`
+**Manual QA:** pending_targeted_independent_review
+
+### Summary
+Proved from tracked source that canonical production authentication uses
+`KALSHI_KEY` plus the `KALSHI_SECRET_FILE` path source and that the existing
+authenticated-client factory is `utils.kalshi_orders.KalshiOrderClient`.
+Replaced the diagnostic-only in-memory credential interface with an
+operator-only bridge around that existing factory.
+
+### Design and compatibility
+- The normal redacted module and CLI are now credential-blind and fail closed
+  before a request unless a client is explicitly injected.
+- The operator-only launcher defaults to value-free no-network preflight and
+  requires the exact `--execute-once` flag for a future request.
+- The bridge constructs the existing client once and injects only its
+  signed-header callable into the unchanged discovery taxonomy, pagination,
+  endpoint selection, stage counts, and output contract.
+- The established value-based wrapper and main live, micro-live, phase-all,
+  canary/health, direct-shadow, weather, and order callers remain unchanged.
+- No second key copy, credential CLI/stdin path, daemon, service, cache,
+  retry/poll loop, capture path, or cron path was added.
+
+### Verified
+- Touched Python compilation and diff checks: PASS.
+- Unprivileged dependency-closure static gate: PASS, 20 rules, zero violations.
+- Privileged bridge static gate: PASS, zero violations.
+- Focused bridge/discovery/compatibility/canary/client/capture/cron suite:
+  272 passed.
+- Empty-environment full suite: 889 passed with one pre-existing dependency
+  warning.
+- `./scripts/run_tests.sh`: `STATUS: ALL GATES PASS`.
+- Synthetic matrix covered canonical field discovery, old-field rejection,
+  missing/factory/path/permission/parse cases, redaction, all required outcome
+  classes, no-network default, exact one-shot invocation, zero order/capture/
+  cron calls, import safety, static closure, and zero SQLite.
+- Sanitized cron fingerprint remained
+  `632b808247f0d62a23790bf75f3b2e95898864a8e4b872f59aefdf3f81e3bad1`;
+  capture/attribution lanes and ingest remained disabled, with no temporary
+  jobs, runtime SQLite, or production database.
+
+### Safety and remaining work
+- No real credential or credential-bearing file was read, parsed, copied,
+  hashed, printed, or modified. No production client was constructed with real
+  authentication.
+- No live request, scanner, trading, weather, ingest, order, cron mutation,
+  database action, service restart, timer/tmux/Caddy/DNS change, or unrelated
+  hybrid-system access occurred.
+- Targeted independent review of the production-auth call chain, privilege
+  boundary, secret non-exposure, and future operator procedure remains
+  mandatory. A live one-shot still requires fresh exact-bounded approval.
+
 # 2026-07-25 (pm_expanded_shadow_secret_boundary_static_checker_getattr_hardening — Source Repair Built)
 
 **Agent:** Codex (SlimyAI NUC1)
